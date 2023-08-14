@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use anyhow::Result;
 use rstest::rstest;
-use rsenv::{build_env, dlog, extract_env, print_env};
+use rsenv::{build_env, dlog, extract_env, print_env, print_files};
 use log::{debug, info};
 use stdext::function_name;
 
@@ -27,7 +27,7 @@ fn test_extract_env() -> Result<()> {
 
 #[rstest]
 fn test_build_env() -> Result<()> {
-    let variables = build_env("./tests/resources/data/level4.env")?;
+    let (variables, files) = build_env("./tests/resources/data/level4.env")?;
     let reference = extract_env("./tests/resources/data/result.env")?.0;
     // println!("reference: {:#?}", reference);
     // println!("variables: {:#?}", variables);
@@ -36,6 +36,7 @@ fn test_build_env() -> Result<()> {
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     println!("variables: {:#?}", filtered_map);
+    println!("files: {:#?}", files);
 
     assert_eq!(filtered_map, reference, "The two BTreeMaps are not equal!");
     Ok(())
@@ -44,5 +45,11 @@ fn test_build_env() -> Result<()> {
 #[rstest]
 fn test_print_env() -> Result<()> {
     print_env("./tests/resources/data/level4.env")?;
+    Ok(())
+}
+
+#[rstest]
+fn test_print_files() -> Result<()> {
+    print_files("./tests/resources/data/level4.env")?;
     Ok(())
 }

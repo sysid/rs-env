@@ -12,8 +12,16 @@ use stdext::function_name;
 mod macros;
 
 // create function which print the hashmap from build_env
+pub fn print_files(file_path: &str) -> Result<()> {
+    let (_, files) = build_env(file_path)?;
+    for f in files {
+        println!("{}", f);
+    }
+    Ok(())
+}
+
 pub fn print_env(file_path: &str) -> Result<()> {
-    let variables = build_env(file_path)?;
+    let (variables, _) = build_env(file_path)?;
     for (k, v) in variables {
         println!("export {}={}", k, v);
     }
@@ -48,7 +56,7 @@ pub fn print_env(file_path: &str) -> Result<()> {
 ///
 /// * The provided `file_path` is invalid.
 /// * There's an issue reading or processing the env file or any of its parent env files.
-pub fn build_env(file_path: &str) -> Result<BTreeMap<String, String>> {
+pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8PathBuf>)> {
     let file_path = Utf8Path::new(file_path)
         .canonicalize_utf8()
         .context(format!("Invalid path: {}", file_path))?;
@@ -58,7 +66,11 @@ pub fn build_env(file_path: &str) -> Result<BTreeMap<String, String>> {
     let mut parent: Option<Utf8PathBuf> = None;
 
     let mut current_file = file_path.to_string();
+    let mut files_read: Vec<Utf8PathBuf> = Vec::new();
+
     loop {
+        files_read.push(Utf8PathBuf::from(&current_file));
+
         let (vars, par) = extract_env(&current_file)?;
         for (k, v) in vars {
             variables.entry(k).or_insert(v);
@@ -71,7 +83,7 @@ pub fn build_env(file_path: &str) -> Result<BTreeMap<String, String>> {
         }
     }
 
-    Ok(variables)
+    Ok((variables, files_read))
 }
 
 /// Extracts environment variables and the parent path from a specified file.
