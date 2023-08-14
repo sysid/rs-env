@@ -1,0 +1,18 @@
+[package]
+name = "rsenv"
+version = "0.1.0"
+edition = "2021"
+description = "build your enviornment"
+keywords = ["development", "environment"]
+repository = "https://github.com/sysid/rs-env"
+readme = "../README.md"
+license = "BSD-3-Clause"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[dev-dependencies]
+
+[package.metadata.test]
+parallel = true
