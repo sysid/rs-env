@@ -30,35 +30,14 @@ MAN_BINS = $(filter-out ./tw-extras.md, $(MANS))
 # Admin \
 ADMIN::  ## ##################################################################
 
-.PHONY: init-env
-init-env:  ## init-env
-	rm -fr ~/xxx/sec-sops
-	#mkdir -p ~/xxx/sec-ops
-	cp -a /Users/Q187392/dev/s/private/sec-sops ~/xxx/
-	tree -a -L 2 ~/xxx/sec-sops/
-
-
-.PHONY: show-env
-show-env:  ## show-env
-	@tree -a ~/xxx
-
-.PHONY: testprj
-testprj:  ## testprj
-	@pushd $(pkg_src) && cargo test --package rsenv --lib rsenv::tests::test_temp_testprj_dir -- --exact
-	@tree -al /tmp/rs-cg
-
 .PHONY: test
 test:  ## test
-	CONFGUARD_GITIGNORE=_gitignore CONFGUARD_BASE=$(PROJ_DIR)/rsenv/tests/resources/stage/ RUST_LOG=DEBUG pushd $(pkg_src) && cargo test -- --test-threads=1  # --nocapture
+	#RUST_LOG=DEBUG pushd $(pkg_src) && cargo test -- --test-threads=1  # --nocapture
+	RUST_LOG=DEBUG pushd $(pkg_src) && cargo test
 
-
-.PHONY: run-enc
-run-enc: init-env  ## run-enc
-	CONFGUARD_BASE=$(PROJ_DIR)/rsenv/tests/resources/stage/ RUST_LOG=DEBUG pushd $(pkg_src) && time cargo run -- -d -d enc /Users/Q187392/xxx/confguard
-
-.PHONY: run-show
-run-show:  ## run-show
-	CONFGUARD_SETTINGS=$(PROJ_DIR)/confguard/settings.toml RUST_LOG=DEBUG pushd $(pkg_src) && cargo run -- -d -d show $(HOME)/xxx/rs-cg/testprj
+.PHONY: run-build
+run-build:  ## run-build
+	pushd $(pkg_src) && time cargo run -- -d -d build ./tests/resources/data/level4.env
 
 ################################################################################
 # Building, Deploying \
