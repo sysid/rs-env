@@ -8,6 +8,12 @@ Last defined variable wins, i.e. child trumps parent.
 source <(rsenv build)
 ```
 
+# Intellij: Life injection of environment variables
+Plugin "EnvFile" can be used to life-inject environment variables.
+Use the script `runenv.sh` as the "EnvFile" script (tick executable checkbox !).
+The environment variable `RUN_ENV` and will tell the script which environment to load.
+It will look for a file `<RUN_ENV>.env` in the specified directory.
+
 
 # Development
 Tests for "skim" need valid terminal, so they are run via Makefile.
