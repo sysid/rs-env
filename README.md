@@ -10,4 +10,5 @@ source <(rsenv build)
 
 
 # Development
-Tests for "skim" need valid terminal, so they are documented in Makefile.
+Tests for "skim" need valid terminal, so they are run via Makefile.
+Test for `rsenv select`: run debug target and check rsenv .envrc file.

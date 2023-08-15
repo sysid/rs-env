@@ -65,6 +65,11 @@ enum Commands {
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
+    Select {
+        /// path to environment file (last child in hierarchy)
+        #[arg(value_hint = ValueHint::DirPath)]
+        source_dir: String,
+    },
 }
 
 fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
@@ -105,6 +110,9 @@ fn main() {
         Some(Commands::Edit {
                  source_dir,
              }) => _edit(source_dir),
+        Some(Commands::Select {
+                 source_dir,
+             }) => _select(source_dir),
         None => {
             // println!("{cli:#?}", cli = cli);
             // println!("{cli:#?}");  // prints current CLI attributes
@@ -137,9 +145,19 @@ fn _edit(source_dir: &str) {
         return;
     }
     let selected_file = select_file_with_suffix(source_dir, ".env").unwrap();
-    println!("Selected: {:?}", &selected_file);
+    println!("Selected: {}", &selected_file);
     let files = get_files(selected_file.as_str()).unwrap();
     open_files_in_editor(files).unwrap();
+}
+
+fn _select(source_dir: &str) {
+    if ! Utf8Path::new(source_dir).exists() {
+        eprintln!("Error: Directory does not exist: {:?}", source_dir);
+        return;
+    }
+    let selected_file = select_file_with_suffix(source_dir, ".env").unwrap();
+    println!("Selected: {}", &selected_file);
+    _envrc(selected_file.as_str(), None);
 }
 
 fn set_logger(cli: &Cli) {

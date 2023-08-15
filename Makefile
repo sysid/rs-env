@@ -54,12 +54,17 @@ run-edit:  ## run-edit
 run-build:  ## run-build
 	pushd $(pkg_src) && time cargo run -- -d -d build ./tests/resources/data/level4.env
 
+.PHONY: run-select
+run-select:  ## run-select
+	rsenv/target/debug/rsenv select $(SOPS_PATH)
+	cat .envrc
+
 .PHONY: run-files
 run-files:  ## run-files
 	pushd $(pkg_src) && time cargo run -- -d -d files ./tests/resources/data/level4.env
 
 .PHONY: run-envrc
-run-envrc:  ## run-envrc
+run-envrc: init-env  ## run-envrc
 	pushd $(pkg_src) && time cargo run -- -d -d envrc ./tests/resources/data/level4.env ~/xxx/.envrc
 	#pushd $(pkg_src) && time cargo run -- envrc ./tests/resources/data/level4.env ~/xxx/.envrc
 	cat ~/xxx/.envrc
