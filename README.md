@@ -7,3 +7,7 @@ Last defined variable wins, i.e. child trumps parent.
 ```bash
 source <(rsenv build)
 ```
+
+
+# Development
+Tests for "skim" need valid terminal, so they are documented in Makefile.

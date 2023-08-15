@@ -11,8 +11,13 @@ use stdext::function_name;
 
 pub mod macros;
 pub mod envrc;
+pub mod edit;
 
-// create function which print the hashmap from build_env
+pub fn get_files(file_path: &str) -> Result<Vec<Utf8PathBuf>> {
+    let (_, files) = build_env(file_path)?;
+    Ok(files)
+}
+
 pub fn print_files(file_path: &str) -> Result<()> {
     let (_, files) = build_env(file_path)?;
     for f in files {
@@ -20,6 +25,7 @@ pub fn print_files(file_path: &str) -> Result<()> {
     }
     Ok(())
 }
+
 
 pub fn build_env_vars(file_path: &str) -> Result<String> {
     let mut env_vars = String::new();

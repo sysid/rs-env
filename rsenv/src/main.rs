@@ -10,7 +10,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Command, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
 use stdext::function_name;
-use rsenv::{dlog, build_env_vars, print_files};
+use rsenv::{dlog, build_env_vars, print_files, get_files};
+use rsenv::edit::{open_files_in_editor, select_file_with_suffix};
 use rsenv::envrc::update_dot_envrc;
 
 // fn main() {
@@ -59,6 +60,11 @@ enum Commands {
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
+    Edit {
+        /// path to environment file (last child in hierarchy)
+        #[arg(value_hint = ValueHint::DirPath)]
+        source_dir: String,
+    },
 }
 
 fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
@@ -96,6 +102,9 @@ fn main() {
         Some(Commands::Files {
                  source_path,
              }) => _files(source_path),
+        Some(Commands::Edit {
+                 source_dir,
+             }) => _edit(source_dir),
         None => {
             // println!("{cli:#?}", cli = cli);
             // println!("{cli:#?}");  // prints current CLI attributes
@@ -120,6 +129,17 @@ fn _envrc(source_path: &str, envrc_path: Option<&str>) {
 fn _files(source_path: &str) {
     dlog!("source_path: {:?}", source_path);
     print_files(source_path).unwrap();
+}
+
+fn _edit(source_dir: &str) {
+    if ! Utf8Path::new(source_dir).exists() {
+        eprintln!("Error: Directory does not exist: {:?}", source_dir);
+        return;
+    }
+    let selected_file = select_file_with_suffix(source_dir, ".env").unwrap();
+    println!("Selected: {:?}", &selected_file);
+    let files = get_files(selected_file.as_str()).unwrap();
+    open_files_in_editor(files).unwrap();
 }
 
 fn set_logger(cli: &Cli) {

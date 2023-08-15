@@ -46,6 +46,10 @@ test:  ## test
 	RUST_LOG=DEBUG pushd $(pkg_src) && cargo test -- --test-threads=1  # --nocapture
 	#RUST_LOG=DEBUG pushd $(pkg_src) && cargo test
 
+.PHONY: run-edit
+run-edit:  ## run-edit
+	pushd $(pkg_src) && cargo run -- edit ./tests/resources/data
+
 .PHONY: run-build
 run-build:  ## run-build
 	pushd $(pkg_src) && time cargo run -- -d -d build ./tests/resources/data/level4.env
@@ -59,6 +63,14 @@ run-envrc:  ## run-envrc
 	pushd $(pkg_src) && time cargo run -- -d -d envrc ./tests/resources/data/level4.env ~/xxx/.envrc
 	#pushd $(pkg_src) && time cargo run -- envrc ./tests/resources/data/level4.env ~/xxx/.envrc
 	cat ~/xxx/.envrc
+
+.PHONY: test-fzf-edit
+test-fzf-edit:  ## test-fzf-edit
+	pushd $(pkg_src) && cargo test --package rsenv --test test_edit test_select_file_with_suffix -- --exact --nocapture --ignored
+
+.PHONY: test-edit
+test-edit:  ## test-edit
+	pushd $(pkg_src) && cargo test --package rsenv --test test_edit test_open_files_in_editor -- --exact --nocapture --ignored
 
 ################################################################################
 # Building, Deploying \
