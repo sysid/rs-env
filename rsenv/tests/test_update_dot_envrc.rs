@@ -12,7 +12,15 @@ use log::{debug, warn};
 use stdext::function_name;
 use rstest::{fixture, rstest};
 use rsenv::build_env_vars;
-use rsenv::envrc::{END_SECTION_DELIMITER, START_SECTION_DELIMITER, update_dot_envrc};
+use rsenv::envrc::{delete_section, END_SECTION_DELIMITER, START_SECTION_DELIMITER, update_dot_envrc};
+
+#[ctor::ctor]
+fn init() {
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::max())
+        .is_test(true)
+        .try_init();
+}
 
 #[fixture]
 fn temp_dir() -> Utf8PathBuf {
@@ -54,6 +62,24 @@ fn test_update_dot_envrc(temp_dir: Utf8PathBuf) -> Result<()> {
     assert!(conf_guard_section.contains(START_SECTION_DELIMITER));
     assert!(conf_guard_section.contains(data.as_str()));
     assert!(path.exists());
+    println!("file_contents: {}", file_contents);
+    Ok(())
+}
+
+#[rstest]
+fn test_delete_section(temp_dir: Utf8PathBuf) -> Result<()> {
+    let path = temp_dir.join("./dot.envrc");
+    let data = build_env_vars("./tests/resources/data/level4.env")?;
+
+    // Given: section has been added
+    update_dot_envrc(&path, data.as_str()).unwrap();
+
+    // When: section is deleted
+    delete_section(&path).unwrap();
+
+    let file_contents = get_file_contents(&path).unwrap();
+    assert!(! file_contents.contains(START_SECTION_DELIMITER));
+    assert!(! file_contents.contains(data.as_str()));
     println!("file_contents: {}", file_contents);
     Ok(())
 }

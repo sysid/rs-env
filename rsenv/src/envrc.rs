@@ -9,14 +9,18 @@ use std::env;
 use camino::{Utf8Path, Utf8PathBuf};
 use regex::Regex;
 use stdext::function_name;
+use crate::dlog;
 
 pub const START_SECTION_DELIMITER: &str = "#------------------------------- rsenv start --------------------------------";
 pub const END_SECTION_DELIMITER: &str = "#-------------------------------- rsenv end ---------------------------------";
 
 pub fn update_dot_envrc(target_file_path: &Utf8Path, data: &str) -> Result<()> {
+    if ! target_file_path.exists() {
+        return Err(anyhow::anyhow!("File does not exist: {:?}", target_file_path));
+    }
 
     let section = format!(
-        "{start_section_delimiter}\n\
+        "\n{start_section_delimiter}\n\
          {data}\
          {end_section_delimiter}\n",
         start_section_delimiter = START_SECTION_DELIMITER,
@@ -66,7 +70,20 @@ pub fn delete_section(file_path: &Utf8Path) -> Result<()> {
     // Define the regex
     // (?s) enables "single-line mode" where . matches any character including newline (\n), allows to span lines It's often also called "dotall mode".
     // In this case, we want to match across multiple lines, hence the s modifier is used.
-    let re = Regex::new(r"(?s)#------------------------------- confguard start --------------------------------.*#-------------------------------- confguard end ---------------------------------\n").unwrap();
+    // (?s)#--------------------- rsenv start ----------------------.*#---------------------- rsenv end -----------------------\n
+    let pattern = format!(
+        r"(?s){start_section_delimiter}.*{end_section_delimiter}\n",
+        start_section_delimiter = START_SECTION_DELIMITER,
+        end_section_delimiter = END_SECTION_DELIMITER,
+    );
+    dlog!("pattern: {}", pattern);
+    let re = Regex::new(pattern.as_str()).unwrap();
+
+    // Assert that only one section
+    let result = re.find_iter(&contents).collect::<Vec<_>>();
+    if result.len() > 1 {
+        return Err(anyhow::anyhow!("More than one section found"));
+    }
 
     // Replace the matched section with an empty string
     let result = re.replace(&contents, "");

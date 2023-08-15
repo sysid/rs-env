@@ -29,19 +29,36 @@ MAN_BINS = $(filter-out ./tw-extras.md, $(MANS))
 ################################################################################
 # Admin \
 ADMIN::  ## ##################################################################
+.PHONY: init-env
+init-env:  ## init-env
+	rm -fr ~/xxx/*
+	mkdir -p ~/xxx
+	cp -r $(tests_src)/resources/data/dot.envrc ~/xxx/.envrc
+	cat ~/xxx/.envrc
+
+.PHONY: show-env
+show-env:  ## show-env
+	@tree -a ~/xxx
+
 
 .PHONY: test
 test:  ## test
-	#RUST_LOG=DEBUG pushd $(pkg_src) && cargo test -- --test-threads=1  # --nocapture
-	RUST_LOG=DEBUG pushd $(pkg_src) && cargo test
+	RUST_LOG=DEBUG pushd $(pkg_src) && cargo test -- --test-threads=1  # --nocapture
+	#RUST_LOG=DEBUG pushd $(pkg_src) && cargo test
 
 .PHONY: run-build
 run-build:  ## run-build
 	pushd $(pkg_src) && time cargo run -- -d -d build ./tests/resources/data/level4.env
 
-.PHONY: run-print-files
-run-print-files:  ## run-print-files
-	pushd $(pkg_src) && time cargo run -- -d -d print_files ./tests/resources/data/level4.env
+.PHONY: run-files
+run-files:  ## run-files
+	pushd $(pkg_src) && time cargo run -- -d -d files ./tests/resources/data/level4.env
+
+.PHONY: run-envrc
+run-envrc:  ## run-envrc
+	pushd $(pkg_src) && time cargo run -- -d -d envrc ./tests/resources/data/level4.env ~/xxx/.envrc
+	#pushd $(pkg_src) && time cargo run -- envrc ./tests/resources/data/level4.env ~/xxx/.envrc
+	cat ~/xxx/.envrc
 
 ################################################################################
 # Building, Deploying \

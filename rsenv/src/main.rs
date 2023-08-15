@@ -11,6 +11,7 @@ use clap::{Args, Command, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
 use stdext::function_name;
 use rsenv::{dlog, build_env_vars, print_files};
+use rsenv::envrc::update_dot_envrc;
 
 // fn main() {
 //     println!("Hello, world!");
@@ -41,12 +42,20 @@ struct Cli {
 #[derive(Subcommand, Debug, PartialEq)]
 enum Commands {
     Build {
-        /// source-path to be guarded
+        /// path to environment file (last child in hierarchy)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
+    Envrc {
+        /// path to environment file (last child in hierarchy)
+        #[arg(value_hint = ValueHint::FilePath)]
+        source_path: String,
+        /// path to .envrc file
+        #[arg(value_hint = ValueHint::FilePath)]
+        envrc_path: Option<String>,
+    },
     Files {
-        /// source-path to be guarded
+        /// path to environment file (last child in hierarchy)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
@@ -80,6 +89,10 @@ fn main() {
         Some(Commands::Build {
                  source_path,
              }) => _build(source_path),
+        Some(Commands::Envrc {
+                 source_path,
+                 envrc_path,
+             }) => _envrc(source_path, envrc_path.as_deref()),
         Some(Commands::Files {
                  source_path,
              }) => _files(source_path),
@@ -92,7 +105,16 @@ fn main() {
 
 fn _build(source_path: &str) {
     dlog!("source_path: {:?}", source_path);
-    build_env_vars(source_path).unwrap();
+    let vars = build_env_vars(source_path).unwrap();
+    println!("{}", vars);
+}
+
+fn _envrc(source_path: &str, envrc_path: Option<&str>) {
+    let envrc_path = envrc_path.unwrap_or(".envrc");
+    // dlog!("source_path: {:?}, envrc_path: {:?}", source_path, envrc_path);
+
+    let vars = build_env_vars(source_path).unwrap();
+    update_dot_envrc(Utf8Path::new(envrc_path), vars.as_str()).unwrap();
 }
 
 fn _files(source_path: &str) {
@@ -111,22 +133,12 @@ fn set_logger(cli: &Cli) {
         1 => {
             let _ = env_logger::builder()
                 .filter_level(log::LevelFilter::Info)
-                .filter_module("skim", log::LevelFilter::Info)
-                .filter_module("html5ever", log::LevelFilter::Info)
-                .filter_module("reqwest", log::LevelFilter::Info)
-                .filter_module("mio", log::LevelFilter::Info)
-                .filter_module("want", log::LevelFilter::Info)
                 .try_init();
             info!("Debug mode: info");
         }
         2 => {
             let _ = env_logger::builder()
                 .filter_level(log::LevelFilter::max())
-                .filter_module("skim", log::LevelFilter::Info)
-                .filter_module("html5ever", log::LevelFilter::Info)
-                .filter_module("reqwest", log::LevelFilter::Info)
-                .filter_module("mio", log::LevelFilter::Info)
-                .filter_module("want", log::LevelFilter::Info)
                 .try_init();
             debug!("Debug mode: debug");
         }

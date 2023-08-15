@@ -32,4 +32,4 @@ walkdir = "2.3.3"
 [dev-dependencies]
 
 [package.metadata.test]
-parallel = true
+parallel = false

@@ -21,7 +21,7 @@ pub fn print_files(file_path: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn build_env_vars(file_path: &str) -> Result<(String)> {
+pub fn build_env_vars(file_path: &str) -> Result<String> {
     let mut env_vars = String::new();
     let (variables, _) = build_env(file_path)?;
     for (k, v) in variables {
@@ -61,11 +61,11 @@ pub fn build_env_vars(file_path: &str) -> Result<(String)> {
 pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8PathBuf>)> {
     let file_path = Utf8Path::new(file_path)
         .canonicalize_utf8()
-        .context(format!("Invalid path: {}", file_path))?;
+        .context(format!("{}: Invalid path: {}", line!(), file_path))?;
     dlog!("Current file_path: {:?}", file_path);
 
     let mut variables: BTreeMap<String, String> = BTreeMap::new();
-    let mut parent: Option<Utf8PathBuf> = None;
+    let mut parent: Option<Utf8PathBuf>;
 
     let mut current_file = file_path.to_string();
     let mut files_read: Vec<Utf8PathBuf> = Vec::new();
@@ -78,7 +78,7 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
             variables.entry(k).or_insert(v);
         }
         parent = par;
-        if let Some(p) = parent.clone() {
+        if let Some(p) = parent {
             current_file = p.to_string();
         } else {
             break;
@@ -125,13 +125,14 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
 pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Option<Utf8PathBuf>)> {
     let file_path = Utf8Path::new(file_path)
         .canonicalize_utf8()
-        .context(format!("Invalid path: {}", file_path))?;
+        .context(format!("{}: Invalid path: {}", line!(), file_path))?;
     dlog!("Current file_path: {:?}", file_path);
 
     // Save the original current directory, to restore it later
     let original_dir = env::current_dir()?;
     // Change the current directory in order to construct correct parent path
     env::set_current_dir(file_path.parent().unwrap())?;
+    dlog!("Current directory: {:?}", env::current_dir()?);
 
 
     let file = File::open(file_path)?;
@@ -150,7 +151,7 @@ pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Option<
             }
             parent_path = Some(Utf8PathBuf::from(parent.clone())
                 .canonicalize_utf8()
-                .context(format!("Invalid path: {}", parent))?);
+                .context(format!("{}: Invalid path: {}", line!(), parent))?);
             dlog!("parent_path: {:?}", parent_path);
         }
 
@@ -171,6 +172,7 @@ pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Option<
     Ok((variables, parent_path))
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     use rstest::{fixture, rstest};
