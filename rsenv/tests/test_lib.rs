@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use anyhow::Result;
 use rstest::rstest;
-use rsenv::{build_env, dlog, extract_env, print_env, print_files};
+use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files};
 use log::{debug, info};
 use stdext::function_name;
 
@@ -43,8 +43,9 @@ fn test_build_env() -> Result<()> {
 }
 
 #[rstest]
-fn test_print_env() -> Result<()> {
-    print_env("./tests/resources/data/level4.env")?;
+fn test_build_env_vars() -> Result<()> {
+    let env_vars = build_env_vars("./tests/resources/data/level4.env")?;
+    println!("{}", env_vars);
     Ok(())
 }
 

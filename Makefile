@@ -39,6 +39,10 @@ test:  ## test
 run-build:  ## run-build
 	pushd $(pkg_src) && time cargo run -- -d -d build ./tests/resources/data/level4.env
 
+.PHONY: run-print-files
+run-print-files:  ## run-print-files
+	pushd $(pkg_src) && time cargo run -- -d -d print_files ./tests/resources/data/level4.env
+
 ################################################################################
 # Building, Deploying \
 BUILDING:  ## ##################################################################

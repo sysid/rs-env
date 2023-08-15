@@ -10,7 +10,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Command, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
 use stdext::function_name;
-use rsenv::{dlog, print_env};
+use rsenv::{dlog, build_env_vars, print_files};
 
 // fn main() {
 //     println!("Hello, world!");
@@ -45,6 +45,11 @@ enum Commands {
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
+    Files {
+        /// source-path to be guarded
+        #[arg(value_hint = ValueHint::FilePath)]
+        source_path: String,
+    },
 }
 
 fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
@@ -74,7 +79,10 @@ fn main() {
     match &cli.command {
         Some(Commands::Build {
                  source_path,
-             }) => build(source_path),
+             }) => _build(source_path),
+        Some(Commands::Files {
+                 source_path,
+             }) => _files(source_path),
         None => {
             // println!("{cli:#?}", cli = cli);
             // println!("{cli:#?}");  // prints current CLI attributes
@@ -82,9 +90,14 @@ fn main() {
     }
 }
 
-fn build(source_path: &str) {
+fn _build(source_path: &str) {
     dlog!("source_path: {:?}", source_path);
-    print_env(source_path).unwrap();
+    build_env_vars(source_path).unwrap();
+}
+
+fn _files(source_path: &str) {
+    dlog!("source_path: {:?}", source_path);
+    print_files(source_path).unwrap();
 }
 
 fn set_logger(cli: &Cli) {

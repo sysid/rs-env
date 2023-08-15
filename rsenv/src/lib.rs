@@ -9,7 +9,8 @@ use std::env;
 use camino::{Utf8Path, Utf8PathBuf};
 use stdext::function_name;
 
-mod macros;
+pub mod macros;
+pub mod envrc;
 
 // create function which print the hashmap from build_env
 pub fn print_files(file_path: &str) -> Result<()> {
@@ -20,12 +21,13 @@ pub fn print_files(file_path: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn print_env(file_path: &str) -> Result<()> {
+pub fn build_env_vars(file_path: &str) -> Result<(String)> {
+    let mut env_vars = String::new();
     let (variables, _) = build_env(file_path)?;
     for (k, v) in variables {
-        println!("export {}={}", k, v);
+        env_vars.push_str(&format!("export {}={}\n", k, v));
     }
-    Ok(())
+    Ok(env_vars)
 }
 
 /// Recursively builds map of environment variables from the specified file and its parents.
