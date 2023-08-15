@@ -1,8 +1,11 @@
 # rs-env
 
 Build environment variable set from a hierarchical list of <name.env> files.
-Each file can point to a parent which will be loaded first.
+Hierarchy forms a tree, each file can point to a parent (not DAG).
 Last defined variable wins, i.e. child trumps parent.
+Have the final variable list updated in your `.envrc` file for clean enviornment management.
+Quick edit of environment files via FZF.
+Smart edit of environment files, the editor opens the entire tree hierarchy for you.
 
 ```bash
 source <(rsenv build)
