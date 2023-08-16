@@ -2,11 +2,12 @@
 
 use std::collections::{BTreeMap};
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use anyhow::{Context, Result};
 use log::{debug, info};
-use std::env;
+use std::{env, fs};
 use camino::{Utf8Path, Utf8PathBuf};
+use pathdiff::diff_utf8_paths;
 use stdext::function_name;
 
 pub mod macros;
@@ -176,6 +177,54 @@ pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Option<
     // After executing your code, restore the original current directory
     env::set_current_dir(original_dir)?;
     Ok((variables, parent_path))
+}
+
+pub fn link(parent: &str, child: &str) -> Result<()> {
+    let parent = Utf8Path::new(parent)
+        .canonicalize_utf8()
+        .context(format!("{}: Invalid path: {}", line!(), parent))?;
+    let child = Utf8Path::new(child)
+        .canonicalize_utf8()
+        .context(format!("{}: Invalid path: {}", line!(), child))?;
+    dlog!("parent: {:?} <- child: {:?}", parent, child);
+
+    let mut child_contents = fs::read_to_string(&child)?;
+    let mut lines: Vec<_> = child_contents.lines().map(|s| s.to_string()).collect();
+
+    // Calculate the relative path from child to parent
+    let relative_path = diff_utf8_paths(parent, child.parent().unwrap()).unwrap();
+
+    // Find and count the lines that start with "# rsenv:"
+    let mut rsenv_lines = 0;
+    let mut rsenv_index = None;
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with("# rsenv:") {
+            rsenv_lines += 1;
+            rsenv_index = Some(i);
+        }
+    }
+    // Based on the count, perform the necessary operations
+    match rsenv_lines {
+        0 => {
+            // No "# rsenv:" line found, so we add it
+            lines.insert(0, format!("# rsenv: {}", relative_path));
+        }
+        1 => {
+            // One "# rsenv:" line found, so we replace it
+            if let Some(index) = rsenv_index {
+                lines[index] = format!("# rsenv: {}", relative_path);
+            }
+        }
+        _ => {
+            // More than one "# rsenv:" line found, we throw an error
+            return Err(anyhow::anyhow!("Multiple '# rsenv:' lines found in {}", child));
+        }
+    }
+    // Write the modified content back to the child file
+    child_contents = lines.join("\n");
+    fs::write(&child, child_contents)?;
+
+    Ok(())
 }
 
 #[cfg(test)]

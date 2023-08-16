@@ -13,6 +13,9 @@ use skim::prelude::*;
 use walkdir::WalkDir;
 use std::path::Path;
 use std::process::Command;
+use crossterm::{execute, terminal::{Clear, ClearType}};
+use crossbeam::channel::bounded;
+
 
 pub fn select_file_with_suffix(dir: &str, suffix: &str) -> Option<String> {
     // Step 1: List all files with the given suffix
@@ -53,6 +56,10 @@ pub fn select_file_with_suffix(dir: &str, suffix: &str) -> Option<String> {
         .map(|out| out.selected_items)
         .unwrap_or_else(Vec::new);
 
+    // clear screen
+    let mut stdout = std::io::stdout();
+    execute!(stdout, Clear(ClearType::FromCursorDown)).unwrap();
+
     // Step 3: Save the selection into a variable for later use
     if let Some(item) = selected_items.get(0) {
         Some(item.output().to_string())
@@ -76,7 +83,7 @@ pub fn open_files_in_editor(files: Vec<Utf8PathBuf>) -> std::io::Result<()> {
     // Spawn a new process to run the editor.
     // For Vim and NeoVim, the `-p` option opens files in separate tabs.
     Command::new(&editor)
-        .arg("-p")
+        .arg("-O")
         .args(&file_paths)
         .status()?;
 

@@ -1,9 +1,13 @@
 #![allow(unused_imports)]
 
 use std::collections::BTreeMap;
+use std::fs;
 use anyhow::Result;
-use rstest::rstest;
-use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files};
+use camino::Utf8PathBuf;
+use camino_tempfile::tempdir;
+use fs_extra::{copy_items, dir};
+use rstest::{fixture, rstest};
+use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files, link};
 use log::{debug, info};
 use stdext::function_name;
 
@@ -13,6 +17,24 @@ fn init() {
         .filter_level(log::LevelFilter::max())
         .is_test(true)
         .try_init();
+}
+
+#[fixture]
+fn temp_dir() -> Utf8PathBuf {
+    let tempdir = tempdir().unwrap();
+    let options = dir::CopyOptions::new(); //Initialize default values for CopyOptions
+    copy_items(
+        &[
+            "tests/resources/data/level1.env",
+            "tests/resources/data/level2.env",
+            "tests/resources/data/a",
+        ],
+        &tempdir,
+        &options,
+    )
+        .expect("Failed to copy test project directory");
+
+    tempdir.into_path()
 }
 
 #[rstest]
@@ -52,5 +74,16 @@ fn test_build_env_vars() -> Result<()> {
 #[rstest]
 fn test_print_files() -> Result<()> {
     print_files("./tests/resources/data/level4.env")?;
+    Ok(())
+}
+
+#[rstest]
+fn test_link(temp_dir: Utf8PathBuf) -> Result<()> {
+    let parent = temp_dir.join("./a/level3.env");
+    let child = temp_dir.join("./level1.env");
+    link(parent.as_str(), child.as_str())?;
+
+    let child_content = fs::read_to_string(&child)?;
+    assert!(child_content.contains("# rsenv: a/level3.env"));
     Ok(())
 }

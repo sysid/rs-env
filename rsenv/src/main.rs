@@ -10,7 +10,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Command, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
 use stdext::function_name;
-use rsenv::{dlog, build_env_vars, print_files, get_files};
+use rsenv::{dlog, build_env_vars, print_files, get_files, link};
 use rsenv::edit::{open_files_in_editor, select_file_with_suffix};
 use rsenv::envrc::update_dot_envrc;
 
@@ -70,6 +70,14 @@ enum Commands {
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
+    Link {
+        /// parent .env file
+        #[arg(value_hint = ValueHint::FilePath)]
+        parent: String,
+        /// child .env file
+        #[arg(value_hint = ValueHint::FilePath)]
+        child: String,
+    },
 }
 
 fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
@@ -113,6 +121,10 @@ fn main() {
         Some(Commands::Select {
                  source_dir,
              }) => _select(source_dir),
+        Some(Commands::Link {
+                 parent,
+                 child,
+             }) => _link(parent, child),
         None => {
             // println!("{cli:#?}", cli = cli);
             // println!("{cli:#?}");  // prints current CLI attributes
@@ -159,6 +171,12 @@ fn _select(source_dir: &str) {
     println!("Selected: {}", &selected_file);
     _envrc(selected_file.as_str(), None);
 }
+
+fn _link(parent: &str, child: &str) {
+    dlog!("parent: {:?} <- child: {:?}", parent, child);
+    link(parent, child).unwrap();
+}
+
 
 fn set_logger(cli: &Cli) {
     // Note, only flags can have multiple occurrences
