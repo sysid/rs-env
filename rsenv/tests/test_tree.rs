@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use anyhow::Result;
 use camino::{Utf8Path, Utf8PathBuf};
