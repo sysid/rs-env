@@ -13,6 +13,7 @@ use stdext::function_name;
 pub mod macros;
 pub mod envrc;
 pub mod edit;
+pub mod tree;
 
 pub fn get_files(file_path: &str) -> Result<Vec<Utf8PathBuf>> {
     let (_, files) = build_env(file_path)?;

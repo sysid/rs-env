@@ -13,6 +13,7 @@ use stdext::function_name;
 use rsenv::{dlog, build_env_vars, print_files, get_files, link, link_all};
 use rsenv::edit::{open_files_in_editor, select_file_with_suffix};
 use rsenv::envrc::update_dot_envrc;
+use rsenv::tree::build_trees;
 
 // fn main() {
 //     println!("Hello, world!");
@@ -75,6 +76,11 @@ enum Commands {
         #[arg(value_hint = ValueHint::FilePath, num_args = 1..)]
         nodes: Vec<String>,
     },
+    Tree {
+        /// path to root directory for dependency tree
+        #[arg(value_hint = ValueHint::DirPath)]
+        source_dir: String,
+    },
 }
 
 fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
@@ -121,6 +127,9 @@ fn main() {
         Some(Commands::Link {
                  nodes,
              }) => _link(nodes),
+        Some(Commands::Tree {
+                 source_dir,
+             }) => _tree(source_dir),
         None => {
             // println!("{cli:#?}", cli = cli);
             // println!("{cli:#?}");  // prints current CLI attributes
@@ -171,6 +180,16 @@ fn _select(source_dir: &str) {
 fn _link(nodes: &[String]) {
     link_all(nodes);
     println!("Linked: {:?}", nodes.join(" <- "));
+}
+
+fn _tree(source_path: &str) {
+    dlog!("source_path: {:?}", source_path);
+    let trees = build_trees(Utf8Path::new(source_path)).unwrap();
+    for tree in &trees {
+        let mut path = vec![&tree.file_path];
+        println!("Leaf paths of tree rooted at {}:", tree.file_path);
+        tree.print_leaf_paths(&mut path);
+    }
 }
 
 
