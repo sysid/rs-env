@@ -227,6 +227,59 @@ pub fn link(parent: &str, child: &str) -> Result<()> {
     Ok(())
 }
 
+
+pub fn unlink(child: &str) -> Result<()> {
+    let child = Utf8Path::new(child)
+        .canonicalize_utf8()
+        .context(format!("{}: Invalid path: {}", line!(), child))?;
+    dlog!("child: {:?}", child);
+
+    let mut child_contents = fs::read_to_string(&child)?;
+    let mut lines: Vec<_> = child_contents.lines().map(|s| s.to_string()).collect();
+
+    // Find and count the lines that start with "# rsenv:"
+    let mut rsenv_lines = 0;
+    let mut rsenv_index = None;
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with("# rsenv:") {
+            rsenv_lines += 1;
+            rsenv_index = Some(i);
+        }
+    }
+    // Based on the count, perform the necessary operations
+    match rsenv_lines {
+        0 => {}
+        1 => {
+            // One "# rsenv:" line found, so we replace it
+            if let Some(index) = rsenv_index {
+                lines[index] = format!("# rsenv:");
+            }
+        }
+        _ => {
+            return Err(anyhow::anyhow!("Multiple '# rsenv:' lines found in {}", child));
+        }
+    }
+    // Write the modified content back to the child file
+    child_contents = lines.join("\n");
+    fs::write(&child, child_contents)?;
+
+    Ok(())
+}
+
+
+pub fn link_all(nodes: &[String]) {
+    dlog!("nodes: {:?}", nodes);
+    let mut parent = None;
+    for node in nodes {
+        if parent.is_some() {
+            link(parent.unwrap(), node).unwrap();
+        } else {
+            unlink(node).unwrap();
+        }
+        parent = Some(node);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

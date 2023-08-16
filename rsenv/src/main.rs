@@ -10,7 +10,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Command, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
 use stdext::function_name;
-use rsenv::{dlog, build_env_vars, print_files, get_files, link};
+use rsenv::{dlog, build_env_vars, print_files, get_files, link, link_all};
 use rsenv::edit::{open_files_in_editor, select_file_with_suffix};
 use rsenv::envrc::update_dot_envrc;
 
@@ -71,12 +71,9 @@ enum Commands {
         source_dir: String,
     },
     Link {
-        /// parent .env file
-        #[arg(value_hint = ValueHint::FilePath)]
-        parent: String,
-        /// child .env file
-        #[arg(value_hint = ValueHint::FilePath)]
-        child: String,
+        /// .env files to link (root -> parent -> child)
+        #[arg(value_hint = ValueHint::FilePath, num_args = 1..)]
+        nodes: Vec<String>,
     },
 }
 
@@ -122,9 +119,8 @@ fn main() {
                  source_dir,
              }) => _select(source_dir),
         Some(Commands::Link {
-                 parent,
-                 child,
-             }) => _link(parent, child),
+                 nodes,
+             }) => _link(nodes),
         None => {
             // println!("{cli:#?}", cli = cli);
             // println!("{cli:#?}");  // prints current CLI attributes
@@ -172,9 +168,9 @@ fn _select(source_dir: &str) {
     _envrc(selected_file.as_str(), None);
 }
 
-fn _link(parent: &str, child: &str) {
-    dlog!("parent: {:?} <- child: {:?}", parent, child);
-    link(parent, child).unwrap();
+fn _link(nodes: &[String]) {
+    link_all(nodes);
+    println!("Linked: {:?}", nodes.join(" <- "));
 }
 
 

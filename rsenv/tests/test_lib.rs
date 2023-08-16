@@ -7,7 +7,7 @@ use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
 use fs_extra::{copy_items, dir};
 use rstest::{fixture, rstest};
-use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files, link};
+use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files, link, link_all, unlink};
 use log::{debug, info};
 use stdext::function_name;
 
@@ -85,5 +85,32 @@ fn test_link(temp_dir: Utf8PathBuf) -> Result<()> {
 
     let child_content = fs::read_to_string(&child)?;
     assert!(child_content.contains("# rsenv: a/level3.env"));
+    Ok(())
+}
+#[rstest]
+fn test_unlink(temp_dir: Utf8PathBuf) -> Result<()> {
+    let child = temp_dir.join("./a/level3.env");
+    unlink(child.as_str())?;
+
+    let child_content = fs::read_to_string(&child)?;
+    assert!(child_content.contains("# rsenv:\n"));
+    Ok(())
+}
+#[rstest]
+fn test_link_all(temp_dir: Utf8PathBuf) -> Result<()> {
+    let parent = temp_dir.join("./a/level3.env");
+    let intermediate = temp_dir.join("./level2.env");
+    let child = temp_dir.join("./level1.env");
+    let nodes = vec![parent.as_str().to_string(), intermediate.as_str().to_string(), child.as_str().to_string()];
+    link_all(&nodes);
+
+    let child_content = fs::read_to_string(&child)?;
+    assert!(child_content.contains("# rsenv: level2.env"));
+
+    let child_content = fs::read_to_string(&intermediate)?;
+    assert!(child_content.contains("# rsenv: a/level3.env"));
+
+    let child_content = fs::read_to_string(&parent)?;
+    assert!(child_content.contains("# rsenv:\n"));
     Ok(())
 }
