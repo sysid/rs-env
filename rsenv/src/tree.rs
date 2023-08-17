@@ -18,23 +18,26 @@ use std::path::Path;
 use std::rc::Rc;
 use crate::dlog;
 
+type WrappedTreeNode<> = Rc<RefCell<TreeNode>>;
+
 #[derive(Debug, Clone)]
 pub struct TreeNode {
     pub base_path: String,
     pub file_path: String,
-    pub children: Vec<Rc<RefCell<TreeNode>>>,
+    pub children: Vec<WrappedTreeNode>,
 }
 
 /*
 The RefCell allows us to borrow the contents, and the Rc allows for shared ownership.
 
 Accessing the Children:
-
-Instead of directly accessing child, we first need to borrow the value inside the RefCell. We do this using the borrow() method, which gives us an immutable reference to the value inside the RefCell.
+Instead of directly accessing child, we first need to borrow the value inside the RefCell.
+We do this using the borrow() method, which gives us an immutable reference to the value inside the RefCell.
 For example, in the depth function, we replace child.depth() with child_rc.borrow().depth().
-In the above line, child_rc is a reference-counted pointer to the RefCell that wraps the TreeNode. We call borrow() to get a reference to the TreeNode and then call depth() on that.
-Iterating over the Children:
+In the above line, child_rc is a reference-counted pointer to the RefCell that wraps the TreeNode.
+We call borrow() to get a reference to the TreeNode and then call depth() on that.
 
+Iterating over the Children:
 In the loop where we iterate over the children, we’ve renamed the loop variable to child_rc to emphasize that it is a reference-counted pointer to a RefCell, not a direct reference to a TreeNode.
 Inside the loop, we borrow the TreeNode from the RefCell in order to call methods on it or access its fields.
  */
