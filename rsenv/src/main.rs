@@ -81,6 +81,11 @@ enum Commands {
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
+    TreeEdit {
+        /// path to root directory for dependency tree
+        #[arg(value_hint = ValueHint::DirPath)]
+        source_dir: String,
+    },
 }
 
 fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
@@ -130,6 +135,9 @@ fn main() {
         Some(Commands::Tree {
                  source_dir,
              }) => _tree(source_dir),
+        Some(Commands::TreeEdit {
+                 source_dir,
+             }) => _tree_edit(source_dir),
         None => {
             // println!("{cli:#?}", cli = cli);
             // println!("{cli:#?}");  // prints current CLI attributes
@@ -190,6 +198,17 @@ fn _tree(source_path: &str) {
         println!("Leaf paths of tree rooted at {}:", tree.file_path);
         tree.print_leaf_paths(&mut path);
     }
+}
+
+
+fn _tree_edit(source_path: &str) {
+    dlog!("source_path: {:?}", source_path);
+    // let trees = build_trees(Utf8Path::new(source_path)).unwrap();
+    // for tree in &trees {
+    //     let mut path = vec![&tree.file_path];
+    //     println!("Leaf paths of tree rooted at {}:", tree.file_path);
+    //     tree.print_leaf_paths(&mut path);
+    // }
 }
 
 

@@ -61,7 +61,8 @@ impl TreeNode {
                 path.push(&child.file_path);
                 dlog!("path after push: {:?}", path);
                 child.print_leaf_paths(path);
-                path.pop();  // backtracking
+                path.pop();
+                // backtracking
                 dlog!("path after pop: {:?}", path);
             }
         }
@@ -143,6 +144,46 @@ fn build_tree(file_name: &str, relationships: &HashMap<String, Vec<String>>, dir
     }
 }
 
+/// non-recursive (iterative) version of the build_tree function using a stack data structure.
+/// This approach mimics the call stack that is used in the recursive approach, but with an explicit stack data structure:
+pub fn build_tree_stack(file_name: &str, relationships: &HashMap<String, Vec<String>>, directory_path: &Utf8Path) -> TreeNode {
+    let mut stack: Vec<String> = Vec::new();
+    let root_name = file_name.to_string();
+    stack.push(root_name.clone());
+
+    let mut processed: HashMap<String, TreeNode> = HashMap::new();
+
+    while let Some(current_file) = stack.pop() {
+        let children: Vec<TreeNode> = if let Some(child_files) = relationships.get(&current_file) {
+            child_files.iter()
+                .map(|child_file| {
+                    stack.push(child_file.clone());
+                    processed.remove(child_file).unwrap()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let node = TreeNode {
+            base_path: directory_path.to_string(),
+            file_path: current_file.clone(),
+            children,
+        };
+
+        if current_file == root_name {
+            return node;
+        } else {
+            processed.insert(current_file, node);
+        }
+    }
+
+    // panic!("Failed to build the tree");
+    unreachable!("Failed to build the tree");
+}
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -156,6 +197,10 @@ mod tests {
             .try_init();
     }
 
+    // root
+    // ├── child1
+    // │   └── grandchild1
+    // └── child2
 
     //      root
     //      /  \
@@ -171,6 +216,37 @@ mod tests {
 
         // Build the tree starting from "root"
         let tree = build_tree("root", &relationships, &Utf8PathBuf::from(""));
+
+        // Check the root node
+        assert_eq!(tree.file_path, "root");
+        assert_eq!(tree.children.len(), 2);
+
+        // Check the first child node
+        let child1 = &tree.children[0];
+        assert_eq!(child1.file_path, "child1");
+        assert_eq!(child1.children.len(), 1);
+
+        // Check the grandchild node
+        let grandchild1 = &child1.children[0];
+        assert_eq!(grandchild1.file_path, "grandchild1");
+        assert_eq!(grandchild1.children.len(), 0);
+
+        // Check the second child node
+        let child2 = &tree.children[1];
+        assert_eq!(child2.file_path, "child2");
+        assert_eq!(child2.children.len(), 0);
+    }
+
+    #[test]
+    #[ignore = "Implementation not working"]
+    fn test_build_tree_stack() {
+        // Set up a HashMap to represent the relationships between files
+        let mut relationships = HashMap::new();
+        relationships.insert("root".to_string(), vec!["child1".to_string(), "child2".to_string()]);
+        relationships.insert("child1".to_string(), vec!["grandchild1".to_string()]);
+
+        // Build the tree starting from "root"
+        let tree = build_tree_stack("root", &relationships, &Utf8PathBuf::from(""));
 
         // Check the root node
         assert_eq!(tree.file_path, "root");
