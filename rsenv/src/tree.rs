@@ -20,7 +20,7 @@ use crate::dlog;
 pub struct TreeNode {
     pub base_path: String,
     pub file_path: String,
-    children: Vec<TreeNode>,
+    pub children: Vec<TreeNode>,
 }
 
 impl TreeNode {
