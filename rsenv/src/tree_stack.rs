@@ -51,14 +51,15 @@ impl TreeNode {
         max_depth
     }
 
-    pub fn leaf_nodes2(&self) -> Vec<&String> {
+    pub fn leaf_nodes2(&self) -> Vec<String> {
         let mut leaves = Vec::new();
         let mut stack = vec![Rc::new(RefCell::new(self.clone()))];
 
         while let Some(node_rc) = stack.pop() {
             let node = node_rc.borrow();
             if node.children.is_empty() {
-                leaves.push(&node.file_path);
+                let leaf = &node.file_path;
+                leaves.push(leaf.to_string());
             } else {
                 for child_rc in &node.children {
                     stack.push(child_rc.clone());
@@ -70,19 +71,21 @@ impl TreeNode {
     }
 
     pub fn print_leaf_paths2(&self) {
-        let mut node_stack = vec![(Rc::new(RefCell::new(self.clone())), vec![&self.file_path])];
+        let mut node_stack = vec![(Rc::new(RefCell::new(self.clone())), vec![self.file_path.clone()])];
 
         while let Some((node_rc, path)) = node_stack.pop() {
             let node = node_rc.borrow();
             if node.children.is_empty() {
                 let path_strs: Vec<&str> = path.iter()
-                    .map(|s| s.as_str().strip_prefix(&node.base_path).unwrap().strip_prefix("/").unwrap_or(s.as_str()))
+                    .map(|s| s.as_str().strip_prefix(&node.base_path).unwrap()
+                        .strip_prefix("/").unwrap_or(s.as_str()))
                     .collect();
                 println!("{}", path_strs.join(" <- "));
             } else {
                 for child_rc in &node.children {
                     let mut new_path = path.clone();
-                    new_path.push(&child_rc.borrow().file_path);
+                    let p = &child_rc.borrow().file_path;
+                    new_path.push(p.to_string());
                     node_stack.push((child_rc.clone(), new_path));
                 }
             }

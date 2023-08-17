@@ -25,12 +25,12 @@ fn test_build_trees2() -> Result<()> {
     let trees = build_trees(Utf8Path::new("./tests/resources/data"))?;
     println!("trees: {:#?}", trees);
     for tree in &trees {
-        println!("Depth of tree rooted at {}: {}", tree.file_path, tree.depth2());
-        assert_eq!(tree.depth2(), 5);
+        println!("Depth of tree rooted at {}: {}", tree.borrow().file_path, tree.borrow().depth2());
+        assert_eq!(tree.borrow().depth2(), 5);
     }
     for tree in &trees {
-        let leaf_nodes = tree.leaf_nodes2();
-        println!("Leaf nodes of tree rooted at {}:", tree.file_path);
+        let leaf_nodes = tree.borrow().leaf_nodes2();
+        println!("Leaf nodes of tree rooted at {}:", tree.borrow().file_path);
         for leaf in &leaf_nodes {
             println!("{}", leaf);
         }
@@ -38,8 +38,8 @@ fn test_build_trees2() -> Result<()> {
         assert!(leaf_nodes[0].ends_with("level4.env"));
     }
     for tree in &trees {
-        println!("Leaf paths of tree rooted at {}:", tree.file_path);
-        tree.print_leaf_paths2();
+        println!("Leaf paths of tree rooted at {}:", tree.borrow().file_path);
+        tree.borrow().print_leaf_paths2();
     }
     Ok(())
 }
