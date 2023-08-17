@@ -6,6 +6,7 @@ use std::io::{BufRead, BufReader, Read};
 use anyhow::{Context, Result};
 use log::{debug, info};
 use std::{env, fs};
+use std::cell::RefCell;
 use camino::{Utf8Path, Utf8PathBuf};
 use pathdiff::diff_utf8_paths;
 use stdext::function_name;
@@ -14,63 +15,68 @@ use walkdir::WalkDir;
 use regex::Regex;
 use std::collections::HashMap;
 use std::path::Path;
+use std::rc::Rc;
 use crate::dlog;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TreeNode {
     pub base_path: String,
     pub file_path: String,
-    pub children: Vec<TreeNode>,
+    pub children: Vec<Rc<RefCell<TreeNode>>>,
 }
 
+/*
+The RefCell allows us to borrow the contents, and the Rc allows for shared ownership.
+
+Accessing the Children:
+
+Instead of directly accessing child, we first need to borrow the value inside the RefCell. We do this using the borrow() method, which gives us an immutable reference to the value inside the RefCell.
+For example, in the depth function, we replace child.depth() with child_rc.borrow().depth().
+In the above line, child_rc is a reference-counted pointer to the RefCell that wraps the TreeNode. We call borrow() to get a reference to the TreeNode and then call depth() on that.
+Iterating over the Children:
+
+In the loop where we iterate over the children, we’ve renamed the loop variable to child_rc to emphasize that it is a reference-counted pointer to a RefCell, not a direct reference to a TreeNode.
+Inside the loop, we borrow the TreeNode from the RefCell in order to call methods on it or access its fields.
+ */
 impl TreeNode {
     pub fn depth(&self) -> usize {
-        // self.children.iter().map(|child| child.depth()) computes the depths of all children recursively.
-        // max() finds the maximum depth among the children.
-        1 + self.children.iter().map(|child| child.depth()).max().unwrap_or(0)
+        1 + self.children.iter()
+            .map(|child_rc| child_rc.borrow().depth())
+            .max()
+            .unwrap_or(0)
     }
-    pub fn leaf_nodes(&self) -> Vec<&String> {
+
+    pub fn leaf_nodes(&self) -> Vec<String> {
         if self.children.is_empty() {
-            vec![&self.file_path]
+            vec![self.file_path.clone()]
         } else {
-            // We use a loop to iterate over each child node, calling leaf_nodes() recursively,
-            // and we extend the leaves vector with the results.
             let mut leaves = Vec::new();
-            for child in &self.children {
-                leaves.extend(child.leaf_nodes());
+            for child_rc in &self.children {
+                leaves.extend(child_rc.borrow().leaf_nodes());
             }
             leaves
         }
     }
 
-    /// recursive function that takes two arguments:
-    /// the current node (&self) and a mutable reference to a vector (path) that accumulates the paths from the root to the current node.
-    pub fn print_leaf_paths<'a>(&'a self, path: &mut Vec<&'a String>) {
-        dlog!("Enter function: {:?}", path);
+    pub fn print_leaf_paths(&self, path: &mut Vec<String>) {
         if self.children.is_empty() {
-            // If it is a leaf node, it prints the accumulated path joined with " <- "
             let path_strs: Vec<&str> = path.iter()
-                .map(|s| s.as_str().strip_prefix(&self.base_path).unwrap().strip_prefix("/").unwrap())
+                .map(|s| s.as_str().strip_prefix(&self.base_path).unwrap().strip_prefix("/").unwrap_or(s.as_str()))
                 .collect();
             println!("{}", path_strs.join(" <- "));
         } else {
-            for child in &self.children {
-                // For each child, it pushes the file_path of the child to the path vector,
-                // calls print_leaf_paths recursively for the child (which will further populate path),
-                // and then pops the last element off of path to backtrack as it moves back up the tree.
-                path.push(&child.file_path);
-                dlog!("path after push: {:?}", path);
+            for child_rc in &self.children {
+                let child = child_rc.borrow();
+                path.push(child.file_path.clone());
                 child.print_leaf_paths(path);
                 path.pop();
-                // backtracking
-                dlog!("path after pop: {:?}", path);
             }
         }
     }
 }
 
 
-pub fn build_trees(directory_path: &Utf8Path) -> Result<Vec<TreeNode>> {
+pub fn build_trees(directory_path: &Utf8Path) -> Result<Vec<Rc<RefCell<TreeNode>>>> {
     let mut relationships: HashMap<String, Vec<String>> = HashMap::new();
     let re = Regex::new(r"# rsenv: (.+)").unwrap();
     let directory_path = directory_path.canonicalize_utf8().context("Failed to canonicalize the path")?;
@@ -108,81 +114,59 @@ pub fn build_trees(directory_path: &Utf8Path) -> Result<Vec<TreeNode>> {
 
     let mut trees = Vec::new();
     for root in root_files {
-        trees.push(build_tree(&root, &relationships, directory_path.as_path()));
+        trees.push(build_tree_stack(&root, &relationships, directory_path.as_path()));
     }
 
     Ok(trees)
 }
 
-// Recursively builds a tree structure starting from the given file_name
-fn build_tree(file_name: &str, relationships: &HashMap<String, Vec<String>>, directory_path: &Utf8Path) -> TreeNode {
-    // Attempt to fetch the children of this file from the relationships HashMap.
-    // If this file has entries in the HashMap, it means it has child files.
-    let children = relationships
-        .get(file_name)
-        // until it reaches files that have no children, at which point the recursion starts to unwind.
-        .map(|children| {
-            // For each child in `children`, recursively call `build_tree` to build
-            // the tree for that child. This is where the recursive step happens.
-            // After mapping, collect the resulting TreeNode instances into a Vec.
-            dlog!("children: {:?}", children);
-            children
-                .iter()
-                .map(|child| build_tree(child, relationships, directory_path))
-                .collect()
-        })
-        // If `file_name` is not present in the HashMap, it means this file has no children,
-        // so we return an empty Vec.
-        .unwrap_or_else(Vec::new);
+/*
+Changing the Type of Children Vector:
 
-    // Construct and return a TreeNode instance with the file name as `file_path`
-    // and the previously computed `children` vector.
-    TreeNode {
-        base_path: directory_path.to_string(),
-        file_path: file_name.to_string(),
-        children,
-    }
-}
+We've changed the children field in the TreeNode struct to hold a vector of Rc<RefCell<TreeNode>> instead of just TreeNode.
+This means that each node in the tree is now wrapped in a RefCell, which allows for interior mutability (i.e., we can now change the contents of a TreeNode even when we have an immutable reference to it), and an Rc, which allows for multiple ownership (i.e., we can have multiple references to the same TreeNode).
+Creating New Nodes:
 
+When we create a new node (new_node), we immediately wrap it in an Rc and a RefCell.
+Storing Nodes in Stack:
+
+We push clones of the Rc<RefCell<TreeNode>> to the stack, rather than pushing the node itself. This allows us to keep multiple references to the same node without duplicating the node itself.
+Adding Children to a Node:
+
+When we want to add a child to a node, we first get a mutable reference to the parent node by calling borrow_mut() on the RefCell, and then we push the child node onto the children vector. We are cloning the Rc, not the TreeNode itself, so this doesn't duplicate the node.
+Returning the Root Node:
+
+The function now returns an Rc<RefCell<TreeNode>> instead of a TreeNode. This is consistent with the fact that all nodes in the tree are now wrapped in Rc<RefCell<...>>.
+ */
 /// non-recursive (iterative) version of the build_tree function using a stack data structure.
 /// This approach mimics the call stack that is used in the recursive approach, but with an explicit stack data structure:
-pub fn build_tree_stack(file_name: &str, relationships: &HashMap<String, Vec<String>>, directory_path: &Utf8Path) -> TreeNode {
-    let mut stack: Vec<String> = Vec::new();
-    let root_name = file_name.to_string();
-    stack.push(root_name.clone());
+pub fn build_tree_stack(file_name: &str, relationships: &HashMap<String, Vec<String>>, directory_path: &Utf8Path) -> Rc<RefCell<TreeNode>> {
+    let mut stack = Vec::new();
+    let root = Rc::new(RefCell::new(TreeNode {
+        base_path: directory_path.to_string(),
+        file_path: file_name.to_string(),
+        children: Vec::new(),
+    }));
 
-    let mut processed: HashMap<String, TreeNode> = HashMap::new();
+    stack.push((file_name.to_string(), Rc::clone(&root)));
 
-    while let Some(current_file) = stack.pop() {
-        let children: Vec<TreeNode> = if let Some(child_files) = relationships.get(&current_file) {
-            child_files.iter()
-                .map(|child_file| {
-                    stack.push(child_file.clone());
-                    processed.remove(child_file).unwrap()
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+    while let Some((node_name, parent_node)) = stack.pop() {
+        if let Some(children_names) = relationships.get(&node_name) {
+            for child_name in children_names {
+                let new_node = Rc::new(RefCell::new(TreeNode {
+                    base_path: directory_path.to_string(),
+                    file_path: child_name.clone(),
+                    children: Vec::new(),
+                }));
 
-        let node = TreeNode {
-            base_path: directory_path.to_string(),
-            file_path: current_file.clone(),
-            children,
-        };
-
-        if current_file == root_name {
-            return node;
-        } else {
-            processed.insert(current_file, node);
+                stack.push((child_name.clone(), Rc::clone(&new_node)));
+                parent_node.borrow_mut().children.push(Rc::clone(&new_node));
+            }
         }
     }
 
-    // panic!("Failed to build the tree");
-    unreachable!("Failed to build the tree");
+    root
 }
-
-
 
 
 #[cfg(test)]
@@ -208,37 +192,7 @@ mod tests {
     //    |
     // grandchild1
     #[test]
-    fn test_build_tree() {
-        // Set up a HashMap to represent the relationships between files
-        let mut relationships = HashMap::new();
-        relationships.insert("root".to_string(), vec!["child1".to_string(), "child2".to_string()]);
-        relationships.insert("child1".to_string(), vec!["grandchild1".to_string()]);
-
-        // Build the tree starting from "root"
-        let tree = build_tree("root", &relationships, &Utf8PathBuf::from(""));
-
-        // Check the root node
-        assert_eq!(tree.file_path, "root");
-        assert_eq!(tree.children.len(), 2);
-
-        // Check the first child node
-        let child1 = &tree.children[0];
-        assert_eq!(child1.file_path, "child1");
-        assert_eq!(child1.children.len(), 1);
-
-        // Check the grandchild node
-        let grandchild1 = &child1.children[0];
-        assert_eq!(grandchild1.file_path, "grandchild1");
-        assert_eq!(grandchild1.children.len(), 0);
-
-        // Check the second child node
-        let child2 = &tree.children[1];
-        assert_eq!(child2.file_path, "child2");
-        assert_eq!(child2.children.len(), 0);
-    }
-
-    #[test]
-    #[ignore = "Implementation not working"]
+    // #[ignore = "Implementation not working"]
     fn test_build_tree_stack() {
         // Set up a HashMap to represent the relationships between files
         let mut relationships = HashMap::new();
@@ -247,24 +201,25 @@ mod tests {
 
         // Build the tree starting from "root"
         let tree = build_tree_stack("root", &relationships, &Utf8PathBuf::from(""));
+        println!("{:#?}", tree);
 
         // Check the root node
-        assert_eq!(tree.file_path, "root");
-        assert_eq!(tree.children.len(), 2);
+        assert_eq!(tree.borrow().file_path, "root");
+        assert_eq!(tree.borrow().children.len(), 2);
 
         // Check the first child node
-        let child1 = &tree.children[0];
-        assert_eq!(child1.file_path, "child1");
-        assert_eq!(child1.children.len(), 1);
+        let child1 = &tree.borrow().children[0];
+        assert_eq!(child1.borrow().file_path, "child1");
+        assert_eq!(child1.borrow().children.len(), 1);
 
         // Check the grandchild node
-        let grandchild1 = &child1.children[0];
-        assert_eq!(grandchild1.file_path, "grandchild1");
-        assert_eq!(grandchild1.children.len(), 0);
+        let grandchild1 = &child1.borrow().children[0];
+        assert_eq!(grandchild1.borrow().file_path, "grandchild1");
+        assert_eq!(grandchild1.borrow().children.len(), 0);
 
         // Check the second child node
-        let child2 = &tree.children[1];
-        assert_eq!(child2.file_path, "child2");
-        assert_eq!(child2.children.len(), 0);
+        let child2 = &tree.borrow().children[1];
+        assert_eq!(child2.borrow().file_path, "child2");
+        assert_eq!(child2.borrow().children.len(), 0);
     }
 }
