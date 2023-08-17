@@ -202,13 +202,19 @@ fn _tree(source_path: &str) {
 
 
 fn _tree_edit(source_path: &str) {
+    // vim -O3 test.env int.env prod.env -c "wincmd h" -c "sp test.env" -c "wincmd l" -c "sp int.env" -c "wincmd l" -c "sp prod.env"
     dlog!("source_path: {:?}", source_path);
-    // let trees = build_trees(Utf8Path::new(source_path)).unwrap();
-    // for tree in &trees {
-    //     let mut path = vec![&tree.file_path];
-    //     println!("Leaf paths of tree rooted at {}:", tree.file_path);
-    //     tree.print_leaf_paths(&mut path);
-    // }
+    let trees = build_trees(Utf8Path::new(source_path)).unwrap();
+    for tree in &trees {
+        let leaf_nodes = tree.leaf_nodes();
+        for leaf in &leaf_nodes {
+            println!("Leaf: {}", leaf);
+            let files = get_files(leaf).unwrap();
+            for file in &files {
+                println!("{}", file);
+            }
+        }
+    }
 }
 
 
