@@ -77,6 +77,10 @@ test-fzf-edit:  ## test-fzf-edit
 test-edit:  ## test-edit
 	pushd $(pkg_src) && cargo test --package rsenv --test test_edit test_open_files_in_editor -- --exact --nocapture --ignored
 
+.PHONY: test-vimscript
+test-vimscript:  ## test-vimscript
+	pushd $(pkg_src) && cargo test --package rsenv --test test_edit test_create_vimscript -- --exact --nocapture --ignored
+
 ################################################################################
 # Building, Deploying \
 BUILDING:  ## ##################################################################

@@ -89,3 +89,32 @@ pub fn open_files_in_editor(files: Vec<Utf8PathBuf>) -> std::io::Result<()> {
 
     Ok(())
 }
+
+pub fn create_vimscript(files: Vec<Vec<&str>>) -> String {
+    let mut script = String::new();
+
+    for (col_idx, col_files) in files.iter().enumerate() {
+        if col_idx == 0 {
+            // For the first column, start with 'edit' for the first file
+            script.push_str(&format!("\" Open the first set of files ('{}') in the first column\n", col_files[0]));
+            script.push_str(&format!("edit {}\n", col_files[0]));
+        } else {
+            // For subsequent columns, start with a 'split' for the first file in the list
+            // and move the cursor to the new (right) column
+            script.push_str(&format!("split {}\n", col_files[0]));
+            script.push_str("\" move to right column\nwincmd L\n");
+        }
+
+        // For the rest of the files in the list, add a 'split' command for each
+        for file in &col_files[1..] {
+            script.push_str(&format!("split {}\n", file));
+        }
+    }
+
+    // Add the final commands to the script
+    script.push_str("\n\" make distribution equal\nwincmd =\n");
+    script.push_str("\n\" jump to left top corner\n1wincmd w\n");
+
+    script
+}
+
