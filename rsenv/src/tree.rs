@@ -125,21 +125,26 @@ pub fn build_trees(directory_path: &Utf8Path) -> Result<Vec<Rc<RefCell<TreeNode>
 
 /*
 Changing the Type of Children Vector:
-
 We've changed the children field in the TreeNode struct to hold a vector of Rc<RefCell<TreeNode>> instead of just TreeNode.
-This means that each node in the tree is now wrapped in a RefCell, which allows for interior mutability (i.e., we can now change the contents of a TreeNode even when we have an immutable reference to it), and an Rc, which allows for multiple ownership (i.e., we can have multiple references to the same TreeNode).
+This means that each node in the tree is now wrapped in a RefCell, which allows for interior mutability
+(i.e., we can now change the contents of a TreeNode even when we have an immutable reference to it), and an Rc,
+which allows for multiple ownership (i.e., we can have multiple references to the same TreeNode).
+
 Creating New Nodes:
-
 When we create a new node (new_node), we immediately wrap it in an Rc and a RefCell.
+
 Storing Nodes in Stack:
+We push clones of the Rc<RefCell<TreeNode>> to the stack, rather than pushing the node itself.
+This allows us to keep multiple references to the same node without duplicating the node itself.
 
-We push clones of the Rc<RefCell<TreeNode>> to the stack, rather than pushing the node itself. This allows us to keep multiple references to the same node without duplicating the node itself.
 Adding Children to a Node:
+When we want to add a child to a node, we first get a mutable reference to the parent node by calling
+borrow_mut() on the RefCell, and then we push the child node onto the children vector.
+We are cloning the Rc, not the TreeNode itself, so this doesn't duplicate the node.
 
-When we want to add a child to a node, we first get a mutable reference to the parent node by calling borrow_mut() on the RefCell, and then we push the child node onto the children vector. We are cloning the Rc, not the TreeNode itself, so this doesn't duplicate the node.
 Returning the Root Node:
-
-The function now returns an Rc<RefCell<TreeNode>> instead of a TreeNode. This is consistent with the fact that all nodes in the tree are now wrapped in Rc<RefCell<...>>.
+The function now returns an Rc<RefCell<TreeNode>> instead of a TreeNode.
+This is consistent with the fact that all nodes in the tree are now wrapped in Rc<RefCell<...>>.
  */
 /// non-recursive (iterative) version of the build_tree function using a stack data structure.
 /// This approach mimics the call stack that is used in the recursive approach, but with an explicit stack data structure:
