@@ -1,11 +1,11 @@
 #![allow(unused_imports)]
 
-use std::collections::{BTreeMap};
+use std::collections::{BTreeMap, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use anyhow::{Context, Result};
 use log::{debug, info};
-use std::{env, fs};
+use std::{env, fmt, fs};
 use std::cell::RefCell;
 use camino::{Utf8Path, Utf8PathBuf};
 use pathdiff::diff_utf8_paths;
@@ -16,6 +16,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
+use termtree::Tree;
 use crate::dlog;
 
 type WrappedTreeNode<> = Rc<RefCell<TreeNode>>;
@@ -229,5 +230,25 @@ mod tests {
         let child2 = &tree.borrow().children[1];
         assert_eq!(child2.borrow().file_path, "child2");
         assert_eq!(child2.borrow().children.len(), 0);
+    }
+}
+
+pub trait TreeNodeConvert {
+    fn to_tree_string(&self) -> Tree<String>;
+}
+
+impl TreeNodeConvert for WrappedTreeNode {
+    fn to_tree_string(&self) -> Tree<String> {
+        let node_borrowed = &self.borrow();
+
+        // The root of the Tree<String> is the file_path of the TreeNode
+        let root = node_borrowed.file_path.clone();
+
+        // Recursively construct the children
+        let leaves: Vec<_> = node_borrowed.children.iter()
+            .map(|c| c.to_tree_string())
+            .collect();
+
+        Tree::new(root).with_leaves(leaves)
     }
 }

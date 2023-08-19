@@ -10,7 +10,8 @@ use rstest::{fixture, rstest};
 use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files, link, link_all, unlink};
 use log::{debug, info};
 use stdext::function_name;
-use rsenv::tree::build_trees;
+use termtree::Tree;
+use rsenv::tree::{build_trees, TreeNodeConvert};
 
 #[ctor::ctor]
 fn init() {
@@ -44,4 +45,12 @@ fn test_build_trees() -> Result<()> {
         tree.borrow().print_leaf_paths(&mut path);
     }
     Ok(())
+}
+
+#[rstest]
+fn test_print() {
+    let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    for t in &trees {
+        println!("xxx: {}", t.to_tree_string());
+    }
 }
