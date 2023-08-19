@@ -2,16 +2,18 @@
 
 use std::collections::{BTreeMap};
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use anyhow::{Context, Result};
 use log::{debug, info};
 use std::{env, io};
 use camino::{Utf8Path, Utf8PathBuf};
+use camino_tempfile::tempfile;
+use camino_tempfile::NamedUtf8TempFile;
 use clap::{Args, Command, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
 use stdext::function_name;
 use rsenv::{dlog, build_env_vars, print_files, get_files, link, link_all};
-use rsenv::edit::{open_files_in_editor, select_file_with_suffix};
+use rsenv::edit::{create_vimscript, open_files_in_editor, select_file_with_suffix};
 use rsenv::envrc::update_dot_envrc;
 use rsenv::tree::build_trees;
 
@@ -165,7 +167,7 @@ fn _files(source_path: &str) {
 }
 
 fn _edit(source_dir: &str) {
-    if ! Utf8Path::new(source_dir).exists() {
+    if !Utf8Path::new(source_dir).exists() {
         eprintln!("Error: Directory does not exist: {:?}", source_dir);
         return;
     }
@@ -176,7 +178,7 @@ fn _edit(source_dir: &str) {
 }
 
 fn _select(source_dir: &str) {
-    if ! Utf8Path::new(source_dir).exists() {
+    if !Utf8Path::new(source_dir).exists() {
         eprintln!("Error: Directory does not exist: {:?}", source_dir);
         return;
     }
@@ -205,17 +207,35 @@ fn _tree(source_path: &str) {
 fn _tree_edit(source_path: &str) {
     // vim -O3 test.env int.env prod.env -c "wincmd h" -c "sp test.env" -c "wincmd l" -c "sp int.env" -c "wincmd l" -c "sp prod.env"
     dlog!("source_path: {:?}", source_path);
+    let mut vimscript_files: Vec<Vec<_>> = vec![];
     let trees = build_trees(Utf8Path::new(source_path)).unwrap();
+
     for tree in &trees {
         let leaf_nodes = tree.borrow().leaf_nodes();
+        let mut branch = Vec::new();
+
         for leaf in &leaf_nodes {
             println!("Leaf: {}", leaf);
             let files = get_files(leaf).unwrap();
             for file in &files {
                 println!("{}", file);
+                branch.push(file.to_string());
             }
+            vimscript_files.push(branch.clone());
         }
     }
+    dlog!("vimscript_files: {:#?}", vimscript_files);
+    let vimscript = create_vimscript(vimscript_files.iter().map(|v| v.iter().map(|s| s.as_str()).collect()).collect());
+    // Create a temporary file.
+    let mut tmpfile = NamedUtf8TempFile::new().unwrap();
+    tmpfile.write_all(vimscript.as_bytes()).unwrap();
+    let status = std::process::Command::new("vim")
+        .arg("-S")
+        .arg(tmpfile.path())
+        .status()
+        .expect("failed to run vim");
+
+    println!("Vim exited with status: {:?}", status);
 }
 
 
