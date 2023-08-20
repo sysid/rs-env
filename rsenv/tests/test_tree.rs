@@ -51,6 +51,28 @@ fn test_build_trees() -> Result<()> {
 fn test_print() {
     let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
     for t in &trees {
-        println!("xxx: {}", t.to_tree_string());
+        println!("{}", t.to_tree_string());
+    }
+}
+
+#[rstest]
+fn test_try_tree() {
+    let mut tree1 = Tree::new("111");
+    let mut tree2 = Tree::new("222");
+
+    let mut tree = Tree::new("xxx");
+    tree.push(Tree::new("yyy"));
+    tree.push(Tree::new("zzz"));
+
+    tree2.push(tree);
+    tree1.push(tree2);
+    println!("{}", tree1);
+}
+
+#[rstest]
+fn test_print_tree_stack() {
+    let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    for t in &trees {
+        println!("{}", t.borrow().print_tree());
     }
 }

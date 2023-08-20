@@ -19,6 +19,7 @@ use crate::tree::TreeNode;
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use termtree::Tree;
 
 /*
 Stacks with Rc<RefCell<TreeNode>>:
@@ -90,6 +91,38 @@ impl TreeNode {
                 }
             }
         }
+    }
+
+    pub fn print_tree(&self) -> Tree<String> {
+        let mut counter: u8 = 0;
+        // stack for backtracking (unwind one leaf is reached)
+        let mut tree_stack: Vec<Tree<String>> = vec![Tree::new(self.file_path.clone())];
+        // stack for building the backtracing stack
+        let mut node_stack = vec![Rc::new(RefCell::new(self.clone()))];
+
+        while let Some(node_rc) = node_stack.pop() {
+            let node = node_rc.borrow();
+            if node.children.is_empty() {  // now we are at a leaf and can build the tree while backtracking
+                let mut built_tree: Option<Tree<String>> = None;  // built tree from leaf to root
+                while let Some(mut tree) = tree_stack.pop() {
+                    if built_tree.is_some() {
+                        tree.push(built_tree.unwrap());
+                    }
+                    built_tree = Some(tree);
+                }
+                return built_tree.unwrap();
+            } else {
+                for (i, child_rc) in node.children.iter().enumerate() {
+                    let node = Tree::new(format!("{}, {}: {}", counter, i, child_rc.borrow().file_path.clone()));
+                    node_stack.push(child_rc.clone());
+                    // dlog!("node: {}", node);
+                    tree_stack.push(node);
+                    dlog!("tree_stack: {:#?}", tree_stack)
+                }
+            }
+            counter += 1;
+        }
+        unreachable!("print_tree");
     }
 }
 

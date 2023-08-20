@@ -79,7 +79,7 @@ test-edit:  ## test-edit
 
 .PHONY: test-vimscript
 test-vimscript:  ## test-vimscript
-	pushd $(pkg_src) && cargo test --package rsenv --test test_edit test_create_vimscript -- --exact --nocapture --ignored
+	pushd $(pkg_src) && cargo test --package rsenv --test test_edit test_open_files_in_editor -- --exact --nocapture --ignored
 
 ################################################################################
 # Building, Deploying \
