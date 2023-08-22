@@ -12,6 +12,7 @@ use log::{debug, info};
 use stdext::function_name;
 use termtree::Tree;
 use rsenv::tree::{build_trees, TreeNodeConvert};
+use rsenv::tree_stack::{transform_tree, transform_tree_recursive, transform_tree_unsafe};
 
 #[ctor::ctor]
 fn init() {
@@ -74,5 +75,15 @@ fn test_print_tree_stack() {
     let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
     for t in &trees {
         println!("{}", t.borrow().print_tree());
+    }
+}
+#[rstest]
+fn test_print_tree_stack2() {
+    let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    for t in &trees {
+        // println!("{}", transform_tree_recursive(t));
+        println!("{}", transform_tree(t));
+        // println!("{}", transform_tree_unsafe(t));
+        // println!("{}", t.borrow().print_tree());
     }
 }

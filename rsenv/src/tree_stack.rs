@@ -15,7 +15,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::path::Path;
 use crate::dlog;
-use crate::tree::TreeNode;
+use crate::tree::{TreeNode, WrappedTreeNode};
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -126,3 +126,101 @@ impl TreeNode {
     }
 }
 
+pub fn transform_tree_unsafe(root: &WrappedTreeNode) -> Tree<String> {
+    #[derive(Debug)]
+    struct StackItem {
+        original: WrappedTreeNode,
+        parent_ref: Option<*mut Vec<Tree<String>>>,  // raw pointer to leaves of the parent
+    }
+
+    let mut stack = Vec::new();
+
+    let mut new_root = Tree::new(format!("{}", root.borrow().file_path));
+
+    stack.push(StackItem {
+        original: Rc::clone(root),
+        parent_ref: None,
+    });
+
+    while !stack.is_empty() {
+        let current_item = stack.pop().unwrap();
+        let current_node = current_item.original.borrow();
+
+        let new_node = Tree::new(format!("{}", current_node.file_path));
+
+        if let Some(parent_ref) = current_item.parent_ref {
+            unsafe { (*parent_ref).push(new_node); }
+        }
+
+        let leaves_ref = if let Some(parent_ref) = current_item.parent_ref {
+            unsafe { &mut (*parent_ref).last_mut().unwrap().leaves as *mut Vec<Tree<String>> }
+        } else {
+            &mut new_root.leaves as *mut Vec<Tree<String>>
+        };
+
+        for child in &current_node.children {
+            stack.push(StackItem {
+                original: Rc::clone(child),
+                parent_ref: Some(leaves_ref),
+            });
+        }
+    }
+
+    new_root
+}
+
+pub fn transform_tree_recursive(node: &WrappedTreeNode) -> Tree<String> {
+    let mut new_node = Tree::new(format!("{}", node.borrow().file_path));
+
+    for child in &node.borrow().children {
+        new_node.leaves.push(transform_tree_recursive(child));
+    }
+
+    new_node
+}
+
+pub fn transform_tree(root: &WrappedTreeNode) -> Tree<String> {
+    #[derive(Debug)]
+    struct StackItem {
+        original: WrappedTreeNode,
+        parent: Option<Rc<RefCell<Tree<String>>>>,
+    }
+
+    let mut stack = Vec::new();
+
+    let new_root = Rc::new(RefCell::new(Tree::new(format!("{}", root.borrow().file_path))));
+    // dlog!("new_root: {:#?}", new_root);
+
+    stack.push(StackItem {
+        original: Rc::clone(root),
+        parent: None,
+    });
+
+    while !stack.is_empty() {
+        let current_item = stack.pop().unwrap();
+        let current_node = current_item.original.borrow();
+
+        let new_node = if let Some(parent) = &current_item.parent {
+            let new_child = Rc::new(RefCell::new(Tree::new(format!("{}", current_node.file_path))));
+            dlog!("new_child: {:#?}", new_child);
+            parent.borrow_mut().leaves.push(new_child.borrow().clone());
+            dlog!("parent: {:#?}", parent);
+            new_child
+        } else {
+            dlog!("new_root: {:#?}", new_root);
+            Rc::clone(&new_root)
+        };
+
+        for child in &current_node.children {
+            stack.push(StackItem {
+                original: Rc::clone(child),
+                parent: Some(Rc::clone(&new_node)),
+            });
+            // dlog!("stack: {:#?}", stack);
+            // dlog!("new_root {:?}", new_root);
+        }
+    }
+
+    // dlog!("new_root final {:?}", new_root);
+    Rc::try_unwrap(new_root).unwrap().into_inner()
+}

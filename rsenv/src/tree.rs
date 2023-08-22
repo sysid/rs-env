@@ -19,7 +19,7 @@ use std::rc::Rc;
 use termtree::Tree;
 use crate::dlog;
 
-type WrappedTreeNode<> = Rc<RefCell<TreeNode>>;
+pub type WrappedTreeNode<> = Rc<RefCell<TreeNode>>;
 
 #[derive(Debug, Clone)]
 pub struct TreeNode {
