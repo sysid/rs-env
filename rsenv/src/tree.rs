@@ -19,13 +19,42 @@ use std::rc::Rc;
 use termtree::Tree;
 use crate::dlog;
 
+#[derive(Debug, Clone)]
+pub struct NodeData {
+    pub base_path: String,
+    pub file_path: String
+}
+
+impl fmt::Display for NodeData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.file_path)
+    }
+}
+
 pub type WrappedTreeNode<> = Rc<RefCell<TreeNode>>;
 
 #[derive(Debug, Clone)]
 pub struct TreeNode {
-    pub base_path: String,
-    pub file_path: String,
+    pub node_data: NodeData,
     pub children: Vec<WrappedTreeNode>,
+}
+
+impl fmt::Display for TreeNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Write the current node's data
+        write!(f, "{}", self.node_data)?;
+
+        // If there are children, recursively write them
+        if !self.children.is_empty() {
+            writeln!(f, " [")?;
+            for child in &self.children {
+                // For better formatting, we can add indentation for child nodes
+                write!(f, "  {}\n", child.borrow())?;
+            }
+            write!(f, "]")?;
+        }
+        Ok(())
+    }
 }
 
 /*
@@ -52,7 +81,7 @@ impl TreeNode {
 
     pub fn leaf_nodes(&self) -> Vec<String> {
         if self.children.is_empty() {
-            vec![self.file_path.clone()]
+            vec![self.node_data.file_path.clone()]
         } else {
             let mut leaves = Vec::new();
             for child_rc in &self.children {
@@ -65,13 +94,13 @@ impl TreeNode {
     pub fn print_leaf_paths(&self, path: &mut Vec<String>) {
         if self.children.is_empty() {
             let path_strs: Vec<&str> = path.iter()
-                .map(|s| s.as_str().strip_prefix(&self.base_path).unwrap().strip_prefix("/").unwrap_or(s.as_str()))
+                .map(|s| s.as_str().strip_prefix(&self.node_data.base_path).unwrap().strip_prefix("/").unwrap_or(s.as_str()))
                 .collect();
             println!("{}", path_strs.join(" <- "));
         } else {
             for child_rc in &self.children {
                 let child = child_rc.borrow();
-                path.push(child.file_path.clone());
+                path.push(child.node_data.file_path.clone());
                 child.print_leaf_paths(path);
                 path.pop();
             }
@@ -152,8 +181,7 @@ This is consistent with the fact that all nodes in the tree are now wrapped in R
 pub fn build_tree_stack(file_name: &str, relationships: &HashMap<String, Vec<String>>, directory_path: &Utf8Path) -> Rc<RefCell<TreeNode>> {
     let mut stack = Vec::new();
     let root = Rc::new(RefCell::new(TreeNode {
-        base_path: directory_path.to_string(),
-        file_path: file_name.to_string(),
+        node_data: NodeData { base_path: directory_path.to_string(), file_path: file_name.to_string() },
         children: Vec::new(),
     }));
 
@@ -163,8 +191,7 @@ pub fn build_tree_stack(file_name: &str, relationships: &HashMap<String, Vec<Str
         if let Some(children_names) = relationships.get(&node_name) {
             for child_name in children_names {
                 let new_node = Rc::new(RefCell::new(TreeNode {
-                    base_path: directory_path.to_string(),
-                    file_path: child_name.clone(),
+                    node_data: NodeData { base_path: directory_path.to_string(), file_path: child_name.clone() },
                     children: Vec::new(),
                 }));
 
@@ -180,6 +207,7 @@ pub fn build_tree_stack(file_name: &str, relationships: &HashMap<String, Vec<Str
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
     use super::*;
 
     #[ctor::ctor]
@@ -213,23 +241,33 @@ mod tests {
         println!("{:#?}", tree);
 
         // Check the root node
-        assert_eq!(tree.borrow().file_path, "root");
+        assert_eq!(tree.borrow().node_data.file_path, "root");
         assert_eq!(tree.borrow().children.len(), 2);
 
         // Check the first child node
         let child1 = &tree.borrow().children[0];
-        assert_eq!(child1.borrow().file_path, "child1");
+        assert_eq!(child1.borrow().node_data.file_path, "child1");
         assert_eq!(child1.borrow().children.len(), 1);
 
         // Check the grandchild node
         let grandchild1 = &child1.borrow().children[0];
-        assert_eq!(grandchild1.borrow().file_path, "grandchild1");
+        assert_eq!(grandchild1.borrow().node_data.file_path, "grandchild1");
         assert_eq!(grandchild1.borrow().children.len(), 0);
 
         // Check the second child node
         let child2 = &tree.borrow().children[1];
-        assert_eq!(child2.borrow().file_path, "child2");
+        assert_eq!(child2.borrow().node_data.file_path, "child2");
         assert_eq!(child2.borrow().children.len(), 0);
+    }
+
+    #[rstest]
+    fn test_display() {
+        let d = NodeData {
+            base_path: "base_path".to_string(),
+            file_path: "file_path".to_string(),
+        };
+        println!("{}", d);
+        assert_eq!(format!("{}", d), "file_path")
     }
 }
 
@@ -242,7 +280,7 @@ impl TreeNodeConvert for WrappedTreeNode {
         let node_borrowed = &self.borrow();
 
         // The root of the Tree<String> is the file_path of the TreeNode
-        let root = node_borrowed.file_path.clone();
+        let root = node_borrowed.node_data.file_path.clone();
 
         // Recursively construct the children
         let leaves: Vec<_> = node_borrowed.children.iter()

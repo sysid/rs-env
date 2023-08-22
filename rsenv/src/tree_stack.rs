@@ -59,7 +59,7 @@ impl TreeNode {
         while let Some(node_rc) = stack.pop() {
             let node = node_rc.borrow();
             if node.children.is_empty() {
-                let leaf = &node.file_path;
+                let leaf = &node.node_data.file_path;
                 leaves.push(leaf.to_string());
             } else {
                 for child_rc in &node.children {
@@ -72,20 +72,20 @@ impl TreeNode {
     }
 
     pub fn print_leaf_paths2(&self) {
-        let mut node_stack = vec![(Rc::new(RefCell::new(self.clone())), vec![self.file_path.clone()])];
+        let mut node_stack = vec![(Rc::new(RefCell::new(self.clone())), vec![self.node_data.file_path.clone()])];
 
         while let Some((node_rc, path)) = node_stack.pop() {
             let node = node_rc.borrow();
             if node.children.is_empty() {
                 let path_strs: Vec<&str> = path.iter()
-                    .map(|s| s.as_str().strip_prefix(&node.base_path).unwrap()
+                    .map(|s| s.as_str().strip_prefix(&node.node_data.base_path).unwrap()
                         .strip_prefix("/").unwrap_or(s.as_str()))
                     .collect();
                 println!("{}", path_strs.join(" <- "));
             } else {
                 for child_rc in &node.children {
                     let mut new_path = path.clone();
-                    let p = &child_rc.borrow().file_path;
+                    let p = &child_rc.borrow().node_data.file_path;
                     new_path.push(p.to_string());
                     node_stack.push((child_rc.clone(), new_path));
                 }
@@ -96,7 +96,7 @@ impl TreeNode {
     pub fn print_tree(&self) -> Tree<String> {
         let mut counter: u8 = 0;
         // stack for backtracking (unwind one leaf is reached)
-        let mut tree_stack: Vec<Tree<String>> = vec![Tree::new(self.file_path.clone())];
+        let mut tree_stack: Vec<Tree<String>> = vec![Tree::new(self.node_data.file_path.clone())];
         // stack for building the backtracing stack
         let mut node_stack = vec![Rc::new(RefCell::new(self.clone()))];
 
@@ -104,6 +104,7 @@ impl TreeNode {
             let node = node_rc.borrow();
             if node.children.is_empty() {  // now we are at a leaf and can build the tree while backtracking
                 let mut built_tree: Option<Tree<String>> = None;  // built tree from leaf to root
+                // todo: this is probably only building linear nested trees, not a tree with multiple branches
                 while let Some(mut tree) = tree_stack.pop() {
                     if built_tree.is_some() {
                         tree.push(built_tree.unwrap());
@@ -113,7 +114,7 @@ impl TreeNode {
                 return built_tree.unwrap();
             } else {
                 for (i, child_rc) in node.children.iter().enumerate() {
-                    let node = Tree::new(format!("{}, {}: {}", counter, i, child_rc.borrow().file_path.clone()));
+                    let node = Tree::new(format!("{}, {}: {}", counter, i, child_rc.borrow().node_data.file_path.clone()));
                     node_stack.push(child_rc.clone());
                     // dlog!("node: {}", node);
                     tree_stack.push(node);
@@ -135,7 +136,7 @@ pub fn transform_tree_unsafe(root: &WrappedTreeNode) -> Tree<String> {
 
     let mut stack = Vec::new();
 
-    let mut new_root = Tree::new(format!("{}", root.borrow().file_path));
+    let mut new_root = Tree::new(format!("{}", root.borrow().node_data.file_path));
 
     stack.push(StackItem {
         original: Rc::clone(root),
@@ -146,7 +147,7 @@ pub fn transform_tree_unsafe(root: &WrappedTreeNode) -> Tree<String> {
         let current_item = stack.pop().unwrap();
         let current_node = current_item.original.borrow();
 
-        let new_node = Tree::new(format!("{}", current_node.file_path));
+        let new_node = Tree::new(format!("{}", current_node.node_data.file_path));
 
         if let Some(parent_ref) = current_item.parent_ref {
             unsafe { (*parent_ref).push(new_node); }
@@ -170,7 +171,7 @@ pub fn transform_tree_unsafe(root: &WrappedTreeNode) -> Tree<String> {
 }
 
 pub fn transform_tree_recursive(node: &WrappedTreeNode) -> Tree<String> {
-    let mut new_node = Tree::new(format!("{}", node.borrow().file_path));
+    let mut new_node = Tree::new(format!("{}", node.borrow().node_data.file_path));
 
     for child in &node.borrow().children {
         new_node.leaves.push(transform_tree_recursive(child));
@@ -188,7 +189,7 @@ pub fn transform_tree(root: &WrappedTreeNode) -> Tree<String> {
 
     let mut stack = Vec::new();
 
-    let new_root = Rc::new(RefCell::new(Tree::new(format!("{}", root.borrow().file_path))));
+    let new_root = Rc::new(RefCell::new(Tree::new(format!("{}", root.borrow().node_data.file_path))));
     // dlog!("new_root: {:#?}", new_root);
 
     stack.push(StackItem {
@@ -201,7 +202,7 @@ pub fn transform_tree(root: &WrappedTreeNode) -> Tree<String> {
         let current_node = current_item.original.borrow();
 
         let new_node = if let Some(parent) = &current_item.parent {
-            let new_child = Rc::new(RefCell::new(Tree::new(format!("{}", current_node.file_path))));
+            let new_child = Rc::new(RefCell::new(Tree::new(format!("{}", current_node.node_data.file_path))));
             dlog!("new_child: {:#?}", new_child);
             parent.borrow_mut().leaves.push(new_child.borrow().clone());
             dlog!("parent: {:#?}", parent);

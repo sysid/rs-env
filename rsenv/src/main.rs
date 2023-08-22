@@ -196,9 +196,9 @@ fn _tree(source_path: &str) {
     dlog!("source_path: {:?}", source_path);
     let trees = build_trees(Utf8Path::new(source_path)).unwrap();
     for tree in &trees {
-        let p = &tree.borrow().file_path;
+        let p = &tree.borrow().node_data.file_path;
         let mut path = vec![p.to_string()];
-        println!("Leaf paths of tree rooted at {}:", tree.borrow().file_path);
+        println!("Leaf paths of tree rooted at {}:", tree.borrow().node_data.file_path);
         tree.borrow().print_leaf_paths(&mut path);
     }
 }

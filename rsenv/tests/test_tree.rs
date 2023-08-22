@@ -27,12 +27,12 @@ fn test_build_trees() -> Result<()> {
     let trees = build_trees(Utf8Path::new("./tests/resources/data"))?;
     println!("trees: {:#?}", trees);
     for tree in &trees {
-        println!("Depth of tree rooted at {}: {}", tree.borrow().file_path, tree.borrow().depth());
+        println!("Depth of tree rooted at {}: {}", tree.borrow().node_data.file_path, tree.borrow().depth());
         assert_eq!(tree.borrow().depth(), 5);
     }
     for tree in &trees {
         let leaf_nodes = tree.borrow().leaf_nodes();
-        println!("Leaf nodes of tree rooted at {}:", tree.borrow().file_path);
+        println!("Leaf nodes of tree rooted at {}:", tree.borrow().node_data.file_path);
         for leaf in &leaf_nodes {
             println!("{}", leaf);
         }
@@ -40,9 +40,9 @@ fn test_build_trees() -> Result<()> {
         assert!(leaf_nodes[0].ends_with("level4.env"));
     }
     for tree in &trees {
-        let p = &tree.borrow().file_path;
+        let p = &tree.borrow().node_data.file_path;
         let mut path = vec![p.to_string()];
-        println!("Leaf paths of tree rooted at {}:", tree.borrow().file_path);
+        println!("Leaf paths of tree rooted at {}:", tree.borrow().node_data.file_path);
         tree.borrow().print_leaf_paths(&mut path);
     }
     Ok(())
@@ -70,6 +70,13 @@ fn test_try_tree() {
     println!("{}", tree1);
 }
 
+#[rstest]
+fn test_print_tree() {
+    let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    for t in trees {
+        println!("{}", Tree::new(t.borrow()));
+    }
+}
 #[rstest]
 fn test_print_tree_stack() {
     let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
