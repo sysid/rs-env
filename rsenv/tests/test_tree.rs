@@ -77,20 +77,76 @@ fn test_print_tree() {
         println!("{}", Tree::new(t.borrow()));
     }
 }
+
 #[rstest]
 fn test_print_tree_stack() {
-    let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    // let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();
     for t in &trees {
         println!("{}", t.borrow().print_tree());
     }
 }
+
 #[rstest]
-fn test_print_tree_stack2() {
-    let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+fn test_print_tree_recursive() {
+    // let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    // let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/parallel")).unwrap();
     for t in &trees {
-        // println!("{}", transform_tree_recursive(t));
-        println!("{}", transform_tree(t));
+        println!("{}", transform_tree_recursive(t));
+        // println!("{}", transform_tree(t));
         // println!("{}", transform_tree_unsafe(t));
         // println!("{}", t.borrow().print_tree());
     }
 }
+
+#[rstest]
+fn test_print_tree_recursive_data() {
+    let result = "/Users/tw/dev/s/public/rs-env/rsenv/tests/resources/data/dot.envrc
+└── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/data/level1.env
+    └── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/data/level2.env
+        └── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/data/a/level3.env
+            └── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/data/level4.env\n";
+
+    let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    assert_eq!(trees.len(), 1);
+    for t in &trees {
+        println!("{}", transform_tree_recursive(t));
+        assert_eq!(format!("{}", transform_tree_recursive(t)), result)
+    }
+}
+
+#[rstest]
+fn test_print_tree_recursive_parallel() {
+    let result = "/Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/a_test.env
+└── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/b_test.env
+    └── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/test.env\n";
+
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/parallel")).unwrap();
+    assert_eq!(trees.len(), 3);
+    for t in &trees {
+        println!("{}", transform_tree_recursive(t));
+        if t.borrow().node_data.file_path.ends_with("test.env") {
+            assert_eq!(format!("{}", transform_tree_recursive(t)), result)
+        }
+    }
+}
+
+#[rstest]
+fn test_print_tree_recursive_tree() {
+    let result = "/Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env
+├── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level11.env
+├── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level13.env
+└── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level12.env
+    ├── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level22.env
+    │   └── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level31.env
+    └── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level21.env\n";
+
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();
+    assert_eq!(trees.len(), 1);
+    for t in &trees {
+        println!("{}", transform_tree_recursive(t));
+        assert_eq!(format!("{}", transform_tree_recursive(t)), result)
+    }
+}
+
