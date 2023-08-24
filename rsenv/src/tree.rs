@@ -102,7 +102,7 @@ impl TreeNode {
                 let child = child_rc.borrow();
                 path.push(child.node_data.file_path.clone());
                 child.print_leaf_paths(path);
-                path.pop();
+                path.pop();  // backtracking
             }
         }
     }
