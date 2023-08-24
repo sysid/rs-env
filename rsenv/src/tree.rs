@@ -15,7 +15,7 @@ use walkdir::WalkDir;
 use regex::Regex;
 use std::collections::HashMap;
 use std::path::Path;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use termtree::Tree;
 use crate::dlog;
 
@@ -31,11 +31,16 @@ impl fmt::Display for NodeData {
     }
 }
 
+/// Parent relationship is one of non-ownership.
+/// This is not a `Rc<TreeNode<T>>` which would cause memory leak.
+pub type WeakTreeNodeRef<> = Weak<RefCell<TreeNode>>;
+
 pub type TreeNodeRef<> = Rc<RefCell<TreeNode>>;
 
 #[derive(Debug, Clone)]
 pub struct TreeNode {
     pub node_data: NodeData,
+    pub parent: Option<WeakTreeNodeRef>,
     pub children: Vec<TreeNodeRef>,
 }
 
@@ -143,12 +148,6 @@ impl TreeNode {
 /// represents the root of a tree. In case of errors, such as IO failures or issues with the path,
 /// an error variant is returned.
 ///
-/// # Examples
-///
-/// ```rust
-/// let trees = build_trees(Utf8Path::new("/path/to/directory")).unwrap();
-/// ```
-///
 /// # Panics
 ///
 /// This function may panic if it encounters issues with regex compilation or
@@ -184,6 +183,7 @@ pub fn build_trees(directory_path: &Utf8Path) -> Result<Vec<Rc<RefCell<TreeNode>
         }
     }
 
+    // root nodes are the ones which do not show up as values in the relationships map
     let root_files: Vec<String> = relationships
         .keys()
         .filter(|&key| !relationships.values().any(|v| v.contains(key)))
@@ -227,16 +227,18 @@ pub fn build_tree_stack(file_name: &str, relationships: &HashMap<String, Vec<Str
     let mut stack = Vec::new();
     let root = Rc::new(RefCell::new(TreeNode {
         node_data: NodeData { base_path: directory_path.to_string(), file_path: file_name.to_string() },
+        parent: None,
         children: Vec::new(),
     }));
 
-    stack.push((file_name.to_string(), Rc::clone(&root)));
+    stack.push((file_name.to_string(), Rc::clone(&root)));  // immutable borrow of root
 
     while let Some((node_name, parent_node)) = stack.pop() {
         if let Some(children_names) = relationships.get(&node_name) {
             for child_name in children_names {
                 let new_node = Rc::new(RefCell::new(TreeNode {
                     node_data: NodeData { base_path: directory_path.to_string(), file_path: child_name.clone() },
+                    parent: Some(Rc::downgrade(&parent_node)),
                     children: Vec::new(),
                 }));
 
