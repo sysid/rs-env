@@ -11,8 +11,9 @@ use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files, link, lin
 use log::{debug, info};
 use stdext::function_name;
 use termtree::Tree;
-use rsenv::tree::{build_trees, TreeNodeConvert};
+use rsenv::tree::{build_trees};
 use rsenv::tree_stack::{transform_tree, transform_tree_recursive, transform_tree_unsafe};
+use rsenv::tree_traits::TreeNodeConvert;
 
 #[ctor::ctor]
 fn init() {

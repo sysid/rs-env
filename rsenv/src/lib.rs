@@ -15,6 +15,7 @@ pub mod envrc;
 pub mod edit;
 pub mod tree;
 pub mod tree_stack;
+pub mod tree_traits;
 // mod tree_queue;
 
 pub fn get_files(file_path: &str) -> Result<Vec<Utf8PathBuf>> {
