@@ -91,6 +91,17 @@ impl TreeNode {
         }
     }
 
+    /// Prints the leaf paths of the tree, starting from 'self'
+    ///
+    /// This function traverses the tree and prints the paths to leaf nodes. For each leaf node,
+    /// the path is constructed by stripping the base path and joining the segments using " <- ".
+    /// Paths are printed to the console.
+    ///
+    /// # Arguments
+    ///
+    /// * `path`: A mutable vector of strings which temporarily stores the path segments as the tree
+    ///   is traversed. It should typically be initialized as an empty vector before calling this function.
+    ///
     pub fn print_leaf_paths(&self, path: &mut Vec<String>) {
         if self.children.is_empty() {
             let path_strs: Vec<&str> = path.iter()
@@ -109,6 +120,40 @@ impl TreeNode {
 }
 
 
+/// Builds a vector of environment tree structures from a given directory path.
+///
+/// This function scans all the files within the specified directory and its subdirectories,
+/// looking for lines that match the pattern `# rsenv: (.+)`.
+/// Each matched line indicates a parent-child relationship between files.
+///
+/// For example, if a file `child.env` contains the line `# rsenv: parent.env`, then `child.env`
+/// is considered a child of `parent.env`.
+///
+/// The resulting trees are constructed based on these relationships. Each tree has a root file
+/// (a file that's not a child of any other file) and zero or more child files. Child files
+/// can further have their own children, forming the tree structure.
+///
+/// # Arguments
+///
+/// * `directory_path`: The path of the directory where the scan starts.
+///
+/// # Returns
+///
+/// Returns a `Result` containing a vector of `Rc<RefCell<TreeNode>>` structures. Each `TreeNode`
+/// represents the root of a tree. In case of errors, such as IO failures or issues with the path,
+/// an error variant is returned.
+///
+/// # Examples
+///
+/// ```rust
+/// let trees = build_trees(Utf8Path::new("/path/to/directory")).unwrap();
+/// ```
+///
+/// # Panics
+///
+/// This function may panic if it encounters issues with regex compilation or
+/// if it fails to unwrap certain expected values, which should be typically present.
+///
 pub fn build_trees(directory_path: &Utf8Path) -> Result<Vec<Rc<RefCell<TreeNode>>>> {
     let mut relationships: HashMap<String, Vec<String>> = HashMap::new();
     let re = Regex::new(r"# rsenv: (.+)").unwrap();
