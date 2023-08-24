@@ -31,12 +31,12 @@ impl fmt::Display for NodeData {
     }
 }
 
-pub type WrappedTreeNode<> = Rc<RefCell<TreeNode>>;
+pub type TreeNodeRef<> = Rc<RefCell<TreeNode>>;
 
 #[derive(Debug, Clone)]
 pub struct TreeNode {
     pub node_data: NodeData,
-    pub children: Vec<WrappedTreeNode>,
+    pub children: Vec<TreeNodeRef>,
 }
 
 impl fmt::Display for TreeNode {
@@ -320,7 +320,7 @@ pub trait TreeNodeConvert {
     fn to_tree_string(&self) -> Tree<String>;
 }
 
-impl TreeNodeConvert for WrappedTreeNode {
+impl TreeNodeConvert for TreeNodeRef {
     fn to_tree_string(&self) -> Tree<String> {
         let node_borrowed = &self.borrow();
 

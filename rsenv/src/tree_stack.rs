@@ -15,7 +15,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::path::Path;
 use crate::dlog;
-use crate::tree::{TreeNode, WrappedTreeNode};
+use crate::tree::{TreeNode, TreeNodeRef};
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -127,10 +127,10 @@ impl TreeNode {
     }
 }
 
-pub fn transform_tree_unsafe(root: &WrappedTreeNode) -> Tree<String> {
+pub fn transform_tree_unsafe(root: &TreeNodeRef) -> Tree<String> {
     #[derive(Debug)]
     struct StackItem {
-        original: WrappedTreeNode,
+        original: TreeNodeRef,
         parent_ref: Option<*mut Vec<Tree<String>>>,  // raw pointer to leaves of the parent
     }
 
@@ -170,7 +170,7 @@ pub fn transform_tree_unsafe(root: &WrappedTreeNode) -> Tree<String> {
     new_root
 }
 
-pub fn transform_tree_recursive(node: &WrappedTreeNode) -> Tree<String> {
+pub fn transform_tree_recursive(node: &TreeNodeRef) -> Tree<String> {
     let mut new_node = Tree::new(format!("{}", node.borrow().node_data.file_path));
 
     for child in &node.borrow().children {
@@ -180,10 +180,10 @@ pub fn transform_tree_recursive(node: &WrappedTreeNode) -> Tree<String> {
     new_node
 }
 
-pub fn transform_tree(root: &WrappedTreeNode) -> Tree<String> {
+pub fn transform_tree(root: &TreeNodeRef) -> Tree<String> {
     #[derive(Debug)]
     struct StackItem {
-        original: WrappedTreeNode,
+        original: TreeNodeRef,
         parent: Option<Rc<RefCell<Tree<String>>>>,
     }
 
