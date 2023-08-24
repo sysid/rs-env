@@ -182,6 +182,7 @@ pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Option<
     Ok((variables, parent_path))
 }
 
+/// links two env files together
 pub fn link(parent: &str, child: &str) -> Result<()> {
     let parent = Utf8Path::new(parent)
         .canonicalize_utf8()
@@ -270,6 +271,7 @@ pub fn unlink(child: &str) -> Result<()> {
 }
 
 
+/// links a list of env files together and build the hierarchical environment variables tree
 pub fn link_all(nodes: &[String]) {
     dlog!("nodes: {:?}", nodes);
     let mut parent = None;
