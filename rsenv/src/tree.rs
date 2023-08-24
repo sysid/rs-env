@@ -318,6 +318,12 @@ mod tests {
     }
 }
 
+/*
+Workaround for error: https://doc.rust-lang.org/error_codes/E0116.html
+Cannot define inherent `impl` for a type outside of the crate where the type is defined
+
+define a trait that has the desired associated functions/types/constants and implement the trait for the type in question
+ */
 pub trait TreeNodeConvert {
     fn to_tree_string(&self) -> Tree<String>;
 }

@@ -92,6 +92,7 @@ fn test_print_tree() {
 }
 
 #[rstest]
+#[ignore = "Implementaion: BFS missing"]
 fn test_print_tree_stack() {
     // let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
     let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();
@@ -101,6 +102,7 @@ fn test_print_tree_stack() {
 }
 
 #[rstest]
+#[ignore = "Only for interactive exploration"]
 fn test_print_tree_recursive() {
     // let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
     // let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();

@@ -105,6 +105,7 @@ impl TreeNode {
             if node.children.is_empty() {  // now we are at a leaf and can build the tree while backtracking
                 let mut built_tree: Option<Tree<String>> = None;  // built tree from leaf to root
                 // todo: this is probably only building linear nested trees, not a tree with multiple branches
+                // todo: try BFS
                 while let Some(mut tree) = tree_stack.pop() {
                     if built_tree.is_some() {
                         tree.push(built_tree.unwrap());
