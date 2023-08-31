@@ -45,11 +45,13 @@ struct Cli {
 
 #[derive(Subcommand, Debug, PartialEq)]
 enum Commands {
+    /// Build the resulting set of environment variables
     Build {
         /// path to environment file (last child in hierarchy)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
+    /// Write the resulting set of environment variables to .envrc (requires direnv)
     Envrc {
         /// path to environment file (last child in hierarchy)
         #[arg(value_hint = ValueHint::FilePath)]
@@ -58,33 +60,39 @@ enum Commands {
         #[arg(value_hint = ValueHint::FilePath)]
         envrc_path: Option<String>,
     },
+    /// Show all files involved in building the variable set
     Files {
         /// path to environment file (last child in hierarchy)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
+    /// Edit the FZF selected file and its linked parents (dependency chain)
     Edit {
-        /// path to environment file (last child in hierarchy)
+        /// path to environment files directory
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
+    /// FZF based selection of environment and update of .envrc file (requires direnv)
     Select {
         /// path to environment file (last child in hierarchy)
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
+    /// Link files into a dependency tree
     Link {
         /// .env files to link (root -> parent -> child)
         #[arg(value_hint = ValueHint::FilePath, num_args = 1..)]
         nodes: Vec<String>,
     },
+    /// Show all dependency trees
     Tree {
-        /// path to root directory for dependency tree
+        /// path to root directory for dependency trees
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
+    /// Edit all dependency trees side-by-side (vim required)
     TreeEdit {
-        /// path to root directory for dependency tree
+        /// path to root directory for dependency trees
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },

@@ -2,7 +2,7 @@
 name = "rsenv"
 version = "0.6.2"
 edition = "2021"
-description = "build your enviornment"
+description = "Hierarchical environment variable management"
 keywords = ["development", "environment"]
 repository = "https://github.com/sysid/rs-env"
 readme = "../README.md"
@@ -26,6 +26,7 @@ fs_extra = "1.3.0"
 itertools = "0.11.0"
 lazy_static = "1.4.0"
 log = "0.4.20"
+nom = "7.1.3"
 pathdiff = { version = "0.2.1", features = ["camino"] }
 regex = "1.9.3"
 rstest = "0.18.2"
