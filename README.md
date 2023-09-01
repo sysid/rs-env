@@ -1,20 +1,32 @@
 # rs-env
 
-## Features
-- Build environment variable set from a hierarchical list of `<name>.env` files.
-- Hierarchy forms a tree, each file can point to one parent (no DAG).
+# Features
+- Compile your environment variables from a hierarchical list of `<name>.env` files.
+- Dependencies form a tree, each file can have one parent (no DAG).
 - Last defined variable wins, i.e. child tops parent.
-- Have the final variable list updated in your `.envrc` file for clean environment management.
-- Quick selection of environments via FZF.
-- Quick edit via FZF.
-- Smart edit of parallel dependency trees side-by-side for full transparency
+- Quick selection of environments via builtin FZF (fuzzy find).
+- Quick edit via builtin FZF.
+- Smart edit of dependency trees side-by-side
+- Chain your dependencies with one command
+- [direnv](https://direnv.net/) integration: Have the resulting variable list documented in your `.envrc` file.
+- [JetBrains](https://www.jetbrains.com/) integration via [EnvFile](https://plugins.jetbrains.com/plugin/7861-envfile) plugin.
 
+### Concept
+![concept](doc/concept.png)
+
+
+### Installation
 ```bash
-# simple activation of environment
-source <(rsenv build)
+cargo install rs-env
 ```
 
-### Usage
+### Basic Usage
+```bash
+# simple activation of environment
+source <(rsenv build <name.env>)
+```
+
+### Comprehensive Usage
 ```bash
 Hierarchical environment variable management
 
@@ -42,17 +54,25 @@ Options:
   -V, --version               Print version
 ```
 
-# Direnv Integration
-[EnvFile](https://plugins.jetbrains.com/plugin/7861-envfile) activates environments automatically.
+<br>
+
+## Integrations
+### direnv
+[direnv](https://direnv.net/) activates environments automatically.
 - rs-env can update the `.envrc` file with the selected dependency graph variables.
 
-# JetBrains Integration: Life injection of environment variables
+
+### JetBrains Integration
+Life injection of environment variables:
 - Plugin [EnvFile](https://plugins.jetbrains.com/plugin/7861-envfile) can be used to life-inject environment variables.
 - Use the script `runenv.sh` as the "EnvFile" script (tick executable checkbox !).
-- The environment variable `RUN_ENV` and will tell the script which environment to load.
+- The environment variable `RUN_ENV` parametrizes which environment to load.
 - It will look for a file `<RUN_ENV>.env` in the specified directory.
 
+[![jetbrain](doc/jetbrain.png)](doc/jetbrain.png)
 
-# Development
+
+
+## Development
 - Tests for "skim" need valid terminal, so they are run via Makefile.
 - Test for `rsenv select`: run debug target and check rsenv .envrc file.
