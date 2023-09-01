@@ -118,11 +118,11 @@ fn test_print_tree_recursive() {
 
 #[rstest]
 fn test_print_tree_recursive_data() {
-    let result = "/Users/tw/dev/s/public/rs-env/rsenv/tests/resources/data/dot.envrc
-└── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/data/level1.env
-    └── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/data/level2.env
-        └── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/data/a/level3.env
-            └── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/data/level4.env\n";
+    let result = "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/data/dot.envrc
+└── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/data/level1.env
+    └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/data/level2.env
+        └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/data/a/level3.env
+            └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/data/level4.env\n";
 
     let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
     assert_eq!(trees.len(), 1);
@@ -134,9 +134,9 @@ fn test_print_tree_recursive_data() {
 
 #[rstest]
 fn test_print_tree_recursive_parallel() {
-    let result = "/Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/a_test.env
-└── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/b_test.env
-    └── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/test.env\n";
+    let result = "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/a_test.env
+└── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/b_test.env
+    └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/test.env\n";
 
     let trees = build_trees(Utf8Path::new("./tests/resources/environments/parallel")).unwrap();
     assert_eq!(trees.len(), 3);
@@ -150,13 +150,13 @@ fn test_print_tree_recursive_parallel() {
 
 #[rstest]
 fn test_print_tree_recursive_tree() {
-    let result = "/Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env
-├── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level11.env
-├── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level13.env
-└── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level12.env
-    ├── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level22.env
-    │   └── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level31.env
-    └── /Users/tw/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level21.env\n";
+    let result = "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env
+├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level11.env
+├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level13.env
+└── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level12.env
+    ├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level22.env
+    │   └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level31.env
+    └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level21.env\n";
 
     let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();
     assert_eq!(trees.len(), 1);
