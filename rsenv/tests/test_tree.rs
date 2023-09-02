@@ -121,16 +121,6 @@ fn test_print_tree() {
 }
 
 #[rstest]
-#[ignore = "Implementaion: BFS missing"]
-fn test_print_tree_stack() {
-    // let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex")).unwrap();
-    let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();
-    for t in &trees {
-        println!("{}", t.borrow().print_tree());
-    }
-}
-
-#[rstest]
 #[ignore = "Only for interactive exploration"]
 fn test_print_tree_recursive() {
     // let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex")).unwrap();
@@ -183,7 +173,7 @@ fn test_print_tree_recursive_tree() {
 ├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level13.env
 └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level12.env
     ├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level22.env
-    │   └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level31.env
+    │   └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level32.env
     └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level21.env\n";
 
     let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();

@@ -117,7 +117,7 @@ fn test_create_branches_tree() {
             "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env",
         ],
         vec![
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level31.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level32.env",
             "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level22.env",
             "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level12.env",
             "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env",
