@@ -94,6 +94,7 @@ impl TreeNode {
     }
 }
 
+/// using raw pointers and unsafe code (not used in the final implementation)
 pub fn transform_tree_unsafe(root: &TreeNodeRef) -> Tree<String> {
     #[derive(Debug)]
     struct StackItem {
@@ -137,6 +138,7 @@ pub fn transform_tree_unsafe(root: &TreeNodeRef) -> Tree<String> {
     new_root
 }
 
+/// natural most effective implementation
 pub fn transform_tree_recursive(node: &TreeNodeRef) -> Tree<String> {
     let mut new_node = Tree::new(format!("{}", node.borrow().node_data.file_path));
 
@@ -147,6 +149,7 @@ pub fn transform_tree_recursive(node: &TreeNodeRef) -> Tree<String> {
     new_node
 }
 
+/// stack based implementation (not used in the final implementation)
 pub fn transform_tree(root: &TreeNodeRef) -> Tree<String> {
     #[derive(Debug)]
     struct StackItem {

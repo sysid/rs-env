@@ -18,6 +18,7 @@ use rsenv::{build_env_vars, dlog, get_files, link, link_all, print_files};
 use rsenv::edit::{create_branches, create_vimscript, open_files_in_editor, select_file_with_suffix};
 use rsenv::envrc::update_dot_envrc;
 use rsenv::tree::{build_trees, TreeNode};
+use rsenv::tree_stack::transform_tree_recursive;
 
 // fn main() {
 //     println!("Hello, world!");
@@ -47,54 +48,60 @@ struct Cli {
 
 #[derive(Subcommand, Debug, PartialEq)]
 enum Commands {
-    /// Build the resulting set of environment variables
+    /// Build the resulting set of environment variables from one branch
     Build {
-        /// path to environment file (last child in hierarchy)
+        /// path to environment file (last child in hierarchy, leaf node)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
-    /// Write the resulting set of environment variables to .envrc (requires direnv)
+    /// Write the resulting set of variables to .envrc (requires direnv)
     Envrc {
-        /// path to environment file (last child in hierarchy)
+        /// path to environment file (last child in hierarchy, leaf node)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
         /// path to .envrc file
         #[arg(value_hint = ValueHint::FilePath)]
         envrc_path: Option<String>,
     },
-    /// Show all files involved in building the variable set
+    /// Show all files of a branch
     Files {
         /// path to environment file (last child in hierarchy)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
-    /// Edit the FZF selected file and its linked parents (dependency chain)
+    /// Edit the FZF selected branch
     Edit {
         /// path to environment files directory
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
-    /// FZF based selection of environment and update of .envrc file (requires direnv)
+    /// FZF based selection of environment/branch and update of .envrc file (requires direnv)
     Select {
-        /// path to environment file (last child in hierarchy)
+        /// path to environment file (leaf node))
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
-    /// Link files into a dependency tree
+    /// Link files into a dependency branch/tree
     Link {
         /// .env files to link (root -> parent -> child)
         #[arg(value_hint = ValueHint::FilePath, num_args = 1..)]
         nodes: Vec<String>,
     },
-    /// Show all dependency trees
-    Tree {
-        /// path to root directory for dependency trees
+    /// Show all branches (linear representation)
+    Branches {
+        /// path to root directory for environment files
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
-    /// Edit all dependency trees side-by-side (vim required)
+    /// Show all trees (hierarchical representation)
+    Tree {
+        /// path to root directory for environment files
+        #[arg(value_hint = ValueHint::DirPath)]
+        source_dir: String,
+    },
+    /// Edit branches of all trees side-by-side (vim required in path)
     TreeEdit {
-        /// path to root directory for dependency trees
+        /// path to root directory for environment files
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
@@ -144,6 +151,9 @@ fn main() {
         Some(Commands::Link {
                  nodes,
              }) => _link(nodes),
+        Some(Commands::Branches {
+                 source_dir,
+             }) => _branches(source_dir),
         Some(Commands::Tree {
                  source_dir,
              }) => _tree(source_dir),
@@ -202,7 +212,7 @@ fn _link(nodes: &[String]) {
     println!("Linked: {:?}", nodes.join(" <- "));
 }
 
-fn _tree(source_path: &str) {
+fn _branches(source_path: &str) {
     dlog!("source_path: {:?}", source_path);
     let trees = build_trees(Utf8Path::new(source_path)).unwrap();
     println!("Found {} trees:\n", trees.len());
@@ -212,6 +222,16 @@ fn _tree(source_path: &str) {
         println!("Tree Root: {}", tree.borrow().node_data.file_path);
         tree.borrow().print_leaf_paths(&mut path);
         println!();
+    }
+}
+
+
+fn _tree(source_path: &str) {
+    dlog!("source_path: {:?}", source_path);
+    let trees = build_trees(Utf8Path::new(source_path)).unwrap();
+    println!("Found {} trees:\n", trees.len());
+    for tree in &trees {
+        println!("{}", transform_tree_recursive(tree));
     }
 }
 

@@ -20,30 +20,35 @@
 cargo install rs-env
 ```
 
-### Basic Usage
-- Create a file `<name>.env` for each environment and define your variables via `export` statements.
-- link the files into a dependency tree either manually with adding the comment line `# rsenv: <name.env>`
-or via `rsenv link <name1.env>, <name2.env`.
-- source the resulting set of variables
+### Usage
+- **branch**: a linear list of files, each file can have one parent (no DAG). It defines the resulting set of variables.
+- environment variables are defined in files `<name>.env` and must be prefixed with `export` command
+  (see [examples](./rsenv/tests/resources/environments))
+- **tree**: a collection of branches (environment files can be part of multiple branches)
+- multiple trees per project are supported
+- files are linked into a **branch** either manually by adding the comment line `# rsenv: <name.env>`
+or via `rsenv link <root.env> <child1>.env <child2>.env`.
+
+That's it. Now you can source the resulting set of variables as usual:
 ```bash
-source <(rsenv build <name.env>)
+source <(rsenv build <leaf-node.env>)
 ```
 
-### Comprehensive Usage
 ```bash
 Hierarchical environment variable management
 
 Usage: rsenv [OPTIONS] [NAME] [COMMAND]
 
 Commands:
-  build      Build the resulting set of environment variables
-  envrc      Write the resulting set of environment variables to .envrc (requires direnv)
-  files      Show all files involved in building the variable set
-  edit       Edit the FZF selected file and its linked parents (dependency chain)
+  build      Build the resulting set of environment variables (evaluate branch)
+  envrc      Write the resulting set of variables to .envrc (requires direnv)
+  files      Show all files involved in branch, forming the resulting variable set
+  edit       Edit the FZF selected branch
   select     FZF based selection of environment and update of .envrc file (requires direnv)
-  link       Link files into a dependency tree
-  tree       Show all dependency trees
-  tree-edit  Edit all dependency trees side-by-side (vim required)
+  link       Link files into a dependency branch/tree
+  branches   Show all branches (linear representation)
+  tree       Show all trees (hierarchical representation)
+  tree-edit  Edit branches of all trees side-by-side (vim required in path)
   help       Print this message or the help of the given subcommand(s)
 
 Arguments:
@@ -57,6 +62,16 @@ Options:
   -V, --version               Print version
 ```
 
+#### Basic
+<a href="https://asciinema.org/a/605946?autoplay=1&speed=1.5" target="_blank"><img src="https://asciinema.org/a/605946.svg" /></a>
+<br>
+
+#### Select via FZF
+<a href="https://asciinema.org/a/605951?autoplay=1&speed=1.5" target="_blank"><img src="https://asciinema.org/a/605951.svg" /></a>
+<br>
+
+#### Tree and Branch structure (Smart edit)
+<a href="https://asciinema.org/a/605950?autoplay=1&speed=1.5" target="_blank"><img src="https://asciinema.org/a/605950.svg" /></a>
 <br>
 
 ## Integrations
