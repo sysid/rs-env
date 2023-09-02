@@ -22,7 +22,7 @@ fn init() {
 
 #[rstest]
 fn test_build_trees2() -> Result<()> {
-    let trees = build_trees(Utf8Path::new("./tests/resources/data"))?;
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex"))?;
     println!("trees: {:#?}", trees);
     for tree in &trees {
         println!("Depth of tree rooted at {}: {}", tree.borrow().node_data.file_path, tree.borrow().depth2());

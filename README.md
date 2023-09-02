@@ -21,8 +21,11 @@ cargo install rs-env
 ```
 
 ### Basic Usage
+- Create a file `<name>.env` for each environment and define your variables via `export` statements.
+- link the files into a dependency tree either manually with adding the comment line `# rsenv: <name.env>`
+or via `rsenv link <name1.env>, <name2.env`.
+- source the resulting set of variables
 ```bash
-# simple activation of environment
 source <(rsenv build <name.env>)
 ```
 

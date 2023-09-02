@@ -25,9 +25,9 @@ fn temp_dir() -> Utf8PathBuf {
     let options = dir::CopyOptions::new(); //Initialize default values for CopyOptions
     copy_items(
         &[
-            "tests/resources/data/level1.env",
-            "tests/resources/data/level2.env",
-            "tests/resources/data/a",
+            "tests/resources/environments/complex/level1.env",
+            "tests/resources/environments/complex/level2.env",
+            "tests/resources/environments/complex/a",
         ],
         &tempdir,
         &options,
@@ -39,7 +39,7 @@ fn temp_dir() -> Utf8PathBuf {
 
 #[rstest]
 fn test_extract_env() -> Result<()> {
-    let (variables, parent) = extract_env("./tests/resources/data/level4.env")?;
+    let (variables, parent) = extract_env("./tests/resources/environments/complex/level4.env")?;
     dlog!("variables: {:?}", variables);
     dlog!("parent: {:?}", parent);
     assert_eq!(variables.get("VAR_6"), Some(&"var_64".to_string()));
@@ -49,8 +49,8 @@ fn test_extract_env() -> Result<()> {
 
 #[rstest]
 fn test_build_env() -> Result<()> {
-    let (variables, files) = build_env("./tests/resources/data/level4.env")?;
-    let reference = extract_env("./tests/resources/data/result.env")?.0;
+    let (variables, files) = build_env("./tests/resources/environments/complex/level4.env")?;
+    let reference = extract_env("./tests/resources/environments/complex/result.env")?.0;
     // println!("reference: {:#?}", reference);
     // println!("variables: {:#?}", variables);
     let filtered_map: BTreeMap<_, _> = variables.iter()
@@ -66,14 +66,15 @@ fn test_build_env() -> Result<()> {
 
 #[rstest]
 fn test_build_env_vars() -> Result<()> {
-    let env_vars = build_env_vars("./tests/resources/data/level4.env")?;
+    // let env_vars = build_env_vars("./tests/resources/environments/complex/level4.env")?;
+    let env_vars = build_env_vars("./tests/resources/environments/parallel/test.env")?;
     println!("{}", env_vars);
     Ok(())
 }
 
 #[rstest]
 fn test_print_files() -> Result<()> {
-    print_files("./tests/resources/data/level4.env")?;
+    print_files("./tests/resources/environments/complex/level4.env")?;
     Ok(())
 }
 

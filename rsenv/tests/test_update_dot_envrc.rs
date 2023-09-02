@@ -28,7 +28,7 @@ fn temp_dir() -> Utf8PathBuf {
     let options = dir::CopyOptions::new(); //Initialize default values for CopyOptions
     copy_items(
         &[
-            "tests/resources/data/dot.envrc",
+            "tests/resources/environments/complex/dot.envrc",
         ],
         &tempdir,
         &options,
@@ -47,7 +47,7 @@ pub fn get_file_contents(path: &Utf8Path) -> Result<String> {
 #[rstest]
 fn test_update_dot_envrc(temp_dir: Utf8PathBuf) -> Result<()> {
     let path = temp_dir.join("./dot.envrc");
-    let data = build_env_vars("./tests/resources/data/level4.env")?;
+    let data = build_env_vars("./tests/resources/environments/complex/level4.env")?;
 
     update_dot_envrc(&path, data.as_str()).unwrap();
 
@@ -69,7 +69,7 @@ fn test_update_dot_envrc(temp_dir: Utf8PathBuf) -> Result<()> {
 #[rstest]
 fn test_delete_section(temp_dir: Utf8PathBuf) -> Result<()> {
     let path = temp_dir.join("./dot.envrc");
-    let data = build_env_vars("./tests/resources/data/level4.env")?;
+    let data = build_env_vars("./tests/resources/environments/complex/level4.env")?;
 
     // Given: section has been added
     update_dot_envrc(&path, data.as_str()).unwrap();

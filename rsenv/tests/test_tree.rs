@@ -25,7 +25,7 @@ fn init() {
 
 #[rstest]
 fn test_build_trees() -> Result<()> {
-    let trees = build_trees(Utf8Path::new("./tests/resources/data"))?;
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex"))?;
     println!("trees: {:#?}", trees);
     for tree in &trees {
         println!("Depth of tree rooted at {}: {}", tree.borrow().node_data.file_path, tree.borrow().depth());
@@ -64,7 +64,7 @@ fn test_print_leaf_paths() -> Result<()> {
 
 #[rstest]
 fn test_print() {
-    let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex")).unwrap();
     for t in &trees {
         println!("{}", t.to_tree_string());
     }
@@ -86,7 +86,7 @@ fn test_try_tree() {
 
 #[rstest]
 fn test_print_tree() {
-    let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex")).unwrap();
     for t in trees {
         println!("{}", Tree::new(t.borrow()));
     }
@@ -95,7 +95,7 @@ fn test_print_tree() {
 #[rstest]
 #[ignore = "Implementaion: BFS missing"]
 fn test_print_tree_stack() {
-    // let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    // let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex")).unwrap();
     let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();
     for t in &trees {
         println!("{}", t.borrow().print_tree());
@@ -105,7 +105,7 @@ fn test_print_tree_stack() {
 #[rstest]
 #[ignore = "Only for interactive exploration"]
 fn test_print_tree_recursive() {
-    // let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    // let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex")).unwrap();
     // let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();
     let trees = build_trees(Utf8Path::new("./tests/resources/environments/parallel")).unwrap();
     for t in &trees {
@@ -118,13 +118,13 @@ fn test_print_tree_recursive() {
 
 #[rstest]
 fn test_print_tree_recursive_data() {
-    let result = "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/data/dot.envrc
-└── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/data/level1.env
-    └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/data/level2.env
-        └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/data/a/level3.env
-            └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/data/level4.env\n";
+    let result = "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/dot.envrc
+└── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/level1.env
+    └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/level2.env
+        └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/a/level3.env
+            └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/level4.env\n";
 
-    let trees = build_trees(Utf8Path::new("./tests/resources/data")).unwrap();
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex")).unwrap();
     assert_eq!(trees.len(), 1);
     for t in &trees {
         println!("{}", transform_tree_recursive(t));
