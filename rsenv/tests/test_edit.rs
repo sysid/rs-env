@@ -10,8 +10,17 @@ use std::process::Command;
 use camino::{Utf8Path, Utf8PathBuf};
 use rstest::rstest;
 use stdext::function_name;
-use rsenv::edit::{create_vimscript, open_files_in_editor, select_file_with_suffix};
+use rsenv::edit::{create_branches, create_vimscript, open_files_in_editor, select_file_with_suffix};
 use rsenv::get_files;
+use rsenv::tree::build_trees;
+
+#[ctor::ctor]
+fn init() {
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::max())
+        .is_test(true)
+        .try_init();
+}
 
 #[rstest]
 #[ignore = "Interactive via Makefile"]
@@ -26,7 +35,7 @@ fn test_select_file_with_suffix() {
 #[rstest]
 #[ignore = "Interactive via Makefile"]
 fn test_open_files_in_editor() {
-    let files = get_files("./tests/resources/data/level4.env").unwrap();
+    let files = get_files("./tests/resources/environments/complex/level4.env").unwrap();
     open_files_in_editor(files).unwrap();
 }
 
@@ -89,5 +98,79 @@ wincmd =
 1wincmd w
 ";
 
+    assert_eq!(result, expected);
+}
+
+#[rstest]
+fn test_create_branches_tree() {
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();
+    let result = create_branches(&trees);
+    println!("{:#?}", result);
+
+    let expected = vec![
+        vec![
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level11.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env",
+        ],
+        vec![
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level13.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env",
+        ],
+        vec![
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level31.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level22.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level12.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env",
+        ],
+        vec![
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level21.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level12.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env",
+        ],
+    ];
+    assert_eq!(result, expected);
+}
+
+#[rstest]
+fn test_create_branches_parallel() {
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/parallel")).unwrap();
+    let result = create_branches(&trees);
+    println!("{:#?}", result);
+
+    let expected = vec![
+        vec![
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/int.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/b_int.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/a_int.env",
+        ],
+        vec![
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/prod.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/b_prod.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/a_prod.env",
+        ],
+        vec![
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/test.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/b_test.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/a_test.env",
+        ],
+    ];
+    assert_eq!(result, expected);
+}
+
+#[rstest]
+fn test_create_branches_complex() {
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex")).unwrap();
+    let result = create_branches(&trees);
+    println!("{:#?}", result);
+
+    let expected = vec![
+        vec![
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/level4.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/a/level3.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/level2.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/level1.env",
+            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/dot.envrc",
+        ],
+    ];
     assert_eq!(result, expected);
 }

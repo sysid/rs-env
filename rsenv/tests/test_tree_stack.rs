@@ -21,6 +21,7 @@ fn init() {
 }
 
 #[rstest]
+/// tests all stack variants
 fn test_build_trees2() -> Result<()> {
     let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex"))?;
     println!("trees: {:#?}", trees);

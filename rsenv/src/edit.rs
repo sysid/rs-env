@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 
-use std::collections::{BTreeMap};
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use anyhow::{Context, Result};
@@ -15,6 +15,9 @@ use std::path::Path;
 use std::process::Command;
 use crossterm::{execute, terminal::{Clear, ClearType}};
 use crossbeam::channel::bounded;
+use itertools::Itertools;
+use crate::dlog;
+use crate::tree::TreeNode;
 
 
 pub fn select_file_with_suffix(dir: &str, suffix: &str) -> Option<String> {
@@ -116,5 +119,30 @@ pub fn create_vimscript(files: Vec<Vec<&str>>) -> String {
     script.push_str("\n\" jump to left top corner\n1wincmd w\n");
 
     script
+}
+
+pub fn create_branches(trees: &Vec<Rc<RefCell<TreeNode>>>) -> Vec<Vec<String>> {
+    let mut vimscript_files: Vec<Vec<_>> = vec![];
+
+    dlog!("trees: {:#?}", trees);
+    for tree in trees {
+        let leaf_nodes = tree.borrow().leaf_nodes();
+        dlog!("Leaf nodes: {:#?}", leaf_nodes);
+
+        for leaf in &leaf_nodes {
+            println!("Leaf: {}", leaf);
+            let mut branch = Vec::new();
+
+            let files = crate::get_files(leaf).unwrap();
+            for file in &files {
+                println!("{}", file);
+                branch.push(file.to_string());
+            }
+            vimscript_files.push(branch.clone());
+        }
+        println!();
+    }
+    dlog!("vimscript_files: {:#?}", vimscript_files);
+    vimscript_files
 }
 

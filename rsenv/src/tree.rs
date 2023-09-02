@@ -195,7 +195,11 @@ pub fn build_trees(directory_path: &Utf8Path) -> Result<Vec<Rc<RefCell<TreeNode>
         trees.push(build_tree_stack(&root, &relationships, directory_path.as_path()));
     }
 
-    Ok(trees)
+    // make tree order stable
+    let mut sorted_trees = trees.clone();
+    sorted_trees.sort_by(|a, b| a.borrow().node_data.file_path.cmp(&b.borrow().node_data.file_path));
+
+    Ok(sorted_trees)
 }
 
 /*

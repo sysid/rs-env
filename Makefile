@@ -33,7 +33,7 @@ ADMIN::  ## ##################################################################
 init-env:  ## init-env
 	rm -fr ~/xxx/*
 	mkdir -p ~/xxx
-	cp -r $(tests_src)/resources/data/dot.envrc ~/xxx/.envrc
+	cp -r $(tests_src)/resources/environments/complex/dot.envrc ~/xxx/.envrc
 	cat ~/xxx/.envrc
 
 .PHONY: show-env
@@ -48,11 +48,11 @@ test:  ## test
 
 .PHONY: run-edit
 run-edit:  ## run-edit
-	pushd $(pkg_src) && cargo run -- edit ./tests/resources/data
+	pushd $(pkg_src) && cargo run -- edit ./tests/resources/environments/complex
 
 .PHONY: run-build
 run-build:  ## run-build
-	pushd $(pkg_src) && time cargo run -- -d -d build ./tests/resources/data/level4.env
+	pushd $(pkg_src) && time cargo run -- -d -d build ./tests/resources/environments/complex/level4.env
 
 .PHONY: run-select
 run-select:  ## run-select
@@ -61,12 +61,12 @@ run-select:  ## run-select
 
 .PHONY: run-files
 run-files:  ## run-files
-	pushd $(pkg_src) && time cargo run -- -d -d files ./tests/resources/data/level4.env
+	pushd $(pkg_src) && time cargo run -- -d -d files ./tests/resources/environments/complex/level4.env
 
 .PHONY: run-envrc
 run-envrc: init-env  ## run-envrc
-	pushd $(pkg_src) && time cargo run -- -d -d envrc ./tests/resources/data/level4.env ~/xxx/.envrc
-	#pushd $(pkg_src) && time cargo run -- envrc ./tests/resources/data/level4.env ~/xxx/.envrc
+	pushd $(pkg_src) && time cargo run -- -d -d envrc ./tests/resources/environments/complex/level4.env ~/xxx/.envrc
+	#pushd $(pkg_src) && time cargo run -- envrc ./tests/resources/environments/complex/level4.env ~/xxx/.envrc
 	cat ~/xxx/.envrc
 
 .PHONY: test-fzf-edit
@@ -79,7 +79,7 @@ test-edit:  ## test-edit
 
 .PHONY: test-vimscript
 test-vimscript:  ## test-vimscript
-	pushd $(pkg_src) && cargo test --package rsenv --test test_edit test_open_files_in_editor -- --exact --nocapture --ignored
+	pushd $(pkg_src) && cargo test --package rsenv --test test_edit test_create_vimscript -- --exact --nocapture --ignored
 
 ################################################################################
 # Building, Deploying \
