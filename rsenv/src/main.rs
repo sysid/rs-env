@@ -203,11 +203,13 @@ fn _link(nodes: &[String]) {
 fn _tree(source_path: &str) {
     dlog!("source_path: {:?}", source_path);
     let trees = build_trees(Utf8Path::new(source_path)).unwrap();
+    println!("Found {} trees:\n", trees.len());
     for tree in &trees {
         let p = &tree.borrow().node_data.file_path;
         let mut path = vec![p.to_string()];
-        println!("Leaf paths of tree rooted at {}:", tree.borrow().node_data.file_path);
+        println!("Tree Root: {}", tree.borrow().node_data.file_path);
         tree.borrow().print_leaf_paths(&mut path);
+        println!();
     }
 }
 
@@ -217,6 +219,8 @@ fn _tree_edit(source_path: &str) {
     dlog!("source_path: {:?}", source_path);
     let mut vimscript_files: Vec<Vec<_>> = vec![];
     let trees = build_trees(Utf8Path::new(source_path)).unwrap();
+
+    println!("Editing {} trees...", trees.len());
 
     for tree in &trees {
         let leaf_nodes = tree.borrow().leaf_nodes();
@@ -231,6 +235,7 @@ fn _tree_edit(source_path: &str) {
             }
             vimscript_files.push(branch.clone());
         }
+        println!();
     }
     dlog!("vimscript_files: {:#?}", vimscript_files);
     let vimscript = create_vimscript(vimscript_files.iter().map(|v| v.iter().map(|s| s.as_str()).collect()).collect());
@@ -243,7 +248,7 @@ fn _tree_edit(source_path: &str) {
         .status()
         .expect("failed to run vim");
 
-    println!("Vim exited with status: {:?}", status);
+    println!("Vim: {}", status.to_string());
 }
 
 
