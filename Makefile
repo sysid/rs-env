@@ -106,6 +106,15 @@ build:  ## build
 install: uninstall  ## install
 	@cp -vf $(pkg_src)/target/release/$(BINARY) ~/bin/$(BINARY)
 
+.PHONY: install-runenv
+install-runenv: uninstall-runenv  ## install-runenv
+	@cp -vf $(app_root)/scripts/rsenv.sh ~/dev/binx/rsenv.sh
+
+.PHONY: uninstall-runenv
+uninstall-runenv:  ## uninstall-runenv
+	@rm -f ~/dev/binx/rsenv.sh
+
+
 .PHONY: uninstall
 uninstall:  ## uninstall
 	-@test -f ~/bin/$(BINARY) && rm -v ~/bin/$(BINARY)
