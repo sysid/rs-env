@@ -24,6 +24,7 @@ pub mod edit;
 pub mod tree;
 pub mod tree_stack;
 pub mod tree_traits;
+pub mod dag;
 // mod tree_queue;
 
 pub fn get_files(file_path: &str) -> Result<Vec<Utf8PathBuf>> {
@@ -55,28 +56,8 @@ pub fn build_env_vars(file_path: &str) -> Result<String> {
 /// It recognizes `export` statements to capture key-value pairs and uses special `# rsenv:`
 /// comments to identify parent files for further extraction.
 ///
-/// The extraction prioritizes variables found in the initial file, i.e., if a variable is
-/// found with the same key in both the child and parent files, the value from the child
-/// will be retained.
-///
-/// # Arguments
-///
-/// * `file_path` - A string slice representing the path to the .env file.
-///                The function will attempt to canonicalize this path.
-///
-/// # Returns
-///
-/// A `Result` containing:
-///
-/// * A `BTreeMap` with the key as the variable name and the value as its corresponding value.
-/// * An error if there's any problem reading the file, or if the path is invalid.
-///
-/// # Errors
-///
-/// This function will return an error in the following situations:
-///
-/// * The provided `file_path` is invalid.
-/// * There's an issue reading or processing the env file or any of its parent env files.
+/// child wins against parent
+/// rightmost sibling wins
 pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8PathBuf>)> {
     let file_path = Utf8Path::new(file_path)
         .canonicalize_utf8()
@@ -84,23 +65,26 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
     dlog!("Current file_path: {:?}", file_path);
 
     let mut variables: BTreeMap<String, String> = BTreeMap::new();
-    let mut parent: Option<Utf8PathBuf>;
-
-    let mut current_file = file_path.to_string();
     let mut files_read: Vec<Utf8PathBuf> = Vec::new();
 
-    loop {
-        files_read.push(Utf8PathBuf::from(&current_file));
+    let mut to_read_files: Vec<Utf8PathBuf> = vec![Utf8PathBuf::from(file_path.to_string())];
 
-        let (vars, par) = extract_env(&current_file)?;
-        for (k, v) in vars {
-            variables.entry(k).or_insert(v);
+    while !to_read_files.is_empty() {
+        dlog!("to_read_files: {:?}", to_read_files);
+        let current_file = to_read_files.pop().unwrap();
+        if files_read.contains(&current_file) {
+            continue;
         }
-        parent = par;
-        if let Some(p) = parent {
-            current_file = p.to_string();
-        } else {
-            break;
+
+        files_read.push(current_file.clone());
+
+        let (vars, parents) = extract_env(&current_file.to_string())?;
+        for (k, v) in vars {
+            variables.entry(k).or_insert(v);  // first entry wins
+        }
+
+        for parent in parents {
+            to_read_files.push(parent);
         }
     }
 
@@ -141,7 +125,7 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
 /// * The provided `file_path` is invalid.
 /// * There's an issue reading or processing the env file.
 /// * The parent path specified in `# rsenv:` is invalid or not specified properly.
-pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Option<Utf8PathBuf>)> {
+pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8PathBuf>)> {
     let file_path = Utf8Path::new(file_path)
         .canonicalize_utf8()
         .context(format!("{}: Invalid path: {}", line!(), file_path))?;
@@ -158,20 +142,21 @@ pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Option<
     let reader = BufReader::new(file);
 
     let mut variables: BTreeMap<String, String> = BTreeMap::new();
-    let mut parent_path: Option<Utf8PathBuf> = None;
+    let mut parent_paths: Vec<Utf8PathBuf> = Vec::new();
+
 
     for line in reader.lines() {
         let line = line?;
         // Check for the rsenv comment
         if line.starts_with("# rsenv:") {
-            let parent = line.trim_start_matches("# rsenv:").trim().to_string();
-            if parent.is_empty() {
-                return Err(anyhow::anyhow!("Invalid rsenv line comment: {}", line));
+            let parents: Vec<&str> = line.trim_start_matches("# rsenv:").trim().split_whitespace().collect();
+            for parent in parents {
+                let parent_path = Utf8PathBuf::from(parent.to_string())
+                    .canonicalize_utf8()
+                    .context(format!("{}: Invalid path: {}", line!(), parent))?;
+                parent_paths.push(parent_path);
             }
-            parent_path = Some(Utf8PathBuf::from(parent.clone())
-                .canonicalize_utf8()
-                .context(format!("{}: Invalid path: {}", line!(), parent))?);
-            dlog!("parent_path: {:?}", parent_path);
+            dlog!("parent_paths: {:?}", parent_paths);
         }
 
         // Check for the export prefix
@@ -188,7 +173,7 @@ pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Option<
 
     // After executing your code, restore the original current directory
     env::set_current_dir(original_dir)?;
-    Ok((variables, parent_path))
+    Ok((variables, parent_paths))
 }
 
 /// links two env files together
@@ -304,14 +289,14 @@ fn space(input: &str) -> IResult<&str, &str> {
 /// trailing whitespace, returning the output of `inner`.
 #[allow(dead_code)]
 fn ws<'a, F, O, E: ParseError<&'a str>>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
-  where
-  F: Parser<&'a str, O, E>,
+    where
+        F: Parser<&'a str, O, E>,
 {
-  delimited(
-    multispace0,
-    inner,
-    multispace0
-  )
+    delimited(
+        multispace0,
+        inner,
+        multispace0,
+    )
 }
 
 // Parser to extract the path after `# rsenv:`

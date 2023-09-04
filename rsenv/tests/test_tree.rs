@@ -183,4 +183,3 @@ fn test_print_tree_recursive_tree() {
         assert_eq!(format!("{}", transform_tree_recursive(t)), result)
     }
 }
-

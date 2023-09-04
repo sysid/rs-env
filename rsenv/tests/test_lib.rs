@@ -65,6 +65,20 @@ fn test_build_env() -> Result<()> {
 }
 
 #[rstest]
+fn test_build_env_graph() -> Result<()> {
+    let (variables, files) = build_env("./tests/resources/environments/graph/level31.env")?;
+    // let filtered_map: BTreeMap<_, _> = variables.iter()
+    //     .filter(|(k, _)| k.starts_with("VAR_"))
+    //     .map(|(k, v)| (k.clone(), v.clone()))
+    //     .collect();
+    println!("variables: {:#?}", variables);
+    println!("files: {:#?}", files);
+
+    // assert_eq!(filtered_map, reference, "The two BTreeMaps are not equal!");
+    Ok(())
+}
+
+#[rstest]
 fn test_build_env_vars() -> Result<()> {
     // let env_vars = build_env_vars("./tests/resources/environments/complex/level4.env")?;
     let env_vars = build_env_vars("./tests/resources/environments/parallel/test.env")?;
