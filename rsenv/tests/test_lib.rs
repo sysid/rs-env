@@ -7,7 +7,7 @@ use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
 use fs_extra::{copy_items, dir};
 use rstest::{fixture, rstest};
-use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files, link, link_all, unlink};
+use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files, link, link_all, unlink, is_dag};
 use log::{debug, info};
 use stdext::function_name;
 
@@ -49,7 +49,7 @@ fn test_extract_env() -> Result<()> {
 
 #[rstest]
 fn test_build_env() -> Result<()> {
-    let (variables, files) = build_env("./tests/resources/environments/complex/level4.env")?;
+    let (variables, files, is_dag) = build_env("./tests/resources/environments/complex/level4.env")?;
     let reference = extract_env("./tests/resources/environments/complex/result.env")?.0;
     // println!("reference: {:#?}", reference);
     // println!("variables: {:#?}", variables);
@@ -61,20 +61,20 @@ fn test_build_env() -> Result<()> {
     println!("files: {:#?}", files);
 
     assert_eq!(filtered_map, reference, "The two BTreeMaps are not equal!");
+    assert!(!is_dag);
     Ok(())
 }
 
 #[rstest]
 fn test_build_env_graph() -> Result<()> {
-    let (variables, files) = build_env("./tests/resources/environments/graph/level31.env")?;
-    // let filtered_map: BTreeMap<_, _> = variables.iter()
-    //     .filter(|(k, _)| k.starts_with("VAR_"))
-    //     .map(|(k, v)| (k.clone(), v.clone()))
-    //     .collect();
+    let (variables, files, is_dag) = build_env("./tests/resources/environments/graph/level31.env")?;
+    let reference = extract_env("./tests/resources/environments/graph/result.env")?.0;
     println!("variables: {:#?}", variables);
     println!("files: {:#?}", files);
+    println!("reference: {:#?}", reference);
 
-    // assert_eq!(filtered_map, reference, "The two BTreeMaps are not equal!");
+    assert_eq!(variables, reference, "The two BTreeMaps are not equal!");
+    assert!(is_dag);
     Ok(())
 }
 
@@ -127,5 +127,18 @@ fn test_link_all(temp_dir: Utf8PathBuf) -> Result<()> {
 
     let child_content = fs::read_to_string(&parent)?;
     assert!(child_content.contains("# rsenv:\n"));
+    Ok(())
+}
+
+#[rstest]
+fn test_is_dat_false() -> Result<()> {
+    assert!(!is_dag("./tests/resources/environments/complex")?);
+    assert!(!is_dag("./tests/resources/environments/parallel")?);
+    Ok(())
+}
+
+#[rstest]
+fn test_is_dat_true() -> Result<()> {
+    assert!(is_dag("./tests/resources/environments/graph")?);
     Ok(())
 }

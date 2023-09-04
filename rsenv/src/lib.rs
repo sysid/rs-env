@@ -16,6 +16,8 @@ use pathdiff::diff_utf8_paths;
 use stdext::function_name;
 use std::rc::Rc;
 use std::cell::RefCell;
+use regex::Regex;
+use walkdir::WalkDir;
 use crate::tree::TreeNode;
 
 pub mod macros;
@@ -28,12 +30,12 @@ pub mod dag;
 // mod tree_queue;
 
 pub fn get_files(file_path: &str) -> Result<Vec<Utf8PathBuf>> {
-    let (_, files) = build_env(file_path)?;
+    let (_, files, _) = build_env(file_path)?;
     Ok(files)
 }
 
 pub fn print_files(file_path: &str) -> Result<()> {
-    let (_, files) = build_env(file_path)?;
+    let (_, files, _) = build_env(file_path)?;
     for f in files {
         println!("{}", f);
     }
@@ -43,12 +45,44 @@ pub fn print_files(file_path: &str) -> Result<()> {
 
 pub fn build_env_vars(file_path: &str) -> Result<String> {
     let mut env_vars = String::new();
-    let (variables, _) = build_env(file_path)?;
+    let (variables, _, _) = build_env(file_path)?;
     for (k, v) in variables {
         env_vars.push_str(&format!("export {}={}\n", k, v));
     }
     Ok(env_vars)
 }
+
+// pub fn is_dag(file_path: &str) -> bool {
+//     let (_, _, is_dag) = build_env(file_path).expect("Failed to build env");
+//     is_dag
+// }
+pub fn is_dag(dir_path: &str) -> Result<bool> {
+    let re = Regex::new(r"# rsenv: (.+)").unwrap();
+
+    // Walk through each file in the directory
+    for entry in WalkDir::new(dir_path) {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            let file = File::open(entry.path())?;
+            let reader = BufReader::new(file);
+            for line in reader.lines() {
+                let line = line?;
+                if let Some(caps) = re.captures(&line) {
+                    // Split on spaces to count the number of parents
+                    let parent_references: Vec<&str> = caps[1].split_whitespace().collect();
+                    if parent_references.len() > 1 {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+// Example usage:
+// let multiple_parents = is_dag("path_to_directory").unwrap();
+
 
 /// Recursively builds map of environment variables from the specified file and its parents.
 ///
@@ -58,7 +92,7 @@ pub fn build_env_vars(file_path: &str) -> Result<String> {
 ///
 /// child wins against parent
 /// rightmost sibling wins
-pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8PathBuf>)> {
+pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8PathBuf>, bool)> {
     let file_path = Utf8Path::new(file_path)
         .canonicalize_utf8()
         .context(format!("{}: Invalid path: {}", line!(), file_path))?;
@@ -66,6 +100,7 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
 
     let mut variables: BTreeMap<String, String> = BTreeMap::new();
     let mut files_read: Vec<Utf8PathBuf> = Vec::new();
+    let mut is_dag = false;
 
     let mut to_read_files: Vec<Utf8PathBuf> = vec![Utf8PathBuf::from(file_path.to_string())];
 
@@ -79,6 +114,10 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
         files_read.push(current_file.clone());
 
         let (vars, parents) = extract_env(&current_file.to_string())?;
+        is_dag = if is_dag || parents.len() > 1 { true } else { false };
+
+        dlog!("vars: {:?}, parents: {:?}, is_dag: {:?}", vars, parents, is_dag);
+
         for (k, v) in vars {
             variables.entry(k).or_insert(v);  // first entry wins
         }
@@ -88,7 +127,7 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
         }
     }
 
-    Ok((variables, files_read))
+    Ok((variables, files_read, is_dag))
 }
 
 /// Extracts environment variables and the parent path from a specified file.

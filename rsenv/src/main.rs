@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use anyhow::{Context, Result};
 use log::{debug, info};
-use std::{env, io};
+use std::{env, io, process};
 use std::cell::RefCell;
 use std::rc::Rc;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -14,11 +14,12 @@ use camino_tempfile::NamedUtf8TempFile;
 use clap::{Args, Command, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
 use stdext::function_name;
-use rsenv::{build_env_vars, dlog, get_files, link, link_all, print_files};
+use rsenv::{build_env_vars, dlog, get_files, is_dag, link, link_all, print_files};
 use rsenv::edit::{create_branches, create_vimscript, open_files_in_editor, select_file_with_suffix};
 use rsenv::envrc::update_dot_envrc;
 use rsenv::tree::{build_trees, TreeNode};
 use rsenv::tree_stack::transform_tree_recursive;
+use colored::Colorize;
 
 // fn main() {
 //     println!("Hello, world!");
@@ -48,13 +49,13 @@ struct Cli {
 
 #[derive(Subcommand, Debug, PartialEq)]
 enum Commands {
-    /// Build the resulting set of environment variables from one branch
+    /// Build the resulting set of environment variables (DAG/Tree)
     Build {
         /// path to environment file (last child in hierarchy, leaf node)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
-    /// Write the resulting set of variables to .envrc (requires direnv)
+    /// Write the resulting set of variables to .envrc (requires direnv, DAG/Tree)
     Envrc {
         /// path to environment file (last child in hierarchy, leaf node)
         #[arg(value_hint = ValueHint::FilePath)]
@@ -63,25 +64,25 @@ enum Commands {
         #[arg(value_hint = ValueHint::FilePath)]
         envrc_path: Option<String>,
     },
-    /// Show all files of a branch
+    /// Show all files involved in resulting set (DAG/Tree)
     Files {
         /// path to environment file (last child in hierarchy)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
-    /// Edit the FZF selected branch
+    /// Edit the FZF selected branch/DAG
     Edit {
         /// path to environment files directory
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
-    /// FZF based selection of environment/branch and update of .envrc file (requires direnv)
+    /// FZF based selection of environment/branch and update of .envrc file (requires direnv, DAG/Tree)
     Select {
         /// path to environment file (leaf node))
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
-    /// Link files into a dependency branch/tree
+    /// Link files into a linear dependency branch (root -> parent -> child).
     Link {
         /// .env files to link (root -> parent -> child)
         #[arg(value_hint = ValueHint::FilePath, num_args = 1..)]
@@ -214,6 +215,10 @@ fn _link(nodes: &[String]) {
 
 fn _branches(source_path: &str) {
     dlog!("source_path: {:?}", source_path);
+    if is_dag(source_path).expect("Failed to determine if DAG") {
+        eprintln!("{}", format!("Dependencies form a DAG, you cannot use tree based commands.", ).red());
+        process::exit(1);
+    }
     let trees = build_trees(Utf8Path::new(source_path)).unwrap();
     println!("Found {} trees:\n", trees.len());
     for tree in &trees {
@@ -228,6 +233,10 @@ fn _branches(source_path: &str) {
 
 fn _tree(source_path: &str) {
     dlog!("source_path: {:?}", source_path);
+    if is_dag(source_path).expect("Failed to determine if DAG") {
+        eprintln!("{}", format!("Dependencies form a DAG, you cannot use tree based commands.", ).red());
+        process::exit(1);
+    }
     let trees = build_trees(Utf8Path::new(source_path)).unwrap();
     println!("Found {} trees:\n", trees.len());
     for tree in &trees {
@@ -239,6 +248,10 @@ fn _tree(source_path: &str) {
 fn _tree_edit(source_path: &str) {
     // vim -O3 test.env int.env prod.env -c "wincmd h" -c "sp test.env" -c "wincmd l" -c "sp int.env" -c "wincmd l" -c "sp prod.env"
     dlog!("source_path: {:?}", source_path);
+    if is_dag(source_path).expect("Failed to determine if DAG") {
+        eprintln!("{}", format!("Dependencies form a DAG, you cannot use tree based commands.", ).red());
+        process::exit(1);
+    }
     let trees = build_trees(Utf8Path::new(source_path)).unwrap();
     println!("Editing {} trees...", trees.len());
 

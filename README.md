@@ -2,8 +2,8 @@
 
 # Features
 - Compile your environment variables from a hierarchical list of `<name>.env` files.
-- Dependencies form a tree, each file can have one parent (no DAG).
-- Last defined variable wins, i.e. child tops parent.
+- Dependencies form a tree/DAG, each file can have several parents.
+- Last defined variable wins, i.e. child tops parent, rightmost sibling tops left sibling.
 - Quick selection of environments via builtin FZF (fuzzy find).
 - Quick edit via builtin FZF.
 - Smart edit of dependency trees side-by-side
@@ -22,9 +22,10 @@ cargo install rs-env
 
 ### Usage
 - **branch**: a linear list of files, each file can have one parent (no DAG). It defines the resulting set of variables.
-- environment variables are defined in files `<name>.env` and must be prefixed with `export` command
-  (see [examples](./rsenv/tests/resources/environments))
+- **DAG**: Directed acyclic graph, i.e. files can have multiple parents
 - **tree**: a collection of branches (environment files can be part of multiple branches)
+- environment variables are defined in files `<name>.env` and must be prefixed with `export` command
+- See [examples](./rsenv/tests/resources/environments) for DAG, Tree and Branches
 - multiple trees per project are supported
 - files are linked into a **branch** either manually by adding the comment line `# rsenv: <name.env>`
 or via `rsenv link <root.env> <child1>.env <child2>.env`.
@@ -40,12 +41,12 @@ Hierarchical environment variable management
 Usage: rsenv [OPTIONS] [NAME] [COMMAND]
 
 Commands:
-  build      Build the resulting set of environment variables (evaluate branch)
-  envrc      Write the resulting set of variables to .envrc (requires direnv)
-  files      Show all files involved in branch, forming the resulting variable set
-  edit       Edit the FZF selected branch
-  select     FZF based selection of environment and update of .envrc file (requires direnv)
-  link       Link files into a dependency branch/tree
+  build      Build the resulting set of environment variables (DAG/Tree)
+  envrc      Write the resulting set of variables to .envrc (requires direnv, DAG/Tree)
+  files      Show all files involved in resulting set (DAG/Tree)
+  edit       Edit the FZF selected branch/DAG
+  select     FZF based selection of environment/branch and update of .envrc file (requires direnv, DAG/Tree)
+  link       Link files into a linear dependency branch (root -> parent -> child)
   branches   Show all branches (linear representation)
   tree       Show all trees (hierarchical representation)
   tree-edit  Edit branches of all trees side-by-side (vim required in path)

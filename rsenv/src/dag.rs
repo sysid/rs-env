@@ -32,6 +32,7 @@ pub struct TreeNodeGraph {
 pub type WeakTreeNodeRefGraph = Weak<RefCell<TreeNodeGraph>>;
 pub type TreeNodeRefGraph = Rc<RefCell<TreeNodeGraph>>;
 
+#[allow(unused_variables)]
 pub fn build_dag(directory_path: &Utf8Path) -> Result<Vec<Rc<RefCell<TreeNodeGraph>>>> {
     Err(anyhow!(format!("{}: Not implemented yet", function_name!())))
 }
