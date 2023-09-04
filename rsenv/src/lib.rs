@@ -45,6 +45,9 @@ pub fn print_files(file_path: &str) -> Result<()> {
 
 pub fn build_env_vars(file_path: &str) -> Result<String> {
     let mut env_vars = String::new();
+    if !Utf8Path::new(file_path).exists() {
+        return Err(anyhow::anyhow!("{}: File does not exist: {}", line!(), file_path));
+    }
     let (variables, _, _) = build_env(file_path)?;
     for (k, v) in variables {
         env_vars.push_str(&format!("export {}={}\n", k, v));
@@ -96,6 +99,9 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
     let file_path = Utf8Path::new(file_path)
         .canonicalize_utf8()
         .context(format!("{}: Invalid path: {}", line!(), file_path))?;
+    if !file_path.exists() {
+        return Err(anyhow::anyhow!("{}: File does not exist: {}", line!(), file_path));
+    }
     dlog!("Current file_path: {:?}", file_path);
 
     let mut variables: BTreeMap<String, String> = BTreeMap::new();
@@ -107,6 +113,9 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
     while !to_read_files.is_empty() {
         dlog!("to_read_files: {:?}", to_read_files);
         let current_file = to_read_files.pop().unwrap();
+        if !current_file.exists() {
+            return Err(anyhow::anyhow!("{}: File does not exist: {}", line!(), current_file));
+        }
         if files_read.contains(&current_file) {
             continue;
         }
@@ -309,6 +318,7 @@ pub fn link_all(nodes: &[String]) {
     dlog!("nodes: {:?}", nodes);
     let mut parent = None;
     for node in nodes {
+        // todo: error handling
         if parent.is_some() {
             link(parent.unwrap(), node).unwrap();
         } else {

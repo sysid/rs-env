@@ -170,21 +170,38 @@ fn main() {
 
 fn _build(source_path: &str) {
     dlog!("source_path: {:?}", source_path);
-    let vars = build_env_vars(source_path).unwrap();
+    let vars = build_env_vars(source_path).unwrap_or_else(|e| {
+        eprintln!(
+            "{}",
+            format!("Cannot build environment: {}", e).red()
+        );
+        process::exit(1);
+    });
     println!("{}", vars);
 }
 
 fn _envrc(source_path: &str, envrc_path: Option<&str>) {
     let envrc_path = envrc_path.unwrap_or(".envrc");
-    // dlog!("source_path: {:?}, envrc_path: {:?}", source_path, envrc_path);
-
-    let vars = build_env_vars(source_path).unwrap();
+    dlog!("source_path: {:?}, envrc_path: {:?}", source_path, envrc_path);
+    let vars = build_env_vars(source_path).unwrap_or_else(|e| {
+        eprintln!(
+            "{}",
+            format!("Cannot build environment: {}", e).red()
+        );
+        process::exit(1);
+    });
     update_dot_envrc(Utf8Path::new(envrc_path), vars.as_str()).unwrap();
 }
 
 fn _files(source_path: &str) {
     dlog!("source_path: {:?}", source_path);
-    print_files(source_path).unwrap();
+    print_files(source_path).unwrap_or_else(|e| {
+        eprintln!(
+            "{}",
+            format!("Cannot print environment: {}", e).red()
+        );
+        process::exit(1);
+    });
 }
 
 fn _edit(source_dir: &str) {
@@ -192,10 +209,28 @@ fn _edit(source_dir: &str) {
         eprintln!("Error: Directory does not exist: {:?}", source_dir);
         return;
     }
-    let selected_file = select_file_with_suffix(source_dir, ".env").unwrap();
+    let selected_file = select_file_with_suffix(source_dir, ".env").unwrap_or_else(|| {
+        eprintln!(
+            "{}",
+            format!("No .env files found").red()
+        );
+        process::exit(1);
+    });
     println!("Selected: {}", &selected_file);
-    let files = get_files(selected_file.as_str()).unwrap();
-    open_files_in_editor(files).unwrap();
+    let files = get_files(selected_file.as_str()).unwrap_or_else(|e| {
+        eprintln!(
+            "{}",
+            format!("Cannot get files: {}", e).red()
+        );
+        process::exit(1);
+    });
+    open_files_in_editor(files).unwrap_or_else(|e| {
+        eprintln!(
+            "{}",
+            format!("Cannot open files in editor: {}", e).red()
+        );
+        process::exit(1);
+    });
 }
 
 fn _select(source_dir: &str) {
@@ -203,7 +238,13 @@ fn _select(source_dir: &str) {
         eprintln!("Error: Directory does not exist: {:?}", source_dir);
         return;
     }
-    let selected_file = select_file_with_suffix(source_dir, ".env").unwrap();
+    let selected_file = select_file_with_suffix(source_dir, ".env").unwrap_or_else(|| {
+        eprintln!(
+            "{}",
+            format!("No .env files found.").red()
+        );
+        process::exit(1);
+    });
     println!("Selected: {}", &selected_file);
     _envrc(selected_file.as_str(), None);
 }
@@ -219,7 +260,13 @@ fn _branches(source_path: &str) {
         eprintln!("{}", format!("Dependencies form a DAG, you cannot use tree based commands.", ).red());
         process::exit(1);
     }
-    let trees = build_trees(Utf8Path::new(source_path)).unwrap();
+    let trees = build_trees(Utf8Path::new(source_path)).unwrap_or_else(|e| {
+        eprintln!(
+            "{}",
+            format!("Cannot build trees: {}", e).red()
+        );
+        process::exit(1);
+    });
     println!("Found {} trees:\n", trees.len());
     for tree in &trees {
         let p = &tree.borrow().node_data.file_path;
@@ -237,7 +284,13 @@ fn _tree(source_path: &str) {
         eprintln!("{}", format!("Dependencies form a DAG, you cannot use tree based commands.", ).red());
         process::exit(1);
     }
-    let trees = build_trees(Utf8Path::new(source_path)).unwrap();
+    let trees = build_trees(Utf8Path::new(source_path)).unwrap_or_else(|e| {
+        eprintln!(
+            "{}",
+            format!("Cannot build trees: {}", e).red()
+        );
+        process::exit(1);
+    });
     println!("Found {} trees:\n", trees.len());
     for tree in &trees {
         println!("{}", transform_tree_recursive(tree));
@@ -252,7 +305,13 @@ fn _tree_edit(source_path: &str) {
         eprintln!("{}", format!("Dependencies form a DAG, you cannot use tree based commands.", ).red());
         process::exit(1);
     }
-    let trees = build_trees(Utf8Path::new(source_path)).unwrap();
+    let trees = build_trees(Utf8Path::new(source_path)).unwrap_or_else(|e| {
+        eprintln!(
+            "{}",
+            format!("Cannot build trees: {}", e).red()
+        );
+        process::exit(1);
+    });
     println!("Editing {} trees...", trees.len());
 
     let vimscript_files: Vec<Vec<_>> = create_branches(&trees);

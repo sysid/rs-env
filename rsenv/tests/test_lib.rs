@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
 use std::collections::BTreeMap;
-use std::fs;
+use std::{env, fs};
 use anyhow::Result;
 use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
@@ -79,10 +79,50 @@ fn test_build_env_graph() -> Result<()> {
 }
 
 #[rstest]
+fn test_build_env_graph2() -> Result<()> {
+    let (variables, files, is_dag) = build_env("./tests/resources/environments/graph2/level21.env")?;
+    let reference = extract_env("./tests/resources/environments/graph2/result1.env")?.0;
+    println!("variables: {:#?}", variables);
+    println!("files: {:#?}", files);
+    println!("reference: {:#?}", reference);
+
+    assert_eq!(variables, reference, "The two BTreeMaps are not equal!");
+    assert!(is_dag);
+
+    let (variables, _, is_dag) = build_env("./tests/resources/environments/graph2/level22.env")?;
+    let reference = extract_env("./tests/resources/environments/graph2/result2.env")?.0;
+    assert_eq!(variables, reference, "The two BTreeMaps are not equal!");
+    assert!(is_dag);
+    Ok(())
+}
+
+#[rstest]
 fn test_build_env_vars() -> Result<()> {
     // let env_vars = build_env_vars("./tests/resources/environments/complex/level4.env")?;
     let env_vars = build_env_vars("./tests/resources/environments/parallel/test.env")?;
     println!("{}", env_vars);
+    Ok(())
+}
+
+#[rstest]
+fn test_build_env_vars_fail_wrong_parent() -> Result<()> {
+    let original_dir = env::current_dir()?;
+    let result = build_env_vars("./tests/resources/environments/graph2/error.env");
+    match result {
+        Ok(_) => panic!("Expected an error, but got OK"),
+        Err(e) => assert_eq!(e.to_string(), "204: Invalid path: not-existing.env"),
+    }
+    env::set_current_dir(original_dir)?;  // error occurs after change directory in extract_env
+    Ok(())
+}
+
+#[rstest]
+fn test_build_env_vars_fail() -> Result<()> {
+    let result = build_env_vars("xxx");
+    match result {
+        Ok(_) => panic!("Expected an error, but got OK"),
+        Err(e) => assert_eq!(e.to_string(), "49: File does not exist: xxx"),
+    }
     Ok(())
 }
 
@@ -102,6 +142,7 @@ fn test_link(temp_dir: Utf8PathBuf) -> Result<()> {
     assert!(child_content.contains("# rsenv: a/level3.env"));
     Ok(())
 }
+
 #[rstest]
 fn test_unlink(temp_dir: Utf8PathBuf) -> Result<()> {
     let child = temp_dir.join("./a/level3.env");
@@ -111,6 +152,7 @@ fn test_unlink(temp_dir: Utf8PathBuf) -> Result<()> {
     assert!(child_content.contains("# rsenv:\n"));
     Ok(())
 }
+
 #[rstest]
 fn test_link_all(temp_dir: Utf8PathBuf) -> Result<()> {
     let parent = temp_dir.join("./a/level3.env");
@@ -131,14 +173,14 @@ fn test_link_all(temp_dir: Utf8PathBuf) -> Result<()> {
 }
 
 #[rstest]
-fn test_is_dat_false() -> Result<()> {
+fn test_is_dag_false() -> Result<()> {
     assert!(!is_dag("./tests/resources/environments/complex")?);
     assert!(!is_dag("./tests/resources/environments/parallel")?);
     Ok(())
 }
 
 #[rstest]
-fn test_is_dat_true() -> Result<()> {
+fn test_is_dag_true() -> Result<()> {
     assert!(is_dag("./tests/resources/environments/graph")?);
     Ok(())
 }
