@@ -3,13 +3,13 @@
 > [Blog: Hierarchical environment variable management](https://sysid.github.io/hierarchical-environment-variable-management/)
 
 # Features
-- Compile a resulting set of environment variables from a hierarchical list of `<name>.env` files.
+- Compile resulting set of from a hierarchical list of `<name>.env` files.
 - Dependencies can form a tree or DAG (directed acyclic graph).
 - Last defined variable wins, i.e. child tops parent, rightmost sibling tops left sibling (in case of DAG).
 - Smart environment selection via builtin FZF (fuzzy find).
 - Quick edit via builtin FZF.
-- Side-by-side edit of trees for easy comparison.
-- [direnv](https://direnv.net/) integration: Have the resulting variable list documented in your `.envrc` file.
+- Side-by-side Tree edit.
+- [direnv](https://direnv.net/) integration: Have the resulting variable list written to your `.envrc` file.
 - [JetBrains](https://www.jetbrains.com/) integration via [EnvFile](https://plugins.jetbrains.com/plugin/7861-envfile) plugin.
 
 ### Concept
