@@ -1,13 +1,14 @@
 # rs-env
 
+> [Blog: Hierarchical environment variable management](https://sysid.github.io/hierarchical-environment-variable-management/)
+
 # Features
-- Compile your environment variables from a hierarchical list of `<name>.env` files.
-- Dependencies form a tree/DAG, each file can have several parents.
-- Last defined variable wins, i.e. child tops parent, rightmost sibling tops left sibling.
-- Quick selection of environments via builtin FZF (fuzzy find).
+- Compile a resulting set of environment variables from a hierarchical list of `<name>.env` files.
+- Dependencies can form a tree or DAG (directed acyclic graph).
+- Last defined variable wins, i.e. child tops parent, rightmost sibling tops left sibling (in case of DAG).
+- Smart environment selection via builtin FZF (fuzzy find).
 - Quick edit via builtin FZF.
-- Smart edit of dependency trees side-by-side
-- Chain your dependencies with one command
+- Side-by-side edit of trees for easy comparison.
 - [direnv](https://direnv.net/) integration: Have the resulting variable list documented in your `.envrc` file.
 - [JetBrains](https://www.jetbrains.com/) integration via [EnvFile](https://plugins.jetbrains.com/plugin/7861-envfile) plugin.
 
@@ -21,16 +22,17 @@ cargo install rs-env
 ```
 
 ### Usage
-- **branch**: a linear list of files, each file can have one parent (no DAG). It defines the resulting set of variables.
+The resulting set of environment variables is an amalgamation of all files involved in the dependency tree, parent variables are overwritten by child variables.
+
 - **DAG**: Directed acyclic graph, i.e. files can have multiple parents
-- **tree**: a collection of branches (environment files can be part of multiple branches)
+- **branch**: a linear list of files, each file can have one parent (no DAG).
+- **tree**: a collection of branches (files can be part of multiple branches, but only one parent)
 - environment variables are defined in files `<name>.env` and must be prefixed with `export` command
 - See [examples](./rsenv/tests/resources/environments) for DAG, Tree and Branches
-- multiple trees per project are supported
-- files are linked into a **branch** either manually by adding the comment line `# rsenv: <name.env>`
-or via `rsenv link <root.env> <child1>.env <child2>.env`.
+- multiple trees/branches per project are supported
+- files are linked either manually by adding the comment line `# rsenv: <name.env>` or via the command: `rsenv link <root.env> <child1>.env <child2>.env`.
 
-That's it. Now you can source the resulting set of variables as usual:
+Source the resulting set of variables as usual:
 ```bash
 source <(rsenv build <leaf-node.env>)
 ```
