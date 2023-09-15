@@ -70,6 +70,12 @@ enum Commands {
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
+    /// Edit the given environment file and all its parents (DAG/Tree)
+    EditLeaf {
+        /// path to environment file (Leaf)
+        #[arg(value_hint = ValueHint::FilePath)]
+        source_path: String,
+    },
     /// Edit the FZF selected branch/DAG
     Edit {
         /// path to environment files directory
@@ -149,6 +155,9 @@ fn main() {
         Some(Commands::Files {
                  source_path,
              }) => _files(source_path),
+        Some(Commands::EditLeaf {
+                 source_path,
+             }) => _edit_leaf(source_path),
         Some(Commands::Edit {
                  source_dir,
              }) => _edit(source_dir),
@@ -208,6 +217,27 @@ fn _files(source_path: &str) {
         eprintln!(
             "{}",
             format!("Cannot print environment: {}", e).red()
+        );
+        process::exit(1);
+    });
+}
+
+fn _edit_leaf(source_path: &str) {
+    if !Utf8Path::new(source_path).exists() {
+        eprintln!("Error: File does not exist: {:?}", source_path);
+        return;
+    }
+    let files = get_files(source_path).unwrap_or_else(|e| {
+        eprintln!(
+            "{}",
+            format!("Cannot get files: {}", e).red()
+        );
+        process::exit(1);
+    });
+    open_files_in_editor(files).unwrap_or_else(|e| {
+        eprintln!(
+            "{}",
+            format!("Cannot open files in editor: {}", e).red()
         );
         process::exit(1);
     });
