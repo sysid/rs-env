@@ -46,6 +46,10 @@ test:  ## test
 	RUST_LOG=DEBUG pushd $(pkg_src) && cargo test -- --test-threads=1  # --nocapture
 	#RUST_LOG=DEBUG pushd $(pkg_src) && cargo test
 
+.PHONY: run-leaves
+run-leaves:  ## run-leaves
+	pushd $(pkg_src) && cargo run -- leaves tests/resources/environments/tree2/confguard
+
 .PHONY: run-edit
 run-edit:  ## run-edit
 	pushd $(pkg_src) && cargo run -- edit ./tests/resources/environments/complex

@@ -91,6 +91,39 @@ fn test_print_leaf_paths() -> Result<()> {
 }
 
 #[rstest]
+fn test_print_leaf_paths_when_not_in_root() -> Result<()> {
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree2/confguard"))?;
+    assert_eq!(trees.len(), 1);
+    for tree in &trees {
+        println!("{}", tree.to_tree_string());
+        let p = &tree.borrow().node_data.file_path;
+        let mut path = vec![p.to_string()];
+        println!("Leaf paths of tree rooted at {}:", tree.borrow().node_data.file_path);
+        tree.borrow().print_leaf_paths(&mut path);
+    }
+    Ok(())
+}
+#[rstest]
+fn test_leaf_nodes() -> Result<()> {
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree2/confguard"))?;
+    // println!("trees: {:#?}", trees);
+    for tree in &trees {
+        println!("Depth of tree rooted at {}: {}", tree.borrow().node_data.file_path, tree.borrow().depth());
+        assert_eq!(tree.borrow().depth(), 4);
+    }
+    for tree in &trees {
+        let leaf_nodes = tree.borrow().leaf_nodes();
+        println!("Tree Root: {}:", tree.borrow().node_data.file_path);
+        for leaf in &leaf_nodes {
+            println!("{}", leaf);
+        }
+        assert_eq!(leaf_nodes.len(), 4);
+        assert!(leaf_nodes[0].ends_with("level11.env"));
+    }
+    Ok(())
+}
+
+#[rstest]
 fn test_print() {
     let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex")).unwrap();
     for t in &trees {

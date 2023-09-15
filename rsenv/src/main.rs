@@ -106,6 +106,12 @@ enum Commands {
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
+    /// Output leaves as paths (Tree)
+    Leaves {
+        /// path to root directory for environment files
+        #[arg(value_hint = ValueHint::DirPath)]
+        source_dir: String,
+    },
 }
 
 fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
@@ -161,6 +167,9 @@ fn main() {
         Some(Commands::TreeEdit {
                  source_dir,
              }) => _tree_edit(source_dir),
+        Some(Commands::Leaves {
+                 source_dir,
+             }) => _leaves(source_dir),
         None => {
             // println!("{cli:#?}", cli = cli);
             // println!("{cli:#?}");  // prints current CLI attributes
@@ -328,6 +337,28 @@ fn _tree_edit(source_path: &str) {
         .expect("failed to run vim");
 
     println!("Vim: {}", status.to_string());
+}
+
+fn _leaves(source_path: &str) {
+    dlog!("source_path: {:?}", source_path);
+    if is_dag(source_path).expect("Failed to determine if DAG") {
+        eprintln!("{}", format!("Dependencies form a DAG, you cannot use tree based commands.", ).red());
+        process::exit(1);
+    }
+    let trees = build_trees(Utf8Path::new(source_path)).unwrap_or_else(|e| {
+        eprintln!(
+            "{}",
+            format!("Cannot build trees: {}", e).red()
+        );
+        process::exit(1);
+    });
+    dlog!("Found {} trees:\n", trees.len());
+    for tree in &trees {
+        let leaf_nodes = tree.borrow().leaf_nodes();
+        for leaf in &leaf_nodes {
+            println!("{}", leaf);
+        }
+    }
 }
 
 

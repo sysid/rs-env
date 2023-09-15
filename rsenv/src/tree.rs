@@ -22,7 +22,7 @@ use crate::dlog;
 #[derive(Debug, Clone)]
 pub struct NodeData {
     pub base_path: String,
-    pub file_path: String
+    pub file_path: String,
 }
 
 impl fmt::Display for NodeData {
@@ -109,14 +109,21 @@ impl TreeNode {
     ///
     pub fn print_leaf_paths(&self, path: &mut Vec<String>) {
         if self.children.is_empty() {
+            let root_path = Utf8Path::new(&path[0]).parent().unwrap();
             let path_strs: Vec<&str> = path.iter()
-                .map(|s| s.as_str().strip_prefix(&self.node_data.base_path).unwrap().strip_prefix("/").unwrap_or(s.as_str()))
+                .map(
+                    |s| {
+                        dlog!("s: {}, root {}", s, root_path);
+                        s.as_str().strip_prefix(root_path.as_str()).unwrap().strip_prefix("/").unwrap_or(s.as_str())
+                    }
+                )
                 .collect();
             println!("{}", path_strs.join(" <- "));
         } else {
             for child_rc in &self.children {
                 let child = child_rc.borrow();
                 path.push(child.node_data.file_path.clone());
+                dlog!("path: {:?}", path);
                 child.print_leaf_paths(path);
                 path.pop();  // backtracking
             }
