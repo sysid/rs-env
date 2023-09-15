@@ -37,22 +37,25 @@ Source the resulting set of variables as usual:
 source <(rsenv build <leaf-node.env>)
 ```
 
-```bash
+```
 Hierarchical environment variable management
 
 Usage: rsenv [OPTIONS] [NAME] [COMMAND]
 
 Commands:
-  build      Build the resulting set of environment variables (DAG/Tree)
-  envrc      Write the resulting set of variables to .envrc (requires direnv, DAG/Tree)
-  files      Show all files involved in resulting set (DAG/Tree)
-  edit       Edit the FZF selected branch/DAG
-  select     FZF based selection of environment/branch and update of .envrc file (requires direnv, DAG/Tree)
-  link       Link files into a linear dependency branch (root -> parent -> child)
-  branches   Show all branches (linear representation)
-  tree       Show all trees (hierarchical representation)
-  tree-edit  Edit branches of all trees side-by-side (vim required in path)
-  help       Print this message or the help of the given subcommand(s)
+  build        Build the resulting set of environment variables (DAG/Tree)
+  envrc        Write the resulting set of variables to .envrc (requires direnv, DAG/Tree)
+  files        Show all files involved in resulting set (DAG/Tree)
+  edit-leaf    Edit the given environment file and all its parents (DAG/Tree)
+  edit         Edit the FZF selected branch/DAG
+  select-leaf  select environment/branch and update .envrc file (requires direnv, DAG/Tree)
+  select       FZF based selection of environment/branch and update of .envrc file (requires direnv, DAG/Tree)
+  link         Link files into a linear dependency branch (root -> parent -> child)
+  branches     Show all branches (linear representation)
+  tree         Show all trees (hierarchical representation)
+  tree-edit    Edit branches of all trees side-by-side (vim required in path)
+  leaves       Output leaves as paths (Tree)
+  help         Print this message or the help of the given subcommand(s)
 
 Arguments:
   [NAME]  Optional name to operate on
