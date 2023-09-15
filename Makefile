@@ -62,6 +62,11 @@ run-edit:  ## run-edit
 run-build:  ## run-build
 	pushd $(pkg_src) && time cargo run -- -d -d build ./tests/resources/environments/complex/level4.env
 
+.PHONY: run-select-leaf
+run-select-leaf:  ## run-select-leaf
+	rsenv/target/debug/rsenv select-leaf $(SOPS_PATH)/environments/local.env
+	cat .envrc
+
 .PHONY: run-select
 run-select:  ## run-select
 	rsenv/target/debug/rsenv select $(SOPS_PATH)

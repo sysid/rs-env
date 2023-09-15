@@ -82,9 +82,15 @@ enum Commands {
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
+    /// select environment/branch and update .envrc file (requires direnv, DAG/Tree)
+    SelectLeaf {
+        /// path to environment file (leaf node))
+        #[arg(value_hint = ValueHint::DirPath)]
+        source_path: String,
+    },
     /// FZF based selection of environment/branch and update of .envrc file (requires direnv, DAG/Tree)
     Select {
-        /// path to environment file (leaf node))
+        /// path to environment directory
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
@@ -161,6 +167,9 @@ fn main() {
         Some(Commands::Edit {
                  source_dir,
              }) => _edit(source_dir),
+        Some(Commands::SelectLeaf {
+                 source_path,
+             }) => _select_leaf(source_path),
         Some(Commands::Select {
                  source_dir,
              }) => _select(source_dir),
@@ -270,6 +279,14 @@ fn _edit(source_dir: &str) {
         );
         process::exit(1);
     });
+}
+
+fn _select_leaf(source_path: &str) {
+    if !Utf8Path::new(source_path).exists() {
+        eprintln!("Error: File does not exist: {:?}", source_path);
+        return;
+    }
+    _envrc(source_path, None);
 }
 
 fn _select(source_dir: &str) {
