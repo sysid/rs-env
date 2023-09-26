@@ -179,7 +179,9 @@ pub fn build_trees(directory_path: &Utf8Path) -> Result<Vec<Rc<RefCell<TreeNode>
                     let original_dir = env::current_dir()?;
                     // Change the current directory
                     env::set_current_dir(abs_path.parent().unwrap())?;
-                    let parent_path = Path::new(caps.get(1).unwrap().as_str()).canonicalize().unwrap();
+                    let parent_path = Path::new(caps.get(1).unwrap().as_str()).canonicalize().context(
+                        format!("Error with rsenv entry '{}' file {:?}", caps.get(1).unwrap().as_str(), abs_path)
+                    )?;
                     relationships
                         .entry(parent_path.to_string_lossy().into_owned())
                         .or_insert_with(Vec::new)

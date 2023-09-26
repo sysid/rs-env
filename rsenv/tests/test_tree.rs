@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
 use std::collections::{BTreeMap, HashMap};
-use std::fs;
+use std::{env, fs};
 use anyhow::Result;
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::tempdir;
@@ -21,6 +21,16 @@ fn init() {
         .filter_level(log::LevelFilter::max())
         .is_test(true)
         .try_init();
+}
+
+#[rstest]
+fn test_build_trees_fail_invalid_parent_path() -> Result<()> {
+    let original_dir = env::current_dir()?;
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/fail"));
+    assert_eq!(trees.is_err(), true);
+    assert!(trees.err().unwrap().to_string().starts_with("Error with rsenv entry 'not-existing.env'"));
+    env::set_current_dir(original_dir)?;
+    Ok(())
 }
 
 #[rstest]
