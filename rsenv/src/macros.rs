@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 use log::*;
 use stdext::function_name;
 

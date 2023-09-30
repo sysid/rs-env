@@ -7,12 +7,12 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::tempdir;
 use fs_extra::{copy_items, dir};
 use rstest::{fixture, rstest};
-use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files, link, link_all, unlink};
+use rsenv::{build_env, build_env_vars, dlog, extract_env, link, link_all, print_files, unlink};
 use log::{debug, info};
 use stdext::function_name;
 use termtree::Tree;
-use rsenv::tree::{build_trees};
-use rsenv::tree_stack::{transform_tree, transform_tree_recursive, transform_tree_unsafe};
+use rsenv::tree::{build_trees, transform_tree_recursive};
+use rsenv::tree_stack::{transform_tree, transform_tree_unsafe};
 use rsenv::tree_traits::TreeNodeConvert;
 
 #[ctor::ctor]

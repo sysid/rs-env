@@ -18,7 +18,7 @@ use rsenv::{build_env_vars, dlog, get_files, is_dag, link, link_all, print_files
 use rsenv::edit::{create_branches, create_vimscript, open_files_in_editor, select_file_with_suffix};
 use rsenv::envrc::update_dot_envrc;
 use rsenv::tree::{build_trees, TreeNode};
-use rsenv::tree_stack::transform_tree_recursive;
+use rsenv::tree::transform_tree_recursive;
 use colored::Colorize;
 
 // fn main() {

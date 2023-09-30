@@ -1,24 +1,17 @@
-#![allow(unused_imports)]
+// #![allow(unused_imports)]
 
+use std::{env, fs};
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
+
 use anyhow::{Context, Result};
-use log::{debug, info};
-use std::{env, fs};
 use camino::{Utf8Path, Utf8PathBuf};
-use nom::bytes::complete::{tag, take_while};
-use nom::error::{dbg_dmp, Error, ParseError};
-use nom::{AsBytes, IResult, Parser};
-use nom::character::complete::multispace0;
-use nom::sequence::delimited;
+use log::debug;
 use pathdiff::diff_utf8_paths;
-use stdext::function_name;
-use std::rc::Rc;
-use std::cell::RefCell;
 use regex::Regex;
+use stdext::function_name;
 use walkdir::WalkDir;
-use crate::tree::TreeNode;
 
 pub mod macros;
 pub mod envrc;
@@ -27,6 +20,7 @@ pub mod tree;
 pub mod tree_stack;
 pub mod tree_traits;
 pub mod dag;
+mod parser;
 // mod tree_queue;
 
 pub fn get_files(file_path: &str) -> Result<Vec<Utf8PathBuf>> {
@@ -55,10 +49,6 @@ pub fn build_env_vars(file_path: &str) -> Result<String> {
     Ok(env_vars)
 }
 
-// pub fn is_dag(file_path: &str) -> bool {
-//     let (_, _, is_dag) = build_env(file_path).expect("Failed to build env");
-//     is_dag
-// }
 pub fn is_dag(dir_path: &str) -> Result<bool> {
     let re = Regex::new(r"# rsenv: (.+)").unwrap();
 
@@ -82,10 +72,6 @@ pub fn is_dag(dir_path: &str) -> Result<bool> {
     }
     Ok(false)
 }
-
-// Example usage:
-// let multiple_parents = is_dag("path_to_directory").unwrap();
-
 
 /// Recursively builds map of environment variables from the specified file and its parents.
 ///
@@ -328,44 +314,9 @@ pub fn link_all(nodes: &[String]) {
     }
 }
 
-// Parser to skip whitespace
-#[allow(dead_code)]
-fn space(input: &str) -> IResult<&str, &str> {
-    take_while(|c: char| c.is_whitespace())(input)
-}
-
-/// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
-/// trailing whitespace, returning the output of `inner`.
-#[allow(dead_code)]
-fn ws<'a, F, O, E: ParseError<&'a str>>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
-    where
-        F: Parser<&'a str, O, E>,
-{
-    delimited(
-        multispace0,
-        inner,
-        multispace0,
-    )
-}
-
-// Parser to extract the path after `# rsenv:`
-#[allow(dead_code)]
-fn extract_path(input: &str) -> IResult<&str, &str> {
-    dlog!("input: {:?}", input);
-    // dbg_dmp(tag::<&str, &[u8], Error<_>>("# rsenv:"),"xxx")(input.as_bytes());
-
-    let (input, _) = multispace0(input)?; // Match optional whitespace or newlines
-    let (input, _) = tag("# rsenv:")(input)?;
-    dlog!("input: {:?}", input);
-    // let (input, _) = space(input)?;
-    // dlog!("input: {:?}", input);
-    ws(take_while(|c: char| !c.is_whitespace()))(input)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rstest::{fixture, rstest};
 
     #[ctor::ctor]
     fn init() {
@@ -373,22 +324,6 @@ mod tests {
             .filter_level(log::LevelFilter::max())
             .is_test(true)
             .try_init();
-    }
-
-    #[test]
-    fn test_extract_path() {
-        let content = r#"
-# rsenv: level1.env
-
-# Level2 overwrite
-export VAR_4=var_42
-export VAR_5=var_52
-"#;
-
-        match extract_path(content) {
-            Ok((_, path)) => println!("Extracted path: {}", path),
-            Err(e) => println!("Error: {:?}", e),
-        }
     }
 
     #[test]

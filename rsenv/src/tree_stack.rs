@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 
-use std::collections::{BTreeMap};
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use anyhow::{Context, Result};
@@ -22,15 +22,17 @@ use std::rc::Rc;
 use termtree::Tree;
 
 /*
+Stack based tree implementation algorithms, educational purposes only
 Stacks with Rc<RefCell<TreeNode>>:
 
 Instead of just having the TreeNode on the stack, we now have an Rc<RefCell<TreeNode>>.
-This requires us to clone the Rc when pushing onto the stack. The RefCell inside lets us borrow its contents immutably or mutably (we use immutable borrows here).
+This requires to clone the Rc when pushing onto the stack.
+The RefCell inside lets us borrow its contents immutably or mutably (we use immutable borrows here).
+
 Accessing Nodes from the Rc<RefCell<TreeNode>>:
-
 Before we can work with a TreeNode we need to borrow it from the RefCell using the borrow() method.
-Pushing Children to Stacks:
 
+Pushing Children to Stacks:
 When pushing a child node to a stack, we first clone the Rc and then push it.
  */
 
@@ -95,6 +97,7 @@ impl TreeNode {
 }
 
 /// using raw pointers and unsafe code (not used in the final implementation)
+/// educational purposes only
 pub fn transform_tree_unsafe(root: &TreeNodeRef) -> Tree<String> {
     #[derive(Debug)]
     struct StackItem {
@@ -138,18 +141,8 @@ pub fn transform_tree_unsafe(root: &TreeNodeRef) -> Tree<String> {
     new_root
 }
 
-/// natural most effective implementation
-pub fn transform_tree_recursive(node: &TreeNodeRef) -> Tree<String> {
-    let mut new_node = Tree::new(format!("{}", node.borrow().node_data.file_path));
-
-    for child in &node.borrow().children {
-        new_node.leaves.push(transform_tree_recursive(child));
-    }
-
-    new_node
-}
-
 /// stack based implementation (not used in the final implementation)
+/// educational purposes only
 pub fn transform_tree(root: &TreeNodeRef) -> Tree<String> {
     #[derive(Debug)]
     struct StackItem {

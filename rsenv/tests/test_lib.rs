@@ -9,6 +9,7 @@ use fs_extra::{copy_items, dir};
 use rstest::{fixture, rstest};
 use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files, link, link_all, unlink, is_dag};
 use log::{debug, info};
+use regex::Regex;
 use stdext::function_name;
 
 #[ctor::ctor]
@@ -110,7 +111,10 @@ fn test_build_env_vars_fail_wrong_parent() -> Result<()> {
     let result = build_env_vars("./tests/resources/environments/graph2/error.env");
     match result {
         Ok(_) => panic!("Expected an error, but got OK"),
-        Err(e) => assert_eq!(e.to_string(), "204: Invalid path: not-existing.env"),
+        Err(e) => {
+            let re = Regex::new(r"\d+: Invalid path: not-existing.env")?;
+            assert!(re.is_match(&e.to_string()));
+        }
     }
     env::set_current_dir(original_dir)?;  // error occurs after change directory in extract_env
     Ok(())
@@ -121,7 +125,10 @@ fn test_build_env_vars_fail() -> Result<()> {
     let result = build_env_vars("xxx");
     match result {
         Ok(_) => panic!("Expected an error, but got OK"),
-        Err(e) => assert_eq!(e.to_string(), "49: File does not exist: xxx"),
+        Err(e) => {
+            let re = Regex::new(r"\d+: File does not exist: xxx")?;
+            assert!(re.is_match(&e.to_string()));
+        }
     }
     Ok(())
 }

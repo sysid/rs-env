@@ -1,22 +1,21 @@
-#![allow(unused_imports)]
+// #![allow(unused_imports)]
 
-use std::collections::{BTreeMap, VecDeque};
-use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
-use anyhow::{Context, Result};
-use log::{debug, info};
-use std::{env, fmt, fs};
+use std::{env, fmt};
 use std::cell::RefCell;
-use camino::{Utf8Path, Utf8PathBuf};
-use pathdiff::diff_utf8_paths;
-use stdext::function_name;
-
-use walkdir::WalkDir;
-use regex::Regex;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::rc::{Rc, Weak};
+
+use anyhow::{Context, Result};
+use camino::{Utf8Path};
+use log::debug;
+use regex::Regex;
+use stdext::function_name;
 use termtree::Tree;
+use walkdir::WalkDir;
+
 use crate::dlog;
 
 #[derive(Debug, Clone)]
@@ -31,8 +30,18 @@ impl fmt::Display for NodeData {
     }
 }
 
-/// Parent relationship is one of non-ownership.
-/// This is not a `Rc<TreeNode<T>>` which would cause memory leak.
+/*
+RefCell allows to borrow the contents
+Rc allows for shared ownership.
+
+Accessing the Children:
+first need to borrow the value inside the RefCell.
+using the borrow() method gives an immutable reference to the value inside the RefCell.
+child_rc is a reference-counted pointer to the RefCell that wraps the TreeNode.
+
+Parent relationship is one of non-ownership:
+This is not a `Rc<TreeNode<T>>` which would cause memory leak.
+ */
 pub type WeakTreeNodeRef<> = Weak<RefCell<TreeNode>>;
 
 pub type TreeNodeRef<> = Rc<RefCell<TreeNode>>;
@@ -62,20 +71,6 @@ impl fmt::Display for TreeNode {
     }
 }
 
-/*
-The RefCell allows us to borrow the contents, and the Rc allows for shared ownership.
-
-Accessing the Children:
-Instead of directly accessing child, we first need to borrow the value inside the RefCell.
-We do this using the borrow() method, which gives us an immutable reference to the value inside the RefCell.
-For example, in the depth function, we replace child.depth() with child_rc.borrow().depth().
-In the above line, child_rc is a reference-counted pointer to the RefCell that wraps the TreeNode.
-We call borrow() to get a reference to the TreeNode and then call depth() on that.
-
-Iterating over the Children:
-In the loop where we iterate over the children, we’ve renamed the loop variable to child_rc to emphasize that it is a reference-counted pointer to a RefCell, not a direct reference to a TreeNode.
-Inside the loop, we borrow the TreeNode from the RefCell in order to call methods on it or access its fields.
- */
 impl TreeNode {
     pub fn depth(&self) -> usize {
         1 + self.children.iter()
@@ -234,8 +229,6 @@ Returning the Root Node:
 The function now returns an Rc<RefCell<TreeNode>> instead of a TreeNode.
 This is consistent with the fact that all nodes in the tree are now wrapped in Rc<RefCell<...>>.
  */
-/// non-recursive (iterative) version of the build_tree function using a stack data structure.
-/// This approach mimics the call stack that is used in the recursive approach, but with an explicit stack data structure:
 pub fn build_tree_stack(file_name: &str, relationships: &HashMap<String, Vec<String>>, directory_path: &Utf8Path) -> Rc<RefCell<TreeNode>> {
     let mut stack = Vec::new();
     let root = Rc::new(RefCell::new(TreeNode {
@@ -260,14 +253,25 @@ pub fn build_tree_stack(file_name: &str, relationships: &HashMap<String, Vec<Str
             }
         }
     }
-
     root
+}
+
+/// natural most effective implementation
+pub fn transform_tree_recursive(node: &TreeNodeRef) -> Tree<String> {
+    let mut new_node = Tree::new(format!("{}", node.borrow().node_data.file_path));
+
+    for child in &node.borrow().children {
+        new_node.leaves.push(transform_tree_recursive(child));
+    }
+
+    new_node
 }
 
 
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
+
     use super::*;
 
     #[ctor::ctor]
@@ -297,7 +301,7 @@ mod tests {
         relationships.insert("child1".to_string(), vec!["grandchild1".to_string()]);
 
         // Build the tree starting from "root"
-        let tree = build_tree_stack("root", &relationships, &Utf8PathBuf::from(""));
+        let tree = build_tree_stack("root", &relationships, &Utf8Path::new(""));
         println!("{:#?}", tree);
 
         // Check the root node
