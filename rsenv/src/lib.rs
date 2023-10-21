@@ -2,7 +2,7 @@
 
 use std::{env, fs};
 use std::collections::BTreeMap;
-use std::fs::File;
+use std::fs::{File, symlink_metadata};
 use std::io::{BufRead, BufReader};
 
 use anyhow::{Context, Result};
@@ -82,6 +82,7 @@ pub fn is_dag(dir_path: &str) -> Result<bool> {
 /// child wins against parent
 /// rightmost sibling wins
 pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8PathBuf>, bool)> {
+    warn_if_symlink(file_path)?;
     let file_path = Utf8Path::new(file_path)
         .canonicalize_utf8()
         .context(format!("{}: Invalid path: {}", line!(), file_path))?;
@@ -160,6 +161,9 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
 /// * There's an issue reading or processing the env file.
 /// * The parent path specified in `# rsenv:` is invalid or not specified properly.
 pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8PathBuf>)> {
+    // Check if the file is a symbolic link before canonicalizing
+    warn_if_symlink(file_path)?;
+
     let file_path = Utf8Path::new(file_path)
         .canonicalize_utf8()
         .context(format!("{}: Invalid path: {}", line!(), file_path))?;
@@ -208,6 +212,14 @@ pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf
     // After executing your code, restore the original current directory
     env::set_current_dir(original_dir)?;
     Ok((variables, parent_paths))
+}
+
+fn warn_if_symlink(file_path: &str) -> Result<()> {
+    let metadata = symlink_metadata(file_path)?;
+    if metadata.file_type().is_symlink() {
+        eprintln!("Warning: The file {} is a symbolic link.", file_path);
+    }
+    Ok(())
 }
 
 /// links two env files together

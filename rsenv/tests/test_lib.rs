@@ -2,10 +2,13 @@
 
 use std::collections::BTreeMap;
 use std::{env, fs};
+use std::os::unix::fs::symlink;
+use std::process::Command;
 use anyhow::Result;
 use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
 use fs_extra::{copy_items, dir};
+use lazy_static::lazy_static;
 use rstest::{fixture, rstest};
 use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files, link, link_all, unlink, is_dag};
 use log::{debug, info};
@@ -189,5 +192,57 @@ fn test_is_dag_false() -> Result<()> {
 #[rstest]
 fn test_is_dag_true() -> Result<()> {
     assert!(is_dag("./tests/resources/environments/graph")?);
+    Ok(())
+}
+
+#[rstest]
+#[ignore = "Only for interactive exploration"]
+fn test_extract_env_symlink() -> Result<()> {
+    let original_dir = env::current_dir()?;
+    env::set_current_dir("./tests/resources/environments/complex")?;
+
+    // 1. Create a symbolic link
+    symlink("level4.env", "symlink.env")?;
+
+    // 3. Run extract_env function
+    let _ = extract_env("./symlink.env");
+
+    // 6. Cleanup: Remove the symlink
+    let _ = fs::remove_file("./symlink.env");
+
+    // Reset to the original directory
+    env::set_current_dir(original_dir)?;
+
+    Ok(())
+}
+
+#[rstest]
+fn test_extract_env_symlink2() -> Result<()> {
+    // Step 1: Create a symbolic link
+    let original_dir = env::current_dir()?;
+    env::set_current_dir("./tests/resources/environments/complex")?;
+    _ = fs::remove_file("./symlink.env");
+    symlink("level4.env", "symlink.env")?;
+    env::set_current_dir(original_dir)?;
+
+    // Step 2: Run the Rust binary as a subprocess
+    let output = Command::new("cargo")
+        .args(&[
+            "run",
+            "--",
+            "build",
+            "./tests/resources/environments/complex/symlink.env",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    // Step 3: Check stderr for the symlink warning
+    let stderr_output = String::from_utf8(output.stderr)?;
+    println!("stderr_output: {}", stderr_output);
+    assert!(stderr_output.contains("Warning: The file"));
+
+    // Step 4: Cleanup by removing the symbolic link
+    fs::remove_file("./tests/resources/environments/complex/symlink.env")?;
+
     Ok(())
 }
