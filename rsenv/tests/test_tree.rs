@@ -88,6 +88,19 @@ fn test_build_trees_tree() -> Result<()> {
 }
 
 #[rstest]
+fn test_print_leaf_paths_when_root_path_only_matches_partially() -> Result<()> {
+    let trees = build_trees(Utf8Path::new("./tests/resources/environments/max_prefix/confguard/xxx"))?;
+    assert_eq!(trees.len(), 1);
+    for tree in &trees {
+        let p = &tree.borrow().node_data.file_path;
+        let mut path = vec![p.to_string()];
+        println!("Leaf paths of tree rooted at {}:", tree.borrow().node_data.file_path);
+        tree.borrow().print_leaf_paths(&mut path);
+    }
+    Ok(())
+}
+
+#[rstest]
 fn test_print_leaf_paths() -> Result<()> {
     let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree"))?;
     assert_eq!(trees.len(), 1);

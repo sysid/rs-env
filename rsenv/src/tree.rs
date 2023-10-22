@@ -108,8 +108,14 @@ impl TreeNode {
             let path_strs: Vec<&str> = path.iter()
                 .map(
                     |s| {
-                        dlog!("s: {}, root {}", s, root_path);
-                        s.as_str().strip_prefix(root_path.as_str()).unwrap().strip_prefix("/").unwrap_or(s.as_str())
+                        dlog!("s: {}, root: {}", s, root_path);
+                        // s.as_str().strip_prefix(root_path.as_str()).unwrap().strip_prefix("/").unwrap_or(s.as_str())
+
+                        // Task 1: Identify largest common prefix
+                        let common_prefix = common_prefix(s, root_path.as_str());
+                        // Task 2: Strip largest common prefix from s
+                        let new_s = s.strip_prefix(&common_prefix).unwrap_or(s.as_str());
+                        new_s.strip_prefix("/").unwrap_or(new_s)
                     }
                 )
                 .collect();
@@ -124,6 +130,15 @@ impl TreeNode {
             }
         }
     }
+}
+
+// Utility function to find largest common prefix
+fn common_prefix(s1: &str, s2: &str) -> String {
+    s1.chars()
+        .zip(s2.chars())
+        .take_while(|(c1, c2)| c1 == c2)
+        .map(|(c1, _)| c1)
+        .collect::<String>()
 }
 
 
