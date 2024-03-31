@@ -1,9 +1,16 @@
 # rs-env
 
-> [Blog: Hierarchical environment variable management](https://sysid.github.io/hierarchical-environment-variable-management/)
+> [Hierarchical environment variable management](https://sysid.github.io/hierarchical-environment-variable-management/)
+
+## Why
+Managing environment variables for different projects, stages, regsions, etc. is an anavoidable chore
+when working on many cloud projects.
+
+Especially the challenge of Avoiding duplication and knowing where a particular value is coming from.
+Hierarchical variable management is my approach to tame the beast.
 
 # Features
-- Compile resulting set of from a hierarchical list of `<name>.env` files.
+- Compile a resulting set of environment variables from a linked list of `<name>.env` files.
 - Dependencies can form a tree or DAG (directed acyclic graph).
 - Last defined variable wins, i.e. child tops parent, rightmost sibling tops left sibling (in case of DAG).
 - Smart environment selection via builtin FZF (fuzzy find).
@@ -22,7 +29,7 @@ cargo install rs-env
 ```
 
 ### Usage
-The resulting set of environment variables is an amalgamation of all files involved in the dependency tree, parent variables are overwritten by child variables.
+The resulting set of environment variables is an amalgamation of all linked files.
 
 - **DAG**: Directed acyclic graph, i.e. files can have multiple parents
 - **branch**: a linear list of files, each file can have one parent (no DAG).
@@ -30,9 +37,9 @@ The resulting set of environment variables is an amalgamation of all files invol
 - environment variables are defined in files `<name>.env` and must be prefixed with `export` command
 - See [examples](./rsenv/tests/resources/environments) for DAG, Tree and Branches
 - multiple trees/branches per project are supported
-- files are linked either manually by adding the comment line `# rsenv: <name.env>` or via the command: `rsenv link <root.env> <child1>.env <child2>.env`.
+- files can be linked manually by adding the comment line `# rsenv: <name.env>` or via: `rsenv link <root.env> <child1>.env <child2>.env`.
 
-Source the resulting set of variables as usual:
+Then source the resulting set of variables as usual:
 ```bash
 source <(rsenv build <leaf-node.env>)
 ```
