@@ -10,8 +10,7 @@ VERSION       = $(shell cat VERSION)
 SHELL	= bash
 .ONESHELL:
 
-app_root = .
-app_root ?= .
+app_root := $(if $(PROJ_DIR),$(PROJ_DIR),$(CURDIR))
 pkg_src =  $(app_root)/rsenv
 tests_src = $(app_root)/rsenv/tests
 BINARY = rsenv
