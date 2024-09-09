@@ -3,11 +3,11 @@
 > [Hierarchical environment variable management](https://sysid.github.io/hierarchical-environment-variable-management/)
 
 ## Why
-Managing environment variables for different projects, stages, regsions, etc. is an anavoidable chore
+Managing environment variables for different projects, stages, regsions, etc. is an unavoidable chore
 when working on many cloud projects.
 
-Especially the challenge of Avoiding duplication and knowing where a particular value is coming from.
-Hierarchical variable management is my approach to tame the beast.
+Especially the challenge of avoiding duplication and knowing where a particular value is coming from.
+Hierarchical variable management seems to be a good solution for this problem.
 
 # Features
 - Compile a resulting set of environment variables from a linked list of `<name>.env` files.
