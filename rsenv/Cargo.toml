@@ -1,6 +1,6 @@
 [package]
 name = "rsenv"
-version = "0.14.6"
+version = "1.0.0"
 edition = "2021"
 description = "Hierarchical environment variable management"
 keywords = ["development", "environment"]
