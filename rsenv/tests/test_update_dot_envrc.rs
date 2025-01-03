@@ -8,19 +8,9 @@ use anyhow::{Context, Result};
 use camino_tempfile::{NamedUtf8TempFile, tempdir};
 use fs_extra::{copy_items, dir, remove_items};
 use itertools::Itertools;
-use log::{debug, warn};
-use stdext::function_name;
 use rstest::{fixture, rstest};
 use rsenv::build_env_vars;
 use rsenv::envrc::{delete_section, END_SECTION_DELIMITER, START_SECTION_DELIMITER, update_dot_envrc};
-
-#[ctor::ctor]
-fn init() {
-    let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::max())
-        .is_test(true)
-        .try_init();
-}
 
 #[fixture]
 fn temp_dir() -> Utf8PathBuf {

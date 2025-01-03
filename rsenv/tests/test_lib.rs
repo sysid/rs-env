@@ -10,17 +10,14 @@ use camino_tempfile::tempdir;
 use fs_extra::{copy_items, dir};
 use lazy_static::lazy_static;
 use rstest::{fixture, rstest};
-use rsenv::{build_env, dlog, extract_env, build_env_vars, print_files, link, link_all, unlink, is_dag};
-use log::{debug, info};
+use rsenv::{build_env, extract_env, build_env_vars, print_files, link, link_all, unlink, is_dag};
 use regex::Regex;
-use stdext::function_name;
+use tracing::debug;
+use rsenv::util::testing;
 
 #[ctor::ctor]
 fn init() {
-    let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::max())
-        .is_test(true)
-        .try_init();
+    testing::init_test_setup();
 }
 
 #[fixture]
@@ -44,8 +41,8 @@ fn temp_dir() -> Utf8PathBuf {
 #[rstest]
 fn test_extract_env() -> Result<()> {
     let (variables, parent) = extract_env("./tests/resources/environments/complex/level4.env")?;
-    dlog!("variables: {:?}", variables);
-    dlog!("parent: {:?}", parent);
+    debug!("variables: {:?}", variables);
+    debug!("parent: {:?}", parent);
     assert_eq!(variables.get("VAR_6"), Some(&"var_64".to_string()));
     // assert_eq!(parent, Some("a/level3.env".to_string()));
     Ok(())
@@ -227,7 +224,7 @@ fn test_extract_env_symlink2() -> Result<()> {
 
     // Step 2: Run the Rust binary as a subprocess
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--",
             "build",

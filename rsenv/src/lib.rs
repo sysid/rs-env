@@ -7,13 +7,11 @@ use std::io::{BufRead, BufReader};
 
 use anyhow::{Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use log::debug;
 use pathdiff::diff_utf8_paths;
 use regex::Regex;
-use stdext::function_name;
+use tracing::{debug, instrument};
 use walkdir::WalkDir;
 
-pub mod macros;
 pub mod envrc;
 pub mod edit;
 pub mod tree;
@@ -21,13 +19,17 @@ pub mod tree_stack;
 pub mod tree_traits;
 pub mod dag;
 mod parser;
+pub mod cli;
+pub mod util;
 // mod tree_queue;
 
+#[instrument(level = "trace")]
 pub fn get_files(file_path: &str) -> Result<Vec<Utf8PathBuf>> {
     let (_, files, _) = build_env(file_path)?;
     Ok(files)
 }
 
+#[instrument(level = "trace")]
 pub fn print_files(file_path: &str) -> Result<()> {
     let (_, files, _) = build_env(file_path)?;
     for f in files {
@@ -37,6 +39,7 @@ pub fn print_files(file_path: &str) -> Result<()> {
 }
 
 
+#[instrument(level = "trace")]
 pub fn build_env_vars(file_path: &str) -> Result<String> {
     let mut env_vars = String::new();
     if !Utf8Path::new(file_path).exists() {
@@ -49,8 +52,9 @@ pub fn build_env_vars(file_path: &str) -> Result<String> {
     Ok(env_vars)
 }
 
+#[instrument(level = "trace")]
 pub fn is_dag(dir_path: &str) -> Result<bool> {
-    let re = Regex::new(r"# rsenv: (.+)").unwrap();
+    let re = Regex::new(r"# rsenv: (.+)")?;
 
     // Walk through each file in the directory
     for entry in WalkDir::new(dir_path) {
@@ -81,6 +85,7 @@ pub fn is_dag(dir_path: &str) -> Result<bool> {
 ///
 /// child wins against parent
 /// rightmost sibling wins
+#[instrument(level = "debug")]
 pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8PathBuf>, bool)> {
     warn_if_symlink(file_path)?;
     let file_path = Utf8Path::new(file_path)
@@ -89,7 +94,7 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
     if !file_path.exists() {
         return Err(anyhow::anyhow!("{}: File does not exist: {}", line!(), file_path));
     }
-    dlog!("Current file_path: {:?}", file_path);
+    debug!("Current file_path: {:?}", file_path);
 
     let mut variables: BTreeMap<String, String> = BTreeMap::new();
     let mut files_read: Vec<Utf8PathBuf> = Vec::new();
@@ -98,7 +103,7 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
     let mut to_read_files: Vec<Utf8PathBuf> = vec![Utf8PathBuf::from(file_path.to_string())];
 
     while !to_read_files.is_empty() {
-        dlog!("to_read_files: {:?}", to_read_files);
+        debug!("to_read_files: {:?}", to_read_files);
         let current_file = to_read_files.pop().unwrap();
         if !current_file.exists() {
             return Err(anyhow::anyhow!("{}: File does not exist: {}", line!(), current_file));
@@ -109,10 +114,10 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
 
         files_read.push(current_file.clone());
 
-        let (vars, parents) = extract_env(&current_file.to_string())?;
-        is_dag = if is_dag || parents.len() > 1 { true } else { false };
+        let (vars, parents) = extract_env(current_file.as_ref())?;
+        is_dag = is_dag || parents.len() > 1;
 
-        dlog!("vars: {:?}, parents: {:?}, is_dag: {:?}", vars, parents, is_dag);
+        debug!("vars: {:?}, parents: {:?}, is_dag: {:?}", vars, parents, is_dag);
 
         for (k, v) in vars {
             variables.entry(k).or_insert(v);  // first entry wins
@@ -160,6 +165,7 @@ pub fn build_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8P
 /// * The provided `file_path` is invalid.
 /// * There's an issue reading or processing the env file.
 /// * The parent path specified in `# rsenv:` is invalid or not specified properly.
+#[instrument(level = "debug")]
 pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf8PathBuf>)> {
     // Check if the file is a symbolic link before canonicalizing
     warn_if_symlink(file_path)?;
@@ -167,13 +173,13 @@ pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf
     let file_path = Utf8Path::new(file_path)
         .canonicalize_utf8()
         .context(format!("{}: Invalid path: {}", line!(), file_path))?;
-    dlog!("Current file_path: {:?}", file_path);
+    debug!("Current file_path: {:?}", file_path);
 
     // Save the original current directory, to restore it later
     let original_dir = env::current_dir()?;
     // Change the current directory in order to construct correct parent path
     env::set_current_dir(file_path.parent().unwrap())?;
-    dlog!("Current directory: {:?}", env::current_dir()?);
+    debug!("Current directory: {:?}", env::current_dir()?);
 
 
     let file = File::open(file_path)?;
@@ -187,14 +193,14 @@ pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf
         let line = line?;
         // Check for the rsenv comment
         if line.starts_with("# rsenv:") {
-            let parents: Vec<&str> = line.trim_start_matches("# rsenv:").trim().split_whitespace().collect();
+            let parents: Vec<&str> = line.trim_start_matches("# rsenv:").split_whitespace().collect();
             for parent in parents {
                 let parent_path = Utf8PathBuf::from(parent.to_string())
                     .canonicalize_utf8()
                     .context(format!("{}: Invalid path: {}", line!(), parent))?;
                 parent_paths.push(parent_path);
             }
-            dlog!("parent_paths: {:?}", parent_paths);
+            debug!("parent_paths: {:?}", parent_paths);
         }
 
         // Check for the export prefix
@@ -214,6 +220,7 @@ pub fn extract_env(file_path: &str) -> Result<(BTreeMap<String, String>, Vec<Utf
     Ok((variables, parent_paths))
 }
 
+#[instrument(level = "trace")]
 fn warn_if_symlink(file_path: &str) -> Result<()> {
     let metadata = symlink_metadata(file_path)?;
     if metadata.file_type().is_symlink() {
@@ -223,6 +230,7 @@ fn warn_if_symlink(file_path: &str) -> Result<()> {
 }
 
 /// links two env files together
+#[instrument(level = "debug")]
 pub fn link(parent: &str, child: &str) -> Result<()> {
     let parent = Utf8Path::new(parent)
         .canonicalize_utf8()
@@ -230,7 +238,7 @@ pub fn link(parent: &str, child: &str) -> Result<()> {
     let child = Utf8Path::new(child)
         .canonicalize_utf8()
         .context(format!("{}: Invalid path: {}", line!(), child))?;
-    dlog!("parent: {:?} <- child: {:?}", parent, child);
+    debug!("parent: {:?} <- child: {:?}", parent, child);
 
     let mut child_contents = fs::read_to_string(&child)?;
     let mut lines: Vec<_> = child_contents.lines().map(|s| s.to_string()).collect();
@@ -272,11 +280,12 @@ pub fn link(parent: &str, child: &str) -> Result<()> {
 }
 
 
+#[instrument(level = "debug")]
 pub fn unlink(child: &str) -> Result<()> {
     let child = Utf8Path::new(child)
         .canonicalize_utf8()
         .context(format!("{}: Invalid path: {}", line!(), child))?;
-    dlog!("child: {:?}", child);
+    debug!("child: {:?}", child);
 
     let mut child_contents = fs::read_to_string(&child)?;
     let mut lines: Vec<_> = child_contents.lines().map(|s| s.to_string()).collect();
@@ -296,7 +305,7 @@ pub fn unlink(child: &str) -> Result<()> {
         1 => {
             // One "# rsenv:" line found, so we replace it
             if let Some(index) = rsenv_index {
-                lines[index] = format!("# rsenv:");
+                lines[index] = "# rsenv:".to_string();
             }
         }
         _ => {
@@ -312,13 +321,14 @@ pub fn unlink(child: &str) -> Result<()> {
 
 
 /// links a list of env files together and build the hierarchical environment variables tree
+#[instrument(level = "debug")]
 pub fn link_all(nodes: &[String]) {
-    dlog!("nodes: {:?}", nodes);
+    debug!("nodes: {:?}", nodes);
     let mut parent = None;
     for node in nodes {
         // todo: error handling
         if parent.is_some() {
-            link(parent.unwrap(), node).unwrap();
+            link(parent.unwrap(), node).expect("Failed to link");  // todo: error handling
         } else {
             unlink(node).unwrap();
         }
@@ -328,20 +338,19 @@ pub fn link_all(nodes: &[String]) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use tracing::debug;
+    use crate::util::testing;
+    
 
     #[ctor::ctor]
     fn init() {
-        let _ = env_logger::builder()
-            .filter_level(log::LevelFilter::max())
-            .is_test(true)
-            .try_init();
+        testing::init_test_setup();
     }
 
     #[test]
-    fn test_dlog_macro() {
+    fn test_debug_macro() {
         let test_var = vec![1, 2, 3];
-        dlog!("Test variable: {:?}", &test_var);
-        dlog!("Test variable: {:?}, {:?}", &test_var, "string");
+        debug!("Test variable: {:?}", &test_var);
+        debug!("Test variable: {:?}, {:?}", &test_var, "string");
     }
 }

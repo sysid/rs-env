@@ -7,27 +7,17 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::tempdir;
 use fs_extra::{copy_items, dir};
 use rstest::{fixture, rstest};
-use rsenv::{build_env, build_env_vars, dlog, extract_env, link, link_all, print_files, unlink};
-use log::{debug, info};
-use stdext::function_name;
+use rsenv::{build_env, build_env_vars, extract_env, link, link_all, print_files, unlink};
 use termtree::Tree;
 use rsenv::tree::{build_trees, transform_tree_recursive};
 use rsenv::tree_stack::{transform_tree, transform_tree_unsafe};
 use rsenv::tree_traits::TreeNodeConvert;
 
-#[ctor::ctor]
-fn init() {
-    let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::max())
-        .is_test(true)
-        .try_init();
-}
-
 #[rstest]
 fn test_build_trees_fail_invalid_parent_path() -> Result<()> {
     let original_dir = env::current_dir()?;
     let trees = build_trees(Utf8Path::new("./tests/resources/environments/fail"));
-    assert_eq!(trees.is_err(), true);
+    assert!(trees.is_err());
     assert!(trees.err().unwrap().to_string().starts_with("Error with rsenv entry 'not-existing.env'"));
     env::set_current_dir(original_dir)?;
     Ok(())

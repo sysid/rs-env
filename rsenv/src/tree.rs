@@ -10,13 +10,11 @@ use std::rc::{Rc, Weak};
 
 use anyhow::{Context, Result};
 use camino::{Utf8Path};
-use log::debug;
 use regex::Regex;
-use stdext::function_name;
 use termtree::Tree;
+use tracing::{debug, instrument};
 use walkdir::WalkDir;
 
-use crate::dlog;
 
 #[derive(Debug, Clone)]
 pub struct NodeData {
@@ -63,7 +61,7 @@ impl fmt::Display for TreeNode {
             writeln!(f, " [")?;
             for child in &self.children {
                 // For better formatting, we can add indentation for child nodes
-                write!(f, "  {}\n", child.borrow())?;
+                writeln!(f, "  {}", child.borrow())?;
             }
             write!(f, "]")?;
         }
@@ -72,6 +70,7 @@ impl fmt::Display for TreeNode {
 }
 
 impl TreeNode {
+    #[instrument(level = "debug")]
     pub fn depth(&self) -> usize {
         1 + self.children.iter()
             .map(|child_rc| child_rc.borrow().depth())
@@ -79,6 +78,7 @@ impl TreeNode {
             .unwrap_or(0)
     }
 
+    #[instrument(level = "debug")]
     pub fn leaf_nodes(&self) -> Vec<String> {
         if self.children.is_empty() {
             vec![self.node_data.file_path.clone()]
@@ -102,13 +102,14 @@ impl TreeNode {
     /// * `path`: A mutable vector of strings which temporarily stores the path segments as the tree
     ///   is traversed. It should typically be initialized as an empty vector before calling this function.
     ///
+    #[instrument(level = "debug")]
     pub fn print_leaf_paths(&self, path: &mut Vec<String>) {
         if self.children.is_empty() {
             let root_path = Utf8Path::new(&path[0]).parent().unwrap();
             let path_strs: Vec<&str> = path.iter()
                 .map(
                     |s| {
-                        dlog!("s: {}, root: {}", s, root_path);
+                        debug!("s: {}, root: {}", s, root_path);
                         // s.as_str().strip_prefix(root_path.as_str()).unwrap().strip_prefix("/").unwrap_or(s.as_str())
 
                         // Task 1: Identify largest common prefix
@@ -124,7 +125,7 @@ impl TreeNode {
             for child_rc in &self.children {
                 let child = child_rc.borrow();
                 path.push(child.node_data.file_path.clone());
-                dlog!("path: {:?}", path);
+                debug!("path: {:?}", path);
                 child.print_leaf_paths(path);
                 path.pop();  // backtracking
             }
@@ -133,6 +134,7 @@ impl TreeNode {
 }
 
 // Utility function to find largest common prefix
+#[instrument(level = "trace")]
 fn common_prefix(s1: &str, s2: &str) -> String {
     s1.chars()
         .zip(s2.chars())
@@ -170,20 +172,21 @@ fn common_prefix(s1: &str, s2: &str) -> String {
 /// This function may panic if it encounters issues with regex compilation or
 /// if it fails to unwrap certain expected values, which should be typically present.
 ///
+#[instrument(level = "debug")]
 pub fn build_trees(directory_path: &Utf8Path) -> Result<Vec<Rc<RefCell<TreeNode>>>> {
     let mut relationships: HashMap<String, Vec<String>> = HashMap::new();
-    let re = Regex::new(r"# rsenv: (.+)").unwrap();
+    let re = Regex::new(r"# rsenv: (.+)")?;
     let directory_path = directory_path.canonicalize_utf8().context("Failed to canonicalize the path")?;
 
     for entry in WalkDir::new(directory_path.as_path()) {
-        let entry = entry.unwrap();
-        let abs_path = entry.path().canonicalize().unwrap();
+        let entry = entry?;
+        let abs_path = entry.path().canonicalize()?;
         if entry.file_type().is_file() {
-            let file = File::open(&abs_path).unwrap();
+            let file = File::open(&abs_path)?;
             let reader = BufReader::new(file);
 
             for line in reader.lines() {
-                let line = line.unwrap();
+                let line = line?;
                 if let Some(caps) = re.captures(&line) {
                     // Save the original current directory, to restore it later
                     let original_dir = env::current_dir()?;
@@ -194,7 +197,7 @@ pub fn build_trees(directory_path: &Utf8Path) -> Result<Vec<Rc<RefCell<TreeNode>
                     )?;
                     relationships
                         .entry(parent_path.to_string_lossy().into_owned())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(abs_path.to_string_lossy().into_owned());
                     env::set_current_dir(original_dir)?;
                 }
@@ -244,6 +247,7 @@ Returning the Root Node:
 The function now returns an Rc<RefCell<TreeNode>> instead of a TreeNode.
 This is consistent with the fact that all nodes in the tree are now wrapped in Rc<RefCell<...>>.
  */
+#[instrument(level = "debug")]
 pub fn build_tree_stack(file_name: &str, relationships: &HashMap<String, Vec<String>>, directory_path: &Utf8Path) -> Rc<RefCell<TreeNode>> {
     let mut stack = Vec::new();
     let root = Rc::new(RefCell::new(TreeNode {
@@ -272,8 +276,9 @@ pub fn build_tree_stack(file_name: &str, relationships: &HashMap<String, Vec<Str
 }
 
 /// natural most effective implementation
+#[instrument(level = "debug")]
 pub fn transform_tree_recursive(node: &TreeNodeRef) -> Tree<String> {
-    let mut new_node = Tree::new(format!("{}", node.borrow().node_data.file_path));
+    let mut new_node = Tree::new(node.borrow().node_data.file_path.to_string());
 
     for child in &node.borrow().children {
         new_node.leaves.push(transform_tree_recursive(child));
@@ -288,14 +293,6 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-
-    #[ctor::ctor]
-    fn init() {
-        let _ = env_logger::builder()
-            .filter_level(log::LevelFilter::max())
-            .is_test(true)
-            .try_init();
-    }
 
     // root
     // ├── child1
@@ -316,7 +313,7 @@ mod tests {
         relationships.insert("child1".to_string(), vec!["grandchild1".to_string()]);
 
         // Build the tree starting from "root"
-        let tree = build_tree_stack("root", &relationships, &Utf8Path::new(""));
+        let tree = build_tree_stack("root", &relationships, Utf8Path::new(""));
         println!("{:#?}", tree);
 
         // Check the root node

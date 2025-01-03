@@ -4,16 +4,15 @@ use std::collections::{BTreeMap};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use anyhow::{Context, Result};
-use log::{debug, info};
 use std::env;
 use camino::{Utf8Path, Utf8PathBuf};
 use regex::Regex;
-use stdext::function_name;
-use crate::dlog;
+use tracing::{debug, instrument};
 
 pub const START_SECTION_DELIMITER: &str = "#------------------------------- rsenv start --------------------------------";
 pub const END_SECTION_DELIMITER: &str = "#-------------------------------- rsenv end ---------------------------------";
 
+#[instrument(level = "debug")]
 pub fn update_dot_envrc(target_file_path: &Utf8Path, data: &str) -> Result<()> {
     if ! target_file_path.exists() {
         return Err(anyhow::anyhow!("File does not exist: {:?}", target_file_path));
@@ -61,6 +60,7 @@ pub fn update_dot_envrc(target_file_path: &Utf8Path, data: &str) -> Result<()> {
     file.write_all(new_file_content.as_bytes())?;
     Ok(())
 }
+#[instrument(level = "debug")]
 pub fn delete_section(file_path: &Utf8Path) -> Result<()> {
     // Read the file to a String
     let mut file = File::open(file_path)?;
@@ -76,7 +76,7 @@ pub fn delete_section(file_path: &Utf8Path) -> Result<()> {
         start_section_delimiter = START_SECTION_DELIMITER,
         end_section_delimiter = END_SECTION_DELIMITER,
     );
-    dlog!("pattern: {}", pattern);
+    debug!("pattern: {}", pattern);
     let re = Regex::new(pattern.as_str()).unwrap();
 
     // Assert that only one section

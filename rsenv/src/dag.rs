@@ -5,7 +5,6 @@ use std::rc::{Rc, Weak};
 
 use anyhow::{anyhow, Result};
 use camino::Utf8Path;
-use stdext::function_name;
 
 #[derive(Debug, Clone)]
 pub struct NodeDataGraph {
@@ -25,5 +24,5 @@ pub type TreeNodeRefGraph = Rc<RefCell<TreeNodeGraph>>;
 
 #[allow(unused_variables)]
 pub fn build_dag(directory_path: &Utf8Path) -> Result<Vec<Rc<RefCell<TreeNodeGraph>>>> {
-    Err(anyhow!(format!("{}: Not implemented yet", function_name!())))
+    Err(anyhow!("Not implemented yet: build_dag()".to_string()))
 }

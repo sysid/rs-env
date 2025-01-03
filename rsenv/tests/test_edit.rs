@@ -4,23 +4,13 @@ use std::collections::{BTreeMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use anyhow::{Context, Result};
-use log::{debug, info};
 use std::env;
 use std::process::Command;
 use camino::{Utf8Path, Utf8PathBuf};
 use rstest::rstest;
-use stdext::function_name;
 use rsenv::edit::{create_branches, create_vimscript, open_files_in_editor, select_file_with_suffix};
 use rsenv::get_files;
 use rsenv::tree::build_trees;
-
-#[ctor::ctor]
-fn init() {
-    let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::max())
-        .is_test(true)
-        .try_init();
-}
 
 #[rstest]
 #[ignore = "Interactive via Makefile"]

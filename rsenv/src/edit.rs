@@ -4,10 +4,8 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use anyhow::{Context, Result};
-use log::{debug, info};
 use std::env;
 use camino::{Utf8Path, Utf8PathBuf};
-use stdext::function_name;
 
 use skim::prelude::*;
 use walkdir::WalkDir;
@@ -16,10 +14,11 @@ use std::process::Command;
 use crossterm::{execute, terminal::{Clear, ClearType}};
 use crossbeam::channel::bounded;
 use itertools::Itertools;
-use crate::dlog;
+use tracing::{debug, instrument};
 use crate::tree::TreeNode;
 
 
+#[instrument(level = "debug")]
 pub fn select_file_with_suffix(dir: &str, suffix: &str) -> Option<String> {
     // Step 1: List all files with the given suffix
     let files: Vec<String> = WalkDir::new(dir)
@@ -57,21 +56,18 @@ pub fn select_file_with_suffix(dir: &str, suffix: &str) -> Option<String> {
     // we just pass the rx (receiver) part of the channel to Skim::run_with().
     let selected_items = Skim::run_with(&options, Some(rx))
         .map(|out| out.selected_items)
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
 
     // clear screen
     let mut stdout = std::io::stdout();
     execute!(stdout, Clear(ClearType::FromCursorDown)).unwrap();
 
     // Step 3: Save the selection into a variable for later use
-    if let Some(item) = selected_items.get(0) {
-        Some(item.output().to_string())
-    } else {
-        None
-    }
+    selected_items.first().map(|item| item.output().to_string())
 }
 
 
+#[instrument(level = "debug")]
 pub fn open_files_in_editor(files: Vec<Utf8PathBuf>) -> std::io::Result<()> {
     // Get the editor command from the environment variable `$EDITOR`.
     // If `$EDITOR` is not set, default to "vim".
@@ -93,6 +89,7 @@ pub fn open_files_in_editor(files: Vec<Utf8PathBuf>) -> std::io::Result<()> {
     Ok(())
 }
 
+#[instrument(level = "debug")]
 pub fn create_vimscript(files: Vec<Vec<&str>>) -> String {
     let mut script = String::new();
 
@@ -121,13 +118,14 @@ pub fn create_vimscript(files: Vec<Vec<&str>>) -> String {
     script
 }
 
+#[instrument(level = "debug")]
 pub fn create_branches(trees: &Vec<Rc<RefCell<TreeNode>>>) -> Vec<Vec<String>> {
     let mut vimscript_files: Vec<Vec<_>> = vec![];
 
-    dlog!("trees: {:#?}", trees);
+    debug!("trees: {:#?}", trees);
     for tree in trees {
         let leaf_nodes = tree.borrow().leaf_nodes();
-        dlog!("Leaf nodes: {:#?}", leaf_nodes);
+        debug!("Leaf nodes: {:#?}", leaf_nodes);
 
         for leaf in &leaf_nodes {
             println!("Leaf: {}", leaf);
@@ -142,7 +140,7 @@ pub fn create_branches(trees: &Vec<Rc<RefCell<TreeNode>>>) -> Vec<Vec<String>> {
         }
         println!();
     }
-    dlog!("vimscript_files: {:#?}", vimscript_files);
+    debug!("vimscript_files: {:#?}", vimscript_files);
     vimscript_files
 }
 

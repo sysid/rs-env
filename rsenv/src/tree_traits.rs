@@ -5,6 +5,7 @@ Cannot define inherent `impl` for a type outside of the crate where the type is 
 define a trait that has the desired associated functions/types/constants and implement the trait for the type in question
  */
 use termtree::Tree;
+use tracing::instrument;
 use crate::tree::TreeNodeRef;
 
 pub trait TreeNodeConvert {
@@ -12,6 +13,7 @@ pub trait TreeNodeConvert {
 }
 
 impl TreeNodeConvert for TreeNodeRef {
+    #[instrument(level = "debug")]
     fn to_tree_string(&self) -> Tree<String> {
         let node_borrowed = &self.borrow();
 

@@ -1,15 +1,14 @@
 #![allow(unused_imports)]
-use log::{debug, info};
-use stdext::function_name;
 use nom::bytes::complete::{tag, take_while};
 use nom::error::{dbg_dmp, Error, ParseError};
 use nom::{AsBytes, IResult, Parser};
 use nom::character::complete::multispace0;
 use nom::sequence::delimited;
-use crate::dlog;
+use tracing::{debug, instrument};
 
 // Parser to skip whitespace
 #[allow(dead_code)]
+#[instrument(level = "trace")]
 fn space(input: &str) -> IResult<&str, &str> {
     take_while(|c: char| c.is_whitespace())(input)
 }
@@ -30,15 +29,16 @@ fn ws<'a, F, O, E: ParseError<&'a str>>(inner: F) -> impl FnMut(&'a str) -> IRes
 
 // Parser to extract the path after `# rsenv:`
 #[allow(dead_code)]
+#[instrument(level = "trace")]
 pub fn extract_path(input: &str) -> IResult<&str, &str> {
-    dlog!("input: {:?}", input);
+    debug!("input: {:?}", input);
     // dbg_dmp(tag::<&str, &[u8], Error<_>>("# rsenv:"),"xxx")(input.as_bytes());
 
     let (input, _) = multispace0(input)?; // Match optional whitespace or newlines
     let (input, _) = tag("# rsenv:")(input)?;
-    dlog!("input: {:?}", input);
+    debug!("input: {:?}", input);
     // let (input, _) = space(input)?;
-    // dlog!("input: {:?}", input);
+    // debug!("input: {:?}", input);
     ws(take_while(|c: char| !c.is_whitespace()))(input)
 }
 
@@ -47,14 +47,6 @@ mod tests {
     use super::*;
     use rstest::{fixture, rstest};
     use crate::parser::extract_path;
-
-    #[ctor::ctor]
-    fn init() {
-        let _ = env_logger::builder()
-            .filter_level(log::LevelFilter::max())
-            .is_test(true)
-            .try_init();
-    }
 
     #[test]
     fn test_extract_path() {
