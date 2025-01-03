@@ -30,9 +30,9 @@ MAN_BINS = $(filter-out ./tw-extras.md, $(MANS))
 ADMIN::  ## ##################################################################
 .PHONY: init-env
 init-env:  ## init-env
-	rm -fr ~/xxx/*
-	mkdir -p ~/xxx
-	cp -r $(tests_src)/resources/environments/complex/dot.envrc ~/xxx/.envrc
+	@rm -fr ~/xxx/*
+	@mkdir -p ~/xxx
+	@cp -r $(tests_src)/resources/environments/complex/dot.envrc ~/xxx/.envrc
 	cat ~/xxx/.envrc
 
 .PHONY: show-env
@@ -114,9 +114,16 @@ upload:  ## upload
 build:  ## build
 	pushd $(pkg_src) && cargo build --release
 
+#.PHONY: install
+#install: uninstall  ## install
+	#@cp -vf $(pkg_src)/target/release/$(BINARY) ~/bin/$(BINARY)
 .PHONY: install
 install: uninstall  ## install
-	@cp -vf $(pkg_src)/target/release/$(BINARY) ~/bin/$(BINARY)
+	@VERSION=$(shell cat VERSION) && \
+		echo "-M- Installagin $$VERSION" && \
+		cp -vf rsenv/target/release/$(BINARY) ~/bin/$(BINARY)$$VERSION && \
+		ln -vsf ~/bin/$(BINARY)$$VERSION ~/bin/$(BINARY)
+
 
 .PHONY: install-runenv
 install-runenv: uninstall-runenv  ## install-runenv
