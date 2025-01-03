@@ -1,47 +1,44 @@
-#![allow(unused_imports)]
-
 use std::fs;
 use std::io::Read;
-use camino::{Utf8Path, Utf8PathBuf};
-use anyhow::{Context, Result};
+use std::path::{Path, PathBuf};
 
-use camino_tempfile::{NamedUtf8TempFile, tempdir};
-use fs_extra::{copy_items, dir, remove_items};
-use itertools::Itertools;
 use rstest::{fixture, rstest};
+use tempfile::tempdir;
+use fs_extra::{copy_items, dir};
 use rsenv::build_env_vars;
-use rsenv::envrc::{delete_section, END_SECTION_DELIMITER, START_SECTION_DELIMITER, update_dot_envrc};
+use rsenv::envrc::{delete_section, update_dot_envrc, END_SECTION_DELIMITER, START_SECTION_DELIMITER};
+use rsenv::errors::TreeResult;
 
 #[fixture]
-fn temp_dir() -> Utf8PathBuf {
+fn temp_dir() -> PathBuf {
     let tempdir = tempdir().unwrap();
-    let options = dir::CopyOptions::new(); //Initialize default values for CopyOptions
+    let options = dir::CopyOptions::new();
     copy_items(
         &[
             "tests/resources/environments/complex/dot.envrc",
         ],
-        &tempdir,
+        tempdir.path(),
         &options,
-    )
-        .expect("Failed to copy test project directory");
+    ).expect("Failed to copy test project directory");
 
     tempdir.into_path()
 }
 
-pub fn get_file_contents(path: &Utf8Path) -> Result<String> {
+fn get_file_contents(path: &Path) -> TreeResult<String> {
     let mut file = fs::File::open(path)?;
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;
     Ok(contents)
 }
+
 #[rstest]
-fn test_update_dot_envrc(temp_dir: Utf8PathBuf) -> Result<()> {
-    let path = temp_dir.join("./dot.envrc");
-    let data = build_env_vars("./tests/resources/environments/complex/level4.env")?;
+fn test_update_dot_envrc(temp_dir: PathBuf) -> TreeResult<()> {
+    let path = temp_dir.join("dot.envrc");
+    let data = build_env_vars(Path::new("./tests/resources/environments/complex/level4.env"))?;
 
-    update_dot_envrc(&path, data.as_str()).unwrap();
+    update_dot_envrc(&path, &data)?;
 
-    let file_contents = get_file_contents(&path).unwrap();
+    let file_contents = get_file_contents(&path)?;
     let conf_guard_start = file_contents
         .find(START_SECTION_DELIMITER)
         .unwrap();
@@ -49,28 +46,50 @@ fn test_update_dot_envrc(temp_dir: Utf8PathBuf) -> Result<()> {
         .find(END_SECTION_DELIMITER)
         .unwrap();
     let conf_guard_section = &file_contents[conf_guard_start..conf_guard_end];
+
     assert!(conf_guard_section.contains(START_SECTION_DELIMITER));
-    assert!(conf_guard_section.contains(data.as_str()));
+    assert!(conf_guard_section.contains(&data));
     assert!(path.exists());
     println!("file_contents: {}", file_contents);
     Ok(())
 }
 
 #[rstest]
-fn test_delete_section(temp_dir: Utf8PathBuf) -> Result<()> {
-    let path = temp_dir.join("./dot.envrc");
-    let data = build_env_vars("./tests/resources/environments/complex/level4.env")?;
+fn test_delete_section(temp_dir: PathBuf) -> TreeResult<()> {
+    let path = temp_dir.join("dot.envrc");
+    let data = build_env_vars(Path::new("./tests/resources/environments/complex/level4.env"))?;
 
     // Given: section has been added
-    update_dot_envrc(&path, data.as_str()).unwrap();
+    update_dot_envrc(&path, &data)?;
 
     // When: section is deleted
-    delete_section(&path).unwrap();
+    delete_section(&path)?;
 
-    let file_contents = get_file_contents(&path).unwrap();
-    assert!(! file_contents.contains(START_SECTION_DELIMITER));
-    assert!(! file_contents.contains(data.as_str()));
+    let file_contents = get_file_contents(&path)?;
+    assert!(!file_contents.contains(START_SECTION_DELIMITER));
+    assert!(!file_contents.contains(&data));
     println!("file_contents: {}", file_contents);
     Ok(())
 }
 
+#[rstest]
+fn test_multiple_updates(temp_dir: PathBuf) -> TreeResult<()> {
+    let path = temp_dir.join("dot.envrc");
+    let data1 = build_env_vars(Path::new("./tests/resources/environments/complex/level4.env"))?;
+    let data2 = build_env_vars(Path::new("./tests/resources/environments/complex/level3.env"))?;
+
+    // First update
+    update_dot_envrc(&path, &data1)?;
+    // Second update should replace the first section
+    update_dot_envrc(&path, &data2)?;
+
+    let file_contents = get_file_contents(&path)?;
+    assert!(file_contents.contains(&data2));
+    assert!(!file_contents.contains(&data1));
+
+    // Should only have one set of delimiters
+    assert_eq!(file_contents.matches(START_SECTION_DELIMITER).count(), 1);
+    assert_eq!(file_contents.matches(END_SECTION_DELIMITER).count(), 1);
+
+    Ok(())
+}

@@ -1,22 +1,17 @@
-#![allow(unused_imports)]
-
-use std::collections::{BTreeMap};
+use std::path::{Path, PathBuf};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
-use anyhow::{Context, Result};
-use std::env;
-use camino::{Utf8Path, Utf8PathBuf};
 use regex::Regex;
 use tracing::{debug, instrument};
+use crate::errors::{TreeError, TreeResult};
+use crate::util::path::ensure_file_exists;
 
 pub const START_SECTION_DELIMITER: &str = "#------------------------------- rsenv start --------------------------------";
 pub const END_SECTION_DELIMITER: &str = "#-------------------------------- rsenv end ---------------------------------";
 
 #[instrument(level = "debug")]
-pub fn update_dot_envrc(target_file_path: &Utf8Path, data: &str) -> Result<()> {
-    if ! target_file_path.exists() {
-        return Err(anyhow::anyhow!("File does not exist: {:?}", target_file_path));
-    }
+pub fn update_dot_envrc(target_file_path: &Path, data: &str) -> TreeResult<()> {
+    ensure_file_exists(target_file_path)?;
 
     let section = format!(
         "\n{start_section_delimiter}\n\
@@ -27,9 +22,12 @@ pub fn update_dot_envrc(target_file_path: &Utf8Path, data: &str) -> Result<()> {
         end_section_delimiter = END_SECTION_DELIMITER,
     );
 
-    let file = File::open(target_file_path)?;
+    let file = File::open(target_file_path)
+        .map_err(TreeError::FileReadError)?;
     let reader = BufReader::new(file);
-    let lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
+    let lines: Vec<String> = reader.lines()
+        .collect::<Result<_, _>>()
+        .map_err(TreeError::FileReadError)?;
 
     let start_index = lines.iter().position(|l| {
         l.starts_with(START_SECTION_DELIMITER)
@@ -55,17 +53,20 @@ pub fn update_dot_envrc(target_file_path: &Utf8Path, data: &str) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .truncate(true)
-        .open(target_file_path)?;
+        .open(target_file_path)
+        .map_err(TreeError::FileReadError)?;
 
-    file.write_all(new_file_content.as_bytes())?;
-    Ok(())
+    file.write_all(new_file_content.as_bytes())
+        .map_err(TreeError::FileReadError)
 }
+
 #[instrument(level = "debug")]
-pub fn delete_section(file_path: &Utf8Path) -> Result<()> {
-    // Read the file to a String
-    let mut file = File::open(file_path)?;
+pub fn delete_section(file_path: &Path) -> TreeResult<()> {
+    let mut file = File::open(file_path)
+        .map_err(TreeError::FileReadError)?;
     let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
+    file.read_to_string(&mut contents)
+        .map_err(TreeError::FileReadError)?;
 
     // Define the regex
     // (?s) enables "single-line mode" where . matches any character including newline (\n), allows to span lines It's often also called "dotall mode".
@@ -77,20 +78,21 @@ pub fn delete_section(file_path: &Utf8Path) -> Result<()> {
         end_section_delimiter = END_SECTION_DELIMITER,
     );
     debug!("pattern: {}", pattern);
-    let re = Regex::new(pattern.as_str()).unwrap();
+    let re = Regex::new(pattern.as_str())
+        .map_err(|e| TreeError::InternalError(e.to_string()))?;
 
     // Assert that only one section
     let result = re.find_iter(&contents).collect::<Vec<_>>();
     if result.len() > 1 {
-        return Err(anyhow::anyhow!("More than one section found"));
+        return Err(TreeError::MultipleParents(file_path.to_path_buf()));
     }
 
     // Replace the matched section with an empty string
     let result = re.replace(&contents, "");
 
     // Write the result back to the file
-    let mut file = File::create(file_path)?;
-    file.write_all(result.as_bytes())?;
-
-    Ok(())
+    let mut file = File::create(file_path)
+        .map_err(TreeError::FileReadError)?;
+    file.write_all(result.as_bytes())
+        .map_err(TreeError::FileReadError)
 }
