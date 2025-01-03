@@ -1,18 +1,18 @@
-#![allow(unused_imports)]
-
 use std::collections::BTreeMap;
 use std::{env, fs};
 use std::os::unix::fs::symlink;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
 use anyhow::Result;
-use camino::Utf8PathBuf;
-use camino_tempfile::tempdir;
-use fs_extra::{copy_items, dir};
 use lazy_static::lazy_static;
-use rstest::{fixture, rstest};
-use rsenv::{build_env, extract_env, build_env_vars, print_files, link, link_all, unlink, is_dag};
 use regex::Regex;
+use rstest::{fixture, rstest};
+use tempfile::tempdir;
+use fs_extra::{copy_items, dir};
 use tracing::debug;
+use rsenv::errors::{TreeError, TreeResult};
+use rsenv::{build_env, build_env_vars, extract_env, is_dag, link, link_all, print_files, unlink};
 use rsenv::util::testing;
 
 #[ctor::ctor]
@@ -21,39 +21,36 @@ fn init() {
 }
 
 #[fixture]
-fn temp_dir() -> Utf8PathBuf {
+fn temp_dir() -> PathBuf {
     let tempdir = tempdir().unwrap();
-    let options = dir::CopyOptions::new(); //Initialize default values for CopyOptions
+    let options = dir::CopyOptions::new();
     copy_items(
         &[
             "tests/resources/environments/complex/level1.env",
             "tests/resources/environments/complex/level2.env",
             "tests/resources/environments/complex/a",
         ],
-        &tempdir,
+        tempdir.path(),
         &options,
-    )
-        .expect("Failed to copy test project directory");
+    ).expect("Failed to copy test project directory");
 
     tempdir.into_path()
 }
 
 #[rstest]
-fn test_extract_env() -> Result<()> {
-    let (variables, parent) = extract_env("./tests/resources/environments/complex/level4.env")?;
+fn test_extract_env() -> TreeResult<()> {
+    let (variables, parent) = extract_env(Path::new("./tests/resources/environments/complex/level4.env"))?;
     debug!("variables: {:?}", variables);
     debug!("parent: {:?}", parent);
     assert_eq!(variables.get("VAR_6"), Some(&"var_64".to_string()));
-    // assert_eq!(parent, Some("a/level3.env".to_string()));
     Ok(())
 }
 
 #[rstest]
-fn test_build_env() -> Result<()> {
-    let (variables, files, is_dag) = build_env("./tests/resources/environments/complex/level4.env")?;
-    let reference = extract_env("./tests/resources/environments/complex/result.env")?.0;
-    // println!("reference: {:#?}", reference);
-    // println!("variables: {:#?}", variables);
+fn test_build_env() -> TreeResult<()> {
+    let (variables, files, is_dag) = build_env(Path::new("./tests/resources/environments/complex/level4.env"))?;
+    let (reference, _, _) = extract_env(Path::new("./tests/resources/environments/complex/result.env"))?;
+
     let filtered_map: BTreeMap<_, _> = variables.iter()
         .filter(|(k, _)| k.starts_with("VAR_"))
         .map(|(k, v)| (k.clone(), v.clone()))
@@ -67,9 +64,9 @@ fn test_build_env() -> Result<()> {
 }
 
 #[rstest]
-fn test_build_env_graph() -> Result<()> {
-    let (variables, files, is_dag) = build_env("./tests/resources/environments/graph/level31.env")?;
-    let reference = extract_env("./tests/resources/environments/graph/result.env")?.0;
+fn test_build_env_graph() -> TreeResult<()> {
+    let (variables, files, is_dag) = build_env(Path::new("./tests/resources/environments/graph/level31.env"))?;
+    let (reference, _, _) = extract_env(Path::new("./tests/resources/environments/graph/result.env"))?;
     println!("variables: {:#?}", variables);
     println!("files: {:#?}", files);
     println!("reference: {:#?}", reference);
@@ -80,9 +77,9 @@ fn test_build_env_graph() -> Result<()> {
 }
 
 #[rstest]
-fn test_build_env_graph2() -> Result<()> {
-    let (variables, files, is_dag) = build_env("./tests/resources/environments/graph2/level21.env")?;
-    let reference = extract_env("./tests/resources/environments/graph2/result1.env")?.0;
+fn test_build_env_graph2() -> TreeResult<()> {
+    let (variables, files, is_dag) = build_env(Path::new("./tests/resources/environments/graph2/level21.env"))?;
+    let (reference, _, _) = extract_env(Path::new("./tests/resources/environments/graph2/result1.env"))?;
     println!("variables: {:#?}", variables);
     println!("files: {:#?}", files);
     println!("reference: {:#?}", reference);
@@ -90,29 +87,28 @@ fn test_build_env_graph2() -> Result<()> {
     assert_eq!(variables, reference, "The two BTreeMaps are not equal!");
     assert!(is_dag);
 
-    let (variables, _, is_dag) = build_env("./tests/resources/environments/graph2/level22.env")?;
-    let reference = extract_env("./tests/resources/environments/graph2/result2.env")?.0;
+    let (variables, _, is_dag) = build_env(Path::new("./tests/resources/environments/graph2/level22.env"))?;
+    let (reference, _, _) = extract_env(Path::new("./tests/resources/environments/graph2/result2.env"))?;
     assert_eq!(variables, reference, "The two BTreeMaps are not equal!");
     assert!(is_dag);
     Ok(())
 }
 
 #[rstest]
-fn test_build_env_vars() -> Result<()> {
-    // let env_vars = build_env_vars("./tests/resources/environments/complex/level4.env")?;
-    let env_vars = build_env_vars("./tests/resources/environments/parallel/test.env")?;
+fn test_build_env_vars() -> TreeResult<()> {
+    let env_vars = build_env_vars(Path::new("./tests/resources/environments/parallel/test.env"))?;
     println!("{}", env_vars);
     Ok(())
 }
 
 #[rstest]
-fn test_build_env_vars_fail_wrong_parent() -> Result<()> {
+fn test_build_env_vars_fail_wrong_parent() -> TreeResult<()> {
     let original_dir = env::current_dir()?;
-    let result = build_env_vars("./tests/resources/environments/graph2/error.env");
+    let result = build_env_vars(Path::new("./tests/resources/environments/graph2/error.env"));
     match result {
         Ok(_) => panic!("Expected an error, but got OK"),
         Err(e) => {
-            let re = Regex::new(r"\d+: Invalid path: not-existing.env")?;
+            let re = Regex::new(r"Invalid parent path: .*not-existing.env")?;
             assert!(re.is_match(&e.to_string()));
         }
     }
@@ -121,29 +117,28 @@ fn test_build_env_vars_fail_wrong_parent() -> Result<()> {
 }
 
 #[rstest]
-fn test_build_env_vars_fail() -> Result<()> {
-    let result = build_env_vars("xxx");
+fn test_build_env_vars_fail() -> TreeResult<()> {
+    let result = build_env_vars(Path::new("xxx"));
     match result {
         Ok(_) => panic!("Expected an error, but got OK"),
         Err(e) => {
-            let re = Regex::new(r"\d+: File does not exist: xxx")?;
-            assert!(re.is_match(&e.to_string()));
+            assert!(matches!(e, TreeError::FileNotFound(_)));
         }
     }
     Ok(())
 }
 
 #[rstest]
-fn test_print_files() -> Result<()> {
-    print_files("./tests/resources/environments/complex/level4.env")?;
+fn test_print_files() -> TreeResult<()> {
+    print_files(Path::new("./tests/resources/environments/complex/level4.env"))?;
     Ok(())
 }
 
 #[rstest]
-fn test_link(temp_dir: Utf8PathBuf) -> Result<()> {
-    let parent = temp_dir.join("./a/level3.env");
-    let child = temp_dir.join("./level1.env");
-    link(parent.as_str(), child.as_str())?;
+fn test_link(temp_dir: PathBuf) -> TreeResult<()> {
+    let parent = temp_dir.join("a/level3.env");
+    let child = temp_dir.join("level1.env");
+    link(&parent, &child)?;
 
     let child_content = fs::read_to_string(&child)?;
     assert!(child_content.contains("# rsenv: a/level3.env"));
@@ -151,9 +146,9 @@ fn test_link(temp_dir: Utf8PathBuf) -> Result<()> {
 }
 
 #[rstest]
-fn test_unlink(temp_dir: Utf8PathBuf) -> Result<()> {
-    let child = temp_dir.join("./a/level3.env");
-    unlink(child.as_str())?;
+fn test_unlink(temp_dir: PathBuf) -> TreeResult<()> {
+    let child = temp_dir.join("a/level3.env");
+    unlink(&child)?;
 
     let child_content = fs::read_to_string(&child)?;
     assert!(child_content.contains("# rsenv:\n"));
@@ -161,11 +156,11 @@ fn test_unlink(temp_dir: Utf8PathBuf) -> Result<()> {
 }
 
 #[rstest]
-fn test_link_all(temp_dir: Utf8PathBuf) -> Result<()> {
-    let parent = temp_dir.join("./a/level3.env");
-    let intermediate = temp_dir.join("./level2.env");
-    let child = temp_dir.join("./level1.env");
-    let nodes = vec![parent.as_str().to_string(), intermediate.as_str().to_string(), child.as_str().to_string()];
+fn test_link_all(temp_dir: PathBuf) -> TreeResult<()> {
+    let parent = temp_dir.join("a/level3.env");
+    let intermediate = temp_dir.join("level2.env");
+    let child = temp_dir.join("level1.env");
+    let nodes = vec![parent.clone(), intermediate.clone(), child.clone()];
     link_all(&nodes);
 
     let child_content = fs::read_to_string(&child)?;
@@ -180,45 +175,40 @@ fn test_link_all(temp_dir: Utf8PathBuf) -> Result<()> {
 }
 
 #[rstest]
-fn test_is_dag_false() -> Result<()> {
-    assert!(!is_dag("./tests/resources/environments/complex")?);
-    assert!(!is_dag("./tests/resources/environments/parallel")?);
+fn test_is_dag_false() -> TreeResult<()> {
+    assert!(!is_dag(Path::new("./tests/resources/environments/complex"))?);
+    assert!(!is_dag(Path::new("./tests/resources/environments/parallel"))?);
     Ok(())
 }
 
 #[rstest]
-fn test_is_dag_true() -> Result<()> {
-    assert!(is_dag("./tests/resources/environments/graph")?);
+fn test_is_dag_true() -> TreeResult<()> {
+    assert!(is_dag(Path::new("./tests/resources/environments/graph"))?);
     Ok(())
 }
 
 #[rstest]
 #[ignore = "Only for interactive exploration"]
-fn test_extract_env_symlink() -> Result<()> {
+fn test_extract_env_symlink() -> TreeResult<()> {
     let original_dir = env::current_dir()?;
     env::set_current_dir("./tests/resources/environments/complex")?;
 
     // 1. Create a symbolic link
     symlink("level4.env", "symlink.env")?;
-
     // 3. Run extract_env function
-    let _ = extract_env("./symlink.env");
-
-    // 6. Cleanup: Remove the symlink
+    let _ = extract_env(Path::new("./symlink.env"));
     let _ = fs::remove_file("./symlink.env");
 
     // Reset to the original directory
     env::set_current_dir(original_dir)?;
-
     Ok(())
 }
 
 #[rstest]
-fn test_extract_env_symlink2() -> Result<()> {
-    // Step 1: Create a symbolic link
+fn test_extract_env_symlink2() -> TreeResult<()> {
     let original_dir = env::current_dir()?;
     env::set_current_dir("./tests/resources/environments/complex")?;
-    _ = fs::remove_file("./symlink.env");
+    let _ = fs::remove_file("./symlink.env");
     symlink("level4.env", "symlink.env")?;
     env::set_current_dir(original_dir)?;
 
@@ -240,6 +230,5 @@ fn test_extract_env_symlink2() -> Result<()> {
 
     // Step 4: Cleanup by removing the symbolic link
     fs::remove_file("./tests/resources/environments/complex/symlink.env")?;
-
     Ok(())
 }

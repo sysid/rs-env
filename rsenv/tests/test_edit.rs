@@ -1,60 +1,67 @@
-#![allow(unused_imports)]
-
-use std::collections::{BTreeMap};
-use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
-use anyhow::{Context, Result};
-use std::env;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use camino::{Utf8Path, Utf8PathBuf};
+
 use rstest::rstest;
-use rsenv::edit::{create_branches, create_vimscript, open_files_in_editor, select_file_with_suffix};
+
+use rsenv::builder::TreeBuilder;
+use rsenv::edit::{
+    create_branches, create_vimscript, open_files_in_editor, select_file_with_suffix,
+};
+use rsenv::errors::TreeResult;
 use rsenv::get_files;
-use rsenv::tree::build_trees;
 
 #[rstest]
 #[ignore = "Interactive via Makefile"]
-fn test_select_file_with_suffix() {
-    let dir = "./tests/resources/data";
+fn test_select_file_with_suffix() -> TreeResult<()> {
+    let dir = Path::new("./tests/resources/data");
     let suffix = ".env";
-    let result = select_file_with_suffix(dir, suffix);
-    println!("Selected: {:?}", result);
-    assert!(result.is_some());
+    let result = select_file_with_suffix(dir, suffix)?;
+    println!("Selected: {}", result.display());
+    assert!(result.to_string_lossy().ends_with(suffix));
+    Ok(())
 }
 
 #[rstest]
 #[ignore = "Interactive via Makefile"]
-fn test_open_files_in_editor() {
-    let files = get_files("./tests/resources/environments/complex/level4.env").unwrap();
-    open_files_in_editor(files).unwrap();
+fn test_open_files_in_editor() -> TreeResult<()> {
+    let files = get_files(Path::new(
+        "./tests/resources/environments/complex/level4.env",
+    ))?;
+    open_files_in_editor(files)?;
+    Ok(())
 }
 
 #[rstest]
 #[ignore = "Interactive via Makefile"]
-fn test_create_vimscript() {
+fn test_create_vimscript_interactive() -> TreeResult<()> {
     let files = vec![
         vec!["a_test.env", "b_test.env", "test.env"],
         vec!["a_int.env", "b_int.env", "int.env"],
-        // vec!["a_prod.env", "b_prod.env", "prod.env"]
         vec!["a_prod.env"],
     ];
 
-    let script = create_vimscript(files);
+    let script = create_vimscript(
+        files
+            .iter()
+            .map(|v| v.iter().map(|s| Path::new(s)).collect())
+            .collect(),
+    );
     println!("{}", script);
 
-    // If you want to save this to a file:
+    // Save script to file
     let vimscript_filename = "tests/resources/environments/generated.vim";
-    let mut file = std::fs::File::create(vimscript_filename).unwrap();
-    file.write_all(script.as_bytes()).unwrap();
+    let mut file = std::fs::File::create(vimscript_filename)?;
+    file.write_all(script.as_bytes())?;
 
     // Run vim with the generated script
     let status = Command::new("vim")
         .arg("-S")
         .arg(vimscript_filename)
-        .status()
-        .expect("failed to run vim");
+        .status()?;
 
     println!("Vim exited with status: {:?}", status);
+    Ok(())
 }
 
 #[rstest]
@@ -65,7 +72,12 @@ fn test_create_vimscript_non_interactive() {
         vec!["a_prod.env"],
     ];
 
-    let result = create_vimscript(files);
+    let script = create_vimscript(
+        files
+            .iter()
+            .map(|v| v.iter().map(|s| Path::new(s)).collect())
+            .collect(),
+    );
 
     let expected = "\
 \" Open the first set of files ('a_test.env') in the first column
@@ -88,79 +100,102 @@ wincmd =
 1wincmd w
 ";
 
-    assert_eq!(result, expected);
+    assert_eq!(script, expected);
 }
 
 #[rstest]
-fn test_create_branches_tree() {
-    let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();
-    let result = create_branches(&trees);
-    println!("{:#?}", result);
+fn test_create_branches_tree() -> TreeResult<()> {
+    let mut builder = TreeBuilder::new();
+    let trees = builder.build_from_directory(Path::new("./tests/resources/environments/tree"))?;
+    let mut result: Vec<Vec<String>> = create_branches(&trees)
+        .into_iter()
+        .map(|branch| {
+            branch
+                .into_iter()
+                .map(|path| {
+                    path.file_name()
+                        .expect("Invalid path")
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect()
+        })
+        .collect();
 
-    let expected = vec![
-        vec![
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level11.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env",
-        ],
-        vec![
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level13.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env",
-        ],
-        vec![
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level32.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level22.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level12.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env",
-        ],
-        vec![
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level21.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level12.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env",
-        ],
+    // Sort both result and expected for stable comparison
+    result.sort();
+
+    let mut expected = vec![
+        vec!["level11.env", "root.env"],
+        vec!["level13.env", "root.env"],
+        vec!["level32.env", "level22.env", "level12.env", "root.env"],
+        vec!["level21.env", "level12.env", "root.env"],
     ];
+    expected.sort();
     assert_eq!(result, expected);
+    Ok(())
 }
 
 #[rstest]
-fn test_create_branches_parallel() {
-    let trees = build_trees(Utf8Path::new("./tests/resources/environments/parallel")).unwrap();
-    let result = create_branches(&trees);
-    println!("{:#?}", result);
+fn test_create_branches_parallel() -> TreeResult<()> {
+    let mut builder = TreeBuilder::new();
+    let trees =
+        builder.build_from_directory(Path::new("./tests/resources/environments/parallel"))?;
+    let mut result: Vec<Vec<String>> = create_branches(&trees)
+        .into_iter()
+        .map(|branch| {
+            branch
+                .into_iter()
+                .map(|path| {
+                    path.file_name()
+                        .expect("Invalid path")
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect()
+        })
+        .collect();
+    result.sort();
 
-    let expected = vec![
-        vec![
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/int.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/b_int.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/a_int.env",
-        ],
-        vec![
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/prod.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/b_prod.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/a_prod.env",
-        ],
-        vec![
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/test.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/b_test.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/a_test.env",
-        ],
+    let mut expected = vec![
+        vec!["int.env", "b_int.env", "a_int.env"],
+        vec!["prod.env", "b_prod.env", "a_prod.env"],
+        vec!["test.env", "b_test.env", "a_test.env"],
     ];
+    expected.sort();
     assert_eq!(result, expected);
+    Ok(())
 }
 
 #[rstest]
-fn test_create_branches_complex() {
-    let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex")).unwrap();
-    let result = create_branches(&trees);
-    println!("{:#?}", result);
+fn test_create_branches_complex() -> TreeResult<()> {
+    let mut builder = TreeBuilder::new();
+    let trees =
+        builder.build_from_directory(Path::new("./tests/resources/environments/complex"))?;
+    let mut result: Vec<Vec<String>> = create_branches(&trees)
+        .into_iter()
+        .map(|branch| {
+            branch
+                .into_iter()
+                .map(|path| {
+                    path.file_name()
+                        .expect("Invalid path")
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect()
+        })
+        .collect();
+    result.sort();
 
-    let expected = vec![
-        vec![
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/level4.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/a/level3.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/level2.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/level1.env",
-            "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/dot.envrc",
-        ],
-    ];
+    let mut expected = vec![vec![
+        "level4.env",
+        "level3.env",
+        "level2.env",
+        "level1.env",
+        "dot.envrc",
+    ]];
+    expected.sort();
     assert_eq!(result, expected);
+    Ok(())
 }
