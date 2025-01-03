@@ -9,7 +9,9 @@ use clap_complete::{generate, Generator, Shell};
 use colored::Colorize;
 use rsenv::cli::args::{Cli, Commands};
 use rsenv::cli::commands::execute_command;
-use rsenv::edit::{create_branches, create_vimscript, open_files_in_editor, select_file_with_suffix};
+use rsenv::edit::{
+    create_branches, create_vimscript, open_files_in_editor, select_file_with_suffix,
+};
 use rsenv::envrc::update_dot_envrc;
 use rsenv::tree::transform_tree_recursive;
 use rsenv::tree::{build_trees, TreeNode};
@@ -41,10 +43,12 @@ fn main() {
     }
     if cli.info {
         use clap::CommandFactory; // Trait which returns the current command
-        if let Some(a) = Cli::command()
-            .get_author() { println!("AUTHOR: {}", a) }
-        if let Some(v) = Cli::command()
-            .get_version() { println!("VERSION: {}", v) }
+        if let Some(a) = Cli::command().get_author() {
+            println!("AUTHOR: {}", a)
+        }
+        if let Some(v) = Cli::command().get_version() {
+            println!("VERSION: {}", v)
+        }
     }
 
     setup_logging(cli.debug);
@@ -54,8 +58,6 @@ fn main() {
         std::process::exit(1);
     }
 }
-
-
 
 fn setup_logging(verbosity: u8) {
     tracing::debug!("INIT: Attempting logger init from main.rs");
@@ -103,15 +105,14 @@ fn setup_logging(verbosity: u8) {
 
 #[cfg(test)]
 mod tests {
-    use tracing::info;
-    use rsenv::util::testing;
     use super::*;
+    use rsenv::util::testing;
+    use tracing::info;
 
     #[ctor::ctor]
     fn init() {
         testing::init_test_setup();
     }
-
 
     // https://docs.rs/clap/latest/clap/_derive/_tutorial/index.html#testing
     #[test]
