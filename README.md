@@ -3,16 +3,16 @@
 > [Hierarchical environment variable management](https://sysid.github.io/hierarchical-environment-variable-management/)
 
 ## Why
-Managing environment variables for different projects, stages, regsions, etc. is an unavoidable chore
-when working on many cloud projects.
+Managing environment variables for different stages, regions, etc. is an unavoidable chore
+when working on cloud projects.
 
 Especially the challenge of avoiding duplication and knowing where a particular value is coming from.
 Hierarchical variable management seems to be a good solution for this problem.
 
 # Features
 - Compile a resulting set of environment variables from a linked list of `<name>.env` files.
-- Dependencies can form a tree or DAG (directed acyclic graph).
-- Last defined variable wins, i.e. child tops parent, rightmost sibling tops left sibling (in case of DAG).
+- Linked `.env` files form trees. Paths from leave-nodes to root (branches) form the resulting set of variables.
+- Last defined variable wins, i.e. child tops parent.
 - Smart environment selection via builtin FZF (fuzzy find).
 - Quick edit via builtin FZF.
 - Side-by-side Tree edit.
@@ -29,17 +29,16 @@ cargo install rs-env
 ```
 
 ### Usage
-The resulting set of environment variables is an amalgamation of all linked files.
+The resulting set of environment variables comes from a merge of all linked `.env` files.
 
-- **DAG**: Directed acyclic graph, i.e. files can have multiple parents
 - **branch**: a linear list of files, each file can have one parent (no DAG).
 - **tree**: a collection of branches (files can be part of multiple branches, but only one parent)
 - environment variables are defined in files `<name>.env` and must be prefixed with `export` command
-- See [examples](./rsenv/tests/resources/environments) for DAG, Tree and Branches
+- See [examples](./rsenv/tests/resources/environments)
 - multiple trees/branches per project are supported
-- files can be linked manually by adding the comment line `# rsenv: <name.env>` or via: `rsenv link <root.env> <child1>.env <child2>.env`.
+- files are linked by adding the comment line `# rsenv: <name.env>` or via: `rsenv link <root.env> <child1>.env <child2>.env`.
 
-Then source the resulting set of variables as usual:
+Publish the resulting set of variables to the shell:
 ```bash
 source <(rsenv build <leaf-node.env>)
 ```
@@ -50,27 +49,27 @@ Hierarchical environment variable management
 Usage: rsenv [OPTIONS] [NAME] [COMMAND]
 
 Commands:
-  build        Build the resulting set of environment variables (DAG/Tree)
-  envrc        Write the resulting set of variables to .envrc (requires direnv, DAG/Tree)
-  files        Show all files involved in resulting set (DAG/Tree)
-  edit-leaf    Edit the given environment file and all its parents (DAG/Tree)
-  edit         Edit the FZF selected branch/DAG
-  select-leaf  select environment/branch and update .envrc file (requires direnv, DAG/Tree)
-  select       FZF based selection of environment/branch and update of .envrc file (requires direnv, DAG/Tree)
-  link         Link files into a linear dependency branch (root -> parent -> child)
+  build        Build and display the complete set of environment variables
+  envrc        Write environment variables to .envrc file (requires direnv)
+  files        List all files in the environment hierarchy
+  edit-leaf    Edit an environment file and all its parent files
+  edit         Interactively select and edit an environment hierarchy
+  select-leaf  Update .envrc with selected environment (requires direnv)
+  select       Interactively select environment and update .envrc (requires direnv)
+  link         Create parent-child relationships between environment files
   branches     Show all branches (linear representation)
   tree         Show all trees (hierarchical representation)
-  tree-edit    Edit branches of all trees side-by-side (vim required in path)
-  leaves       Output leaves as paths (Tree)
+  tree-edit    Edit all environment hierarchies side-by-side (requires vim)
+  leaves       List all leaf environment files
   help         Print this message or the help of the given subcommand(s)
 
 Arguments:
-  [NAME]  Optional name to operate on
+  [NAME]  Name of the configuration to operate on (optional)
 
 Options:
-  -d, --debug...              Turn debugging information on
-      --generate <GENERATOR>  [possible values: bash, elvish, fish, powershell, zsh]
-      --info                  
+  -d, --debug...              Enable debug logging. Multiple flags (-d, -dd, -ddd) increase verbosity
+      --generate <GENERATOR>  Generate shell completion scripts [possible values: bash, elvish, fish, powershell, zsh]
+      --info                  Display version and configuration information
   -h, --help                  Print help
   -V, --version               Print version
 ```
@@ -90,7 +89,7 @@ Options:
 ## Integrations
 ### direnv
 [direnv](https://direnv.net/) activates environments automatically.
-- rs-env can update the `.envrc` file with the selected dependency graph variables.
+- rs-env can update the `.envrc` file with the dependency graph variables.
 
 
 ### JetBrains Integration
