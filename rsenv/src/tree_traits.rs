@@ -7,12 +7,14 @@ define a trait that has the desired associated functions/types/constants and imp
 use crate::arena::TreeArena;
 use generational_arena::Index;
 use termtree::Tree;
+use tracing::instrument;
 
 pub trait TreeNodeConvert {
     fn to_tree_string(&self) -> Tree<String>;
 }
 
 impl TreeNodeConvert for TreeArena {
+    #[instrument(level = "trace", skip(self))]
     fn to_tree_string(&self) -> Tree<String> {
         if let Some(root_idx) = self.root() {
             let mut tree = Tree::new(self.get_node(root_idx).unwrap().data.file_path.display().to_string());
@@ -37,6 +39,7 @@ impl TreeNodeConvert for TreeArena {
     }
 }
 
+#[instrument(level = "trace", skip(tree))]
 pub fn build_tree_representation(tree: &TreeArena, node_idx: Index, tree_repr: &mut Tree<String>) {
     if let Some(node) = tree.get_node(node_idx) {
         // Sort children only for display purposes

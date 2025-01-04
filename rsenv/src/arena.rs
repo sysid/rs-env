@@ -2,6 +2,7 @@
 use std::fmt;
 use generational_arena::{Arena, Index};
 use std::path::PathBuf;
+use tracing::instrument;
 
 #[derive(Debug, Clone)]
 pub struct NodeData {
@@ -42,6 +43,7 @@ impl TreeArena {
         }
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub fn insert_node(&mut self, data: NodeData, parent: Option<Index>) -> Index {
         let node = TreeNode {
             data,
@@ -61,26 +63,32 @@ impl TreeArena {
         node_idx
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub fn get_node(&self, idx: Index) -> Option<&TreeNode> {
         self.arena.get(idx)
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub fn get_node_mut(&mut self, idx: Index) -> Option<&mut TreeNode> {
         self.arena.get_mut(idx)
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub fn root(&self) -> Option<Index> {
         self.root
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub fn iter(&self) -> TreeIterator {
         TreeIterator::new(self)
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub fn iter_postorder(&self) -> PostOrderIterator {
         PostOrderIterator::new(self)
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub fn depth(&self) -> usize {
         if let Some(root) = self.root {
             self.calculate_depth(root)
@@ -89,6 +97,7 @@ impl TreeArena {
         }
     }
 
+    #[instrument(level = "trace", skip(self))]
     fn calculate_depth(&self, node_idx: Index) -> usize {
         if let Some(node) = self.get_node(node_idx) {
             1 + node.children
@@ -101,6 +110,7 @@ impl TreeArena {
         }
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub fn leaf_nodes(&self) -> Vec<String> {
         let mut leaves = Vec::new();
         if let Some(root) = self.root {
@@ -109,6 +119,7 @@ impl TreeArena {
         leaves
     }
 
+    #[instrument(level = "trace", skip(self))]
     fn collect_leaves(&self, node_idx: Index, leaves: &mut Vec<String>) {
         if let Some(node) = self.get_node(node_idx) {
             if node.children.is_empty() {
@@ -128,6 +139,7 @@ pub struct TreeIterator<'a> {
 }
 
 impl<'a> TreeIterator<'a> {
+    #[instrument(level = "trace")]
     fn new(arena: &'a TreeArena) -> Self {
         let mut stack = Vec::new();
         if let Some(root) = arena.root() {
@@ -140,6 +152,7 @@ impl<'a> TreeIterator<'a> {
 impl<'a> Iterator for TreeIterator<'a> {
     type Item = (Index, &'a TreeNode);
 
+    #[instrument(level = "trace", skip(self))]
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(current_idx) = self.stack.pop() {
             if let Some(node) = self.arena.get_node(current_idx) {
@@ -160,6 +173,7 @@ pub struct PostOrderIterator<'a> {
 }
 
 impl<'a> PostOrderIterator<'a> {
+    #[instrument(level = "trace")]
     fn new(arena: &'a TreeArena) -> Self {
         let mut stack = Vec::new();
         if let Some(root) = arena.root() {
@@ -172,6 +186,7 @@ impl<'a> PostOrderIterator<'a> {
 impl<'a> Iterator for PostOrderIterator<'a> {
     type Item = (Index, &'a TreeNode);
 
+    #[instrument(level = "trace", skip(self))]
     fn next(&mut self) -> Option<Self::Item> {
         while let Some((current_idx, visited)) = self.stack.pop() {
             if let Some(node) = self.arena.get_node(current_idx) {

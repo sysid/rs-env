@@ -88,7 +88,7 @@ pub fn is_dag(dir_path: &Path) -> TreeResult<bool> {
 ///
 /// child wins against parent
 /// rightmost sibling wins
-#[instrument(level = "trace")]
+#[instrument(level = "debug")]
 pub fn build_env(file_path: &Path) -> TreeResult<(BTreeMap<String, String>, Vec<PathBuf>, bool)> {
     warn_if_symlink(file_path)?;
     let file_path = file_path.to_canonical()?;
@@ -230,6 +230,11 @@ fn warn_if_symlink(file_path: &Path) -> TreeResult<()> {
     Ok(())
 }
 
+/// Links a parent file to a child file by adding a special comment to the child file.
+/// The comment contains the relative path from the child to the parent.
+/// If the child file already has a parent, the function will replace the existing parent.
+/// If the child file has multiple parents, the function will return an error.
+#[instrument(level = "debug")]
 pub fn link(parent: &Path, child: &Path) -> TreeResult<()> {
     let parent = parent.to_canonical()?;
     let child = child.to_canonical()?;
@@ -282,6 +287,7 @@ pub fn link(parent: &Path, child: &Path) -> TreeResult<()> {
     Ok(())
 }
 
+#[instrument(level = "debug")]
 pub fn unlink(child: &Path) -> TreeResult<()> {
     let child = child.to_canonical()?;
     debug!("child: {:?}", child);
@@ -321,6 +327,7 @@ pub fn unlink(child: &Path) -> TreeResult<()> {
 }
 
 /// links a list of env files together and build the hierarchical environment variables tree
+#[instrument(level = "debug")]
 pub fn link_all(nodes: &[PathBuf]) {
     debug!("nodes: {:?}", nodes);
     let mut parent = None;

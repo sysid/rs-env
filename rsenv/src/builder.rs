@@ -4,6 +4,7 @@ use std::io::BufReader;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use regex::Regex;
+use tracing::instrument;
 use walkdir::WalkDir;
 
 use crate::errors::{TreeError, TreeResult};
@@ -31,6 +32,7 @@ impl TreeBuilder {
         }
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub fn build_from_directory(&mut self, directory_path: &Path) -> TreeResult<Vec<TreeArena>> {
         if !directory_path.exists() {
             return Err(TreeError::FileNotFound(directory_path.to_path_buf()));
@@ -58,6 +60,7 @@ impl TreeBuilder {
         Ok(trees)
     }
 
+    #[instrument(level = "debug", skip(self))]
     fn scan_directory(&mut self, directory_path: &Path) -> TreeResult<()> {
         for entry in WalkDir::new(directory_path) {
             let entry = entry.map_err(|e| TreeError::PathResolution {
@@ -72,6 +75,7 @@ impl TreeBuilder {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self))]
     fn process_file(&mut self, path: &Path) -> TreeResult<()> {
         let file = File::open(path).map_err(TreeError::FileReadError)?;
         let reader = BufReader::new(file);
@@ -95,6 +99,7 @@ impl TreeBuilder {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self))]
     fn find_root_nodes(&self) -> Vec<PathBuf> {
         self.relationship_cache
             .keys()
@@ -103,6 +108,7 @@ impl TreeBuilder {
             .collect()
     }
 
+    #[instrument(level = "debug", skip(self))]
     fn build_tree(&mut self, root_path: &Path) -> TreeResult<TreeArena> {
         let mut tree = TreeArena::new();
         let mut stack = vec![(root_path.to_path_buf(), None)];
