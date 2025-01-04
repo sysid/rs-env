@@ -4,20 +4,20 @@ use clap_complete::Shell;
 #[derive(Parser, Debug, PartialEq)]
 #[command(author, version, about, long_about = None)] // Read from `Cargo.toml`
 #[command(arg_required_else_help = true)]
-/// A security guard for your config files
+/// A hierarchical environment variable manager for configuration files
 pub struct Cli {
-    /// Optional name to operate on
+    /// Name of the configuration to operate on (optional)
     name: Option<String>,
 
-    /// Turn debugging information on (multiple -d flags increase verbosity)
+    /// Enable debug logging. Multiple flags (-d, -dd, -ddd) increase verbosity
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub debug: u8,
 
-    /// Generate shell completions
+    /// Generate shell completion scripts
     #[arg(long = "generate", value_enum)]
     pub generator: Option<Shell>,
 
-    /// Show configuration information
+    /// Display version and configuration information
     #[arg(long = "info")]
     pub info: bool,
 
@@ -27,78 +27,78 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum Commands {
-    /// Build the resulting set of environment variables (DAG/Tree)
+    /// Build and display the complete set of environment variables
     Build {
-        /// path to environment file (last child in hierarchy, leaf node)
+        /// Path to the last linked environment file (leaf node in hierarchy)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
-    /// Write the resulting set of variables to .envrc (requires direnv, DAG/Tree)
+    /// Write environment variables to .envrc file (requires direnv)
     Envrc {
-        /// path to environment file (last child in hierarchy, leaf node)
+        /// Path to the last linked environment file (leaf node in hierarchy)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
         /// path to .envrc file
         #[arg(value_hint = ValueHint::FilePath)]
         envrc_path: Option<String>,
     },
-    /// Show all files involved in resulting set (DAG/Tree)
+    /// List all files in the environment hierarchy
     Files {
-        /// path to environment file (last child in hierarchy)
+        /// Path to the last linked environment file (leaf node in hierarchy)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
-    /// Edit the given environment file and all its parents (DAG/Tree)
+    /// Edit an environment file and all its parent files
     EditLeaf {
-        /// path to environment file (Leaf)
+        /// Path to the last linked environment file (leaf node in hierarchy)
         #[arg(value_hint = ValueHint::FilePath)]
         source_path: String,
     },
-    /// Edit the FZF selected branch/DAG
+    /// Interactively select and edit an environment hierarchy
     Edit {
-        /// path to environment files directory
+        /// Directory containing environment files
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
-    /// select environment/branch and update .envrc file (requires direnv, DAG/Tree)
+    /// Update .envrc with selected environment (requires direnv)
     SelectLeaf {
-        /// path to environment file (leaf node))
+        /// Path to the leaf environment file
         #[arg(value_hint = ValueHint::DirPath)]
         source_path: String,
     },
-    /// FZF based selection of environment/branch and update of .envrc file (requires direnv, DAG/Tree)
+    /// Interactively select environment and update .envrc (requires direnv)
     Select {
-        /// path to environment directory
+        /// Directory containing environment files
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
-    /// Link files into a linear dependency branch (root -> parent -> child).
+    /// Create parent-child relationships between environment files
     Link {
-        /// .env files to link (root -> parent -> child)
+        /// Environment files to link (root -> parent -> child)
         #[arg(value_hint = ValueHint::FilePath, num_args = 1..)]
         nodes: Vec<String>,
     },
     /// Show all branches (linear representation)
     Branches {
-        /// path to root directory for environment files
+        /// Root directory containing environment files
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
     /// Show all trees (hierarchical representation)
     Tree {
-        /// path to root directory for environment files
+        /// Root directory containing environment files
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
-    /// Edit branches of all trees side-by-side (vim required in path)
+    /// Edit all environment hierarchies side-by-side (requires vim)
     TreeEdit {
-        /// path to root directory for environment files
+        /// Root directory containing environment files
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
-    /// Output leaves as paths (Tree)
+    /// List all leaf environment files
     Leaves {
-        /// path to root directory for environment files
+        /// Root directory containing environment files
         #[arg(value_hint = ValueHint::DirPath)]
         source_dir: String,
     },
