@@ -11,6 +11,7 @@ use rsenv::builder::TreeBuilder;
 use rsenv::arena::TreeArena;
 use generational_arena::Index;
 use rstest::rstest;
+use rsenv::util::path;
 use rsenv::util::path::normalize_path_separator;
 
 #[rstest]
@@ -108,13 +109,7 @@ fn given_non_root_location_when_printing_leaf_paths_then_resolves_paths_correctl
             println!("{}", path);
         }
 
-        // Convert full paths to relative paths starting at "tests/"
-        let mut leaf_nodes: Vec<String> = leaf_nodes.iter()
-            .map(|path| {
-                let pos = path.find("tests/").unwrap();
-                path[pos..].to_string()
-            })
-            .collect();
+        let mut leaf_nodes = path::relativize_paths(leaf_nodes, "tests/");
 
         // Sort for consistent comparison
         let mut expected = vec![
@@ -130,8 +125,6 @@ fn given_non_root_location_when_printing_leaf_paths_then_resolves_paths_correctl
     }
     Ok(())
 }
-
-
 
 #[rstest]
 fn test_print() {
@@ -192,12 +185,12 @@ fn test_print_tree_recursive() {
 }
 
 #[rstest]
-fn test_print_tree_recursive_data() {
-    let expected = "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/dot.envrc
-└── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/level1.env
-    └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/level2.env
-        └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/a/level3.env
-            └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/complex/level4.env\n";
+fn given_complex_structure_when_printing_tree_then_shows_nested_hierarchy() {
+    let expected = "tests/resources/environments/complex/dot.envrc
+└── tests/resources/environments/complex/level1.env
+    └── tests/resources/environments/complex/level2.env
+        └── tests/resources/environments/complex/a/level3.env
+            └── tests/resources/environments/complex/level4.env\n";
 
     let mut builder = TreeBuilder::new();
     let trees = builder.build_from_directory(Path::new("./tests/resources/environments/complex")).unwrap();
@@ -208,18 +201,20 @@ fn test_print_tree_recursive_data() {
                 let mut tree_repr = Tree::new(root_node.data.file_path.to_string_lossy().to_string());
                 tree_traits::build_tree_representation(tree, root_idx, &mut tree_repr);
                 let tree_str = tree_repr.to_string();
-                println!("{}", tree_str);
-                assert_eq!(normalize_path_separator(&tree_str), normalize_path_separator(expected));
+                // Convert absolute paths to relative using path helper
+                let relative_str = path::relativize_tree_str(&tree_str, "tests/");
+                println!("{}", relative_str);
+                assert_eq!(normalize_path_separator(&relative_str), normalize_path_separator(expected));
             }
         }
     }
 }
 
 #[rstest]
-fn test_print_tree_recursive_parallel() {
-    let expected = "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/a_test.env
-└── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/b_test.env
-    └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/parallel/test.env\n";
+fn given_parallel_structure_when_printing_tree_then_shows_correct_hierarchy() {
+    let expected = "tests/resources/environments/parallel/a_test.env
+└── tests/resources/environments/parallel/b_test.env
+    └── tests/resources/environments/parallel/test.env\n";
 
     let mut builder = TreeBuilder::new();
     let trees = builder.build_from_directory(Path::new("./tests/resources/environments/parallel")).unwrap();
@@ -230,9 +225,10 @@ fn test_print_tree_recursive_parallel() {
                 let mut tree_repr = Tree::new(root_node.data.file_path.to_string_lossy().to_string());
                 tree_traits::build_tree_representation(tree, root_idx, &mut tree_repr);
                 let tree_str = tree_repr.to_string();
-                println!("{}", tree_str);
-                if tree_str.contains("test.env") {
-                    assert_eq!(normalize_path_separator(&tree_str), normalize_path_separator(expected));
+                let relative_str = path::relativize_tree_str(&tree_str, "tests/");
+                println!("{}", relative_str);
+                if relative_str.contains("test.env") {
+                    assert_eq!(normalize_path_separator(&relative_str), normalize_path_separator(expected));
                 }
             }
         }
@@ -240,14 +236,14 @@ fn test_print_tree_recursive_parallel() {
 }
 
 #[rstest]
-fn test_print_tree_recursive_tree() {
-    let expected = "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env
-├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level11.env
-├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level12.env
-│   ├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level21.env
-│   └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level22.env
-│       └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level32.env
-└── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level13.env\n";
+fn given_tree_structure_when_printing_complete_tree_then_shows_all_branches() {
+    let expected = "tests/resources/environments/tree/root.env
+├── tests/resources/environments/tree/level11.env
+├── tests/resources/environments/tree/level12.env
+│   ├── tests/resources/environments/tree/level21.env
+│   └── tests/resources/environments/tree/level22.env
+│       └── tests/resources/environments/tree/level32.env
+└── tests/resources/environments/tree/level13.env\n";
 
     let mut builder = TreeBuilder::new();
     let trees = builder.build_from_directory(Path::new("./tests/resources/environments/tree")).unwrap();
@@ -258,9 +254,11 @@ fn test_print_tree_recursive_tree() {
                 let mut tree_repr = Tree::new(root_node.data.file_path.to_string_lossy().to_string());
                 tree_traits::build_tree_representation(tree, root_idx, &mut tree_repr);
                 let tree_str = tree_repr.to_string();
-                println!("{}", tree_str);
-                assert_eq!(normalize_path_separator(&tree_str), normalize_path_separator(expected));
+                let relative_str = path::relativize_tree_str(&tree_str, "tests/");
+                println!("{}", relative_str);
+                assert_eq!(normalize_path_separator(&relative_str), normalize_path_separator(expected));
             }
         }
     }
 }
+

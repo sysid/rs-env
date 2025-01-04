@@ -1,9 +1,6 @@
 #![allow(unused_imports)]
 
 use anyhow::{Context, Result};
-use camino::{Utf8Path, Utf8PathBuf};
-use camino_tempfile::tempfile;
-use camino_tempfile::NamedUtf8TempFile;
 use clap::{Args, Command, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
 use colored::Colorize;
@@ -71,8 +68,8 @@ fn setup_logging(verbosity: u8) {
         }
     };
 
-    // Create a noisy module filter
-    let noisy_modules = [""];
+    // Create a noisy module filter (Gotcha: empty matches all!)
+    let noisy_modules = ["x"];
     let module_filter = filter_fn(move |metadata| {
         !noisy_modules
             .iter()
