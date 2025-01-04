@@ -167,7 +167,7 @@ fn _branches(source_path: &str) -> Result<()> {
         if let Some(root_idx) = tree.root() {
             if let Some(root_node) = tree.get_node(root_idx) {
                 println!("Tree Root: {}", root_node.data.file_path.display());
-                let mut path = vec![root_node.data.file_path.to_str().unwrap().to_string()];
+                let _path = [root_node.data.file_path.to_str().unwrap().to_string()];
                 // TODO: Implement print_leaf_paths for arena-based tree
                 println!();
             }

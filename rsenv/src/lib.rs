@@ -12,7 +12,6 @@ use crate::util::path::{ensure_file_exists, PathExt};
 
 pub mod envrc;
 pub mod edit;
-pub mod tree;
 pub mod tree_traits;
 pub mod dag;
 pub mod cli;

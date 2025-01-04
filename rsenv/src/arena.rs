@@ -1,10 +1,7 @@
 
 use std::fmt;
-use anyhow::Result;
 use generational_arena::{Arena, Index};
-use std::path::{Path, PathBuf};
-use termtree::Tree;
-use crate::tree_traits::TreeNodeConvert;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct NodeData {
@@ -29,6 +26,12 @@ pub struct TreeNode {
 pub struct TreeArena {
     arena: Arena<TreeNode>,
     root: Option<Index>,
+}
+
+impl Default for TreeArena {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TreeArena {
