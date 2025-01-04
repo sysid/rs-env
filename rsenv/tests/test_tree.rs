@@ -14,7 +14,7 @@ use rstest::rstest;
 use rsenv::util::path::normalize_path_separator;
 
 #[rstest]
-fn test_build_trees_fail_invalid_parent_path() -> Result<()> {
+fn given_invalid_parent_path_when_building_trees_then_returns_error() -> Result<()> {
     let original_dir = env::current_dir()?;
     let mut builder = TreeBuilder::new();
     let trees = builder.build_from_directory(Path::new("./tests/resources/environments/fail"));
@@ -34,7 +34,7 @@ fn test_build_trees_fail_invalid_parent_path() -> Result<()> {
 
 
 #[rstest]
-fn test_build_trees_complex() -> Result<()> {
+fn given_complex_hierarchy_when_building_trees_then_returns_correct_depth_and_leaves() -> Result<()> {
     let mut builder = TreeBuilder::new();
     let trees = builder.build_from_directory(Path::new("./tests/resources/environments/complex"))?;
     println!("trees: {:#?}", trees);
@@ -55,7 +55,7 @@ fn test_build_trees_complex() -> Result<()> {
 }
 
 #[rstest]
-fn test_build_trees_tree_and_leaf_paths() -> Result<()> {
+fn given_tree_structure_when_building_trees_then_returns_correct_hierarchy() -> Result<()> {
     let mut builder = TreeBuilder::new();
     let trees = builder.build_from_directory(Path::new("./tests/resources/environments/tree"))?;
     println!("trees: {:#?}", trees);
@@ -80,7 +80,7 @@ fn test_build_trees_tree_and_leaf_paths() -> Result<()> {
 }
 
 #[rstest]
-fn test_print_leaf_paths_when_root_path_only_matches_partially() -> Result<()> {
+fn given_partial_root_match_when_printing_leaf_paths_then_handles_prefix_correctly() -> Result<()> {
     let mut builder = TreeBuilder::new();
     let trees = builder.build_from_directory(Path::new("./tests/resources/environments/max_prefix/confguard/xxx"))?;
     assert_eq!(trees.len(), 1);
@@ -95,13 +95,13 @@ fn test_print_leaf_paths_when_root_path_only_matches_partially() -> Result<()> {
 }
 
 #[rstest]
-fn test_print_leaf_paths_when_not_in_root() -> Result<()> {
+fn given_non_root_location_when_printing_leaf_paths_then_resolves_paths_correctly()-> Result<()> {
     let mut builder = TreeBuilder::new();
     let trees = builder.build_from_directory(Path::new("./tests/resources/environments/tree2/confguard"))?;
     assert_eq!(trees.len(), 1);
 
     for tree in &trees {
-        let mut leaf_nodes = tree.leaf_nodes();
+        let leaf_nodes = tree.leaf_nodes();
         println!("Tree paths:");
         assert_eq!(tree.depth(), 4);
         for path in &leaf_nodes {
@@ -139,7 +139,7 @@ fn test_print() {
     let trees = builder.build_from_directory(Path::new("./tests/resources/environments/complex")).unwrap();
     for tree in &trees {
         for (idx, node) in tree.iter() {
-            println!("{}", node.data.file_path.display());
+            println!("{:?}: {}", idx, node.data.file_path.display());
         }
     }
     // todo: assert order?

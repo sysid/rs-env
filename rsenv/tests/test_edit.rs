@@ -1,5 +1,5 @@
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use rstest::rstest;
@@ -13,7 +13,7 @@ use rsenv::get_files;
 
 #[rstest]
 #[ignore = "Interactive via Makefile"]
-fn test_select_file_with_suffix() -> TreeResult<()> {
+fn given_directory_when_selecting_file_with_suffix_then_returns_valid_file() -> TreeResult<()> {
     let dir = Path::new("./tests/resources/data");
     let suffix = ".env";
     let result = select_file_with_suffix(dir, suffix)?;
@@ -24,7 +24,7 @@ fn test_select_file_with_suffix() -> TreeResult<()> {
 
 #[rstest]
 #[ignore = "Interactive via Makefile"]
-fn test_open_files_in_editor() -> TreeResult<()> {
+fn given_valid_files_when_opening_in_editor_then_opens_successfully() -> TreeResult<()> {
     let files = get_files(Path::new(
         "./tests/resources/environments/complex/level4.env",
     ))?;
@@ -34,17 +34,15 @@ fn test_open_files_in_editor() -> TreeResult<()> {
 
 #[rstest]
 #[ignore = "Interactive via Makefile"]
-fn test_create_vimscript_interactive() -> TreeResult<()> {
-    let files = vec![
-        vec!["a_test.env", "b_test.env", "test.env"],
+fn given_file_list_when_creating_vimscript_then_generates_valid_interactive_script() -> TreeResult<()> {
+    let files = [vec!["a_test.env", "b_test.env", "test.env"],
         vec!["a_int.env", "b_int.env", "int.env"],
-        vec!["a_prod.env"],
-    ];
+        vec!["a_prod.env"]];
 
     let script = create_vimscript(
         files
             .iter()
-            .map(|v| v.iter().map(|s| Path::new(s)).collect())
+            .map(|v| v.iter().map(Path::new).collect())
             .collect(),
     );
     println!("{}", script);
@@ -65,17 +63,15 @@ fn test_create_vimscript_interactive() -> TreeResult<()> {
 }
 
 #[rstest]
-fn test_create_vimscript_non_interactive() {
-    let files = vec![
-        vec!["a_test.env", "b_test.env", "test.env"],
+fn given_file_list_when_creating_vimscript_then_generates_expected_script() {
+    let files = [vec!["a_test.env", "b_test.env", "test.env"],
         vec!["a_int.env", "b_int.env", "int.env"],
-        vec!["a_prod.env"],
-    ];
+        vec!["a_prod.env"]];
 
     let script = create_vimscript(
         files
             .iter()
-            .map(|v| v.iter().map(|s| Path::new(s)).collect())
+            .map(|v| v.iter().map(Path::new).collect())
             .collect(),
     );
 
@@ -104,7 +100,7 @@ wincmd =
 }
 
 #[rstest]
-fn test_create_branches_tree() -> TreeResult<()> {
+fn given_tree_structure_when_creating_branches_then_returns_correct_branch_paths() -> TreeResult<()> {
     let mut builder = TreeBuilder::new();
     let trees = builder.build_from_directory(Path::new("./tests/resources/environments/tree"))?;
     let mut result: Vec<Vec<String>> = create_branches(&trees)
@@ -137,7 +133,7 @@ fn test_create_branches_tree() -> TreeResult<()> {
 }
 
 #[rstest]
-fn test_create_branches_parallel() -> TreeResult<()> {
+fn given_parallel_structure_when_creating_branches_then_returns_correct_paths() -> TreeResult<()> {
     let mut builder = TreeBuilder::new();
     let trees =
         builder.build_from_directory(Path::new("./tests/resources/environments/parallel"))?;
@@ -168,7 +164,7 @@ fn test_create_branches_parallel() -> TreeResult<()> {
 }
 
 #[rstest]
-fn test_create_branches_complex() -> TreeResult<()> {
+fn given_complex_structure_when_creating_branches_then_returns_correct_hierarchy() -> TreeResult<()> {
     let mut builder = TreeBuilder::new();
     let trees =
         builder.build_from_directory(Path::new("./tests/resources/environments/complex"))?;

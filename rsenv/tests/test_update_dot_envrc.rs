@@ -32,7 +32,7 @@ fn get_file_contents(path: &Path) -> TreeResult<String> {
 }
 
 #[rstest]
-fn test_update_dot_envrc(temp_dir: PathBuf) -> TreeResult<()> {
+fn given_envrc_file_when_updating_then_adds_correct_section(temp_dir: PathBuf) -> TreeResult<()> {
     let path = temp_dir.join("dot.envrc");
     let data = build_env_vars(Path::new("./tests/resources/environments/complex/level4.env"))?;
 
@@ -55,7 +55,7 @@ fn test_update_dot_envrc(temp_dir: PathBuf) -> TreeResult<()> {
 }
 
 #[rstest]
-fn test_delete_section(temp_dir: PathBuf) -> TreeResult<()> {
+fn given_envrc_with_section_when_deleting_then_removes_section(temp_dir: PathBuf) -> TreeResult<()> {
     let path = temp_dir.join("dot.envrc");
     let data = build_env_vars(Path::new("./tests/resources/environments/complex/level4.env"))?;
 
@@ -73,7 +73,7 @@ fn test_delete_section(temp_dir: PathBuf) -> TreeResult<()> {
 }
 
 #[rstest]
-fn test_multiple_updates(temp_dir: PathBuf) -> TreeResult<()> {
+fn given_multiple_updates_when_updating_envrc_then_maintains_single_section(temp_dir: PathBuf) -> TreeResult<()> {
     let path = temp_dir.join("dot.envrc");
     let data1 = build_env_vars(Path::new("./tests/resources/environments/complex/level4.env"))?;
     let data2 = build_env_vars(Path::new("./tests/resources/environments/complex/a/level3.env"))?;

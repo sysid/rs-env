@@ -3,18 +3,23 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
-use generational_arena::Index;
 use regex::Regex;
 use walkdir::WalkDir;
 
 use crate::errors::{TreeError, TreeResult};
 use crate::arena::{TreeArena, NodeData};
-use crate::util::path::{ensure_file_exists, PathExt};
+use crate::util::path::PathExt;
 
 pub struct TreeBuilder {
     relationship_cache: HashMap<PathBuf, Vec<PathBuf>>,
     visited_paths: HashSet<PathBuf>,
     parent_regex: Regex,
+}
+
+impl Default for TreeBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TreeBuilder {

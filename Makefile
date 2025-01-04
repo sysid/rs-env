@@ -39,44 +39,59 @@ init-env:  ## init-env
 show-env:  ## show-env
 	@tree -a ~/xxx
 
-
 .PHONY: test
 test:  ## test
 	RUST_LOG=DEBUG pushd $(pkg_src) && cargo test -- --test-threads=1  # --nocapture
 	#RUST_LOG=DEBUG pushd $(pkg_src) && cargo test
 
 .PHONY: run-edit-leaf
-run-edit-leaf:  ## run-edit-leaf
+run-edit-leaf:  ## run-edit-leaf: expect to open entire branch
 	pushd $(pkg_src) && cargo run -- edit-leaf tests/resources/environments/tree2/confguard/subdir/level32.env
 
 .PHONY: run-leaves
-run-leaves:  ## run-leaves
+run-leaves:  ## run-leaves: expect level21, level32, level13, level11
 	pushd $(pkg_src) && cargo run -- leaves tests/resources/environments/tree2/confguard
 
 .PHONY: run-edit
-run-edit:  ## run-edit
+run-edit:  ## run-edit: expect fzf selection for open
 	pushd $(pkg_src) && cargo run -- edit ./tests/resources/environments/complex
 
 .PHONY: run-build
-run-build:  ## run-build
+run-build:  ## run-build: expect fully compiled env vars list
 	pushd $(pkg_src) && time cargo run -- -d -d build ./tests/resources/environments/complex/level4.env
 
 .PHONY: run-select-leaf
-run-select-leaf:  ## run-select-leaf
+run-select-leaf:  ## run-select-leaf: expect updated .envrc (idempotent)
 	rsenv/target/debug/rsenv select-leaf $(SOPS_PATH)/environments/local.env
 	cat .envrc
 
 .PHONY: run-select
-run-select:  ## run-select
+run-select:  ## run-select: select sops env and update .envrc
 	rsenv/target/debug/rsenv select $(SOPS_PATH)
 	cat .envrc
 
 .PHONY: run-files
-run-files:  ## run-files
+run-files:  ## run-files: create branch
 	pushd $(pkg_src) && time cargo run -- -d -d files ./tests/resources/environments/complex/level4.env
 
+### Expected .enrc entry:
+# #------------------------------- rsenv start --------------------------------
+# export PIPENV_VENV_IN_PROJECT=1  # creates .venv
+# export PYTHONPATH=$PROJ_DIR
+# export RUN_ENV=local
+# export SOPS_PATH=$HOME/dev/s/private/sec-sops/confguard/rs-sops-20ae57f0
+# export TERRAFORM_PROMPT=0
+# export VAR_1=var_1
+# export VAR_2=var_2
+# export VAR_3=var_31
+# export VAR_4=var_42
+# export VAR_5=var_53
+# export VAR_6=var_64
+# export VAR_7=var_74
+# export senv="source $PROJ_DIR/scripts/env.sh"
+# #-------------------------------- rsenv end ---------------------------------
 .PHONY: run-envrc
-run-envrc: init-env  ## run-envrc
+run-envrc: init-env  ## run-envrc: expect above entry in .envrc
 	pushd $(pkg_src) && time cargo run -- -d -d envrc ./tests/resources/environments/complex/level4.env ~/xxx/.envrc
 	#pushd $(pkg_src) && time cargo run -- envrc ./tests/resources/environments/complex/level4.env ~/xxx/.envrc
 	cat ~/xxx/.envrc
