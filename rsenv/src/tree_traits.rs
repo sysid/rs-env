@@ -4,34 +4,14 @@ Cannot define inherent `impl` for a type outside of the crate where the type is 
 
 define a trait that has the desired associated functions/types/constants and implement the trait for the type in question
  */
+use crate::arena::TreeArena;
 use generational_arena::Index;
 use termtree::Tree;
-use tracing::instrument;
-use crate::arena::TreeArena;
-use crate::tree::TreeNodeRef;
 
 pub trait TreeNodeConvert {
     fn to_tree_string(&self) -> Tree<String>;
 }
 
-impl TreeNodeConvert for TreeNodeRef {
-    #[instrument(level = "debug")]
-    fn to_tree_string(&self) -> Tree<String> {
-        let node_borrowed = &self.borrow();
-
-        // The root of the Tree<String> is the file_path of the TreeNode
-        let root = node_borrowed.node_data.file_path.clone();
-
-        // Recursively construct the children
-        let leaves: Vec<_> = node_borrowed.children.iter()
-            .map(|c| c.to_tree_string())
-            .collect();
-
-        Tree::new(root).with_leaves(leaves)
-    }
-}
-
-// Implementation of to_tree_string for TreeArena
 impl TreeNodeConvert for TreeArena {
     fn to_tree_string(&self) -> Tree<String> {
         if let Some(root_idx) = self.root() {
@@ -57,3 +37,22 @@ impl TreeNodeConvert for TreeArena {
     }
 }
 
+pub fn build_tree_representation(tree: &TreeArena, node_idx: Index, tree_repr: &mut Tree<String>) {
+    if let Some(node) = tree.get_node(node_idx) {
+        // Sort children only for display purposes
+        let mut children = node.children.clone();
+        children.sort_by(|a, b| {
+            let a_node = tree.get_node(*a).unwrap();
+            let b_node = tree.get_node(*b).unwrap();
+            a_node.data.file_path.cmp(&b_node.data.file_path)
+        });
+
+        for &child_idx in &children {
+            if let Some(child_node) = tree.get_node(child_idx) {
+                let mut child_tree = Tree::new(child_node.data.file_path.to_string_lossy().to_string());
+                build_tree_representation(tree, child_idx, &mut child_tree);
+                tree_repr.push(child_tree);
+            }
+        }
+    }
+}

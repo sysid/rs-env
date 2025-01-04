@@ -76,7 +76,7 @@ fn test_delete_section(temp_dir: PathBuf) -> TreeResult<()> {
 fn test_multiple_updates(temp_dir: PathBuf) -> TreeResult<()> {
     let path = temp_dir.join("dot.envrc");
     let data1 = build_env_vars(Path::new("./tests/resources/environments/complex/level4.env"))?;
-    let data2 = build_env_vars(Path::new("./tests/resources/environments/complex/level3.env"))?;
+    let data2 = build_env_vars(Path::new("./tests/resources/environments/complex/a/level3.env"))?;
 
     // First update
     update_dot_envrc(&path, &data1)?;

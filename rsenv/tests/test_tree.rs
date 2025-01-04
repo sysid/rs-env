@@ -5,7 +5,7 @@ use std::{env, fs};
 use std::path::{Path, PathBuf};
 use anyhow::Result;
 use fs_extra::{copy_items, dir};
-use rsenv::{build_env, build_env_vars, extract_env, link, link_all, print_files, unlink};
+use rsenv::{build_env, build_env_vars, extract_env, link, link_all, print_files, tree_traits, unlink};
 use termtree::Tree;
 use rsenv::builder::TreeBuilder;
 use rsenv::arena::TreeArena;
@@ -184,20 +184,8 @@ fn test_print_tree_recursive() {
         if let Some(root_idx) = tree.root() {
             if let Some(root_node) = tree.get_node(root_idx) {
                 let mut tree_repr = Tree::new(root_node.data.file_path.to_string_lossy().to_string());
-                build_tree_representation(tree, root_idx, &mut tree_repr);
+                tree_traits::build_tree_representation(tree, root_idx, &mut tree_repr);
                 println!("{}", tree_repr);
-            }
-        }
-    }
-}
-
-fn build_tree_representation(tree: &TreeArena, node_idx: Index, tree_repr: &mut Tree<String>) {
-    if let Some(node) = tree.get_node(node_idx) {
-        for &child_idx in &node.children {
-            if let Some(child_node) = tree.get_node(child_idx) {
-                let mut child_tree = Tree::new(child_node.data.file_path.to_string_lossy().to_string());
-                build_tree_representation(tree, child_idx, &mut child_tree);
-                tree_repr.push(child_tree);
             }
         }
     }
@@ -218,7 +206,7 @@ fn test_print_tree_recursive_data() {
         if let Some(root_idx) = tree.root() {
             if let Some(root_node) = tree.get_node(root_idx) {
                 let mut tree_repr = Tree::new(root_node.data.file_path.to_string_lossy().to_string());
-                build_tree_representation(tree, root_idx, &mut tree_repr);
+                tree_traits::build_tree_representation(tree, root_idx, &mut tree_repr);
                 let tree_str = tree_repr.to_string();
                 println!("{}", tree_str);
                 assert_eq!(normalize_path_separator(&tree_str), normalize_path_separator(expected));
@@ -240,7 +228,7 @@ fn test_print_tree_recursive_parallel() {
         if let Some(root_idx) = tree.root() {
             if let Some(root_node) = tree.get_node(root_idx) {
                 let mut tree_repr = Tree::new(root_node.data.file_path.to_string_lossy().to_string());
-                build_tree_representation(tree, root_idx, &mut tree_repr);
+                tree_traits::build_tree_representation(tree, root_idx, &mut tree_repr);
                 let tree_str = tree_repr.to_string();
                 println!("{}", tree_str);
                 if tree_str.contains("test.env") {
@@ -255,11 +243,11 @@ fn test_print_tree_recursive_parallel() {
 fn test_print_tree_recursive_tree() {
     let expected = "/Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/root.env
 ├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level11.env
-├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level13.env
-└── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level12.env
-    ├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level22.env
-    │   └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level32.env
-    └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level21.env\n";
+├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level12.env
+│   ├── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level21.env
+│   └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level22.env
+│       └── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level32.env
+└── /Users/Q187392/dev/s/public/rs-env/rsenv/tests/resources/environments/tree/level13.env\n";
 
     let mut builder = TreeBuilder::new();
     let trees = builder.build_from_directory(Path::new("./tests/resources/environments/tree")).unwrap();
@@ -268,7 +256,7 @@ fn test_print_tree_recursive_tree() {
         if let Some(root_idx) = tree.root() {
             if let Some(root_node) = tree.get_node(root_idx) {
                 let mut tree_repr = Tree::new(root_node.data.file_path.to_string_lossy().to_string());
-                build_tree_representation(tree, root_idx, &mut tree_repr);
+                tree_traits::build_tree_representation(tree, root_idx, &mut tree_repr);
                 let tree_str = tree_repr.to_string();
                 println!("{}", tree_str);
                 assert_eq!(normalize_path_separator(&tree_str), normalize_path_separator(expected));

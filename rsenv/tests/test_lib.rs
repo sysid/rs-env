@@ -49,7 +49,7 @@ fn test_extract_env() -> TreeResult<()> {
 #[rstest]
 fn test_build_env() -> TreeResult<()> {
     let (variables, files, is_dag) = build_env(Path::new("./tests/resources/environments/complex/level4.env"))?;
-    let (reference, _, _) = extract_env(Path::new("./tests/resources/environments/complex/result.env"))?;
+    let (reference, _) = extract_env(Path::new("./tests/resources/environments/complex/result.env"))?;
 
     let filtered_map: BTreeMap<_, _> = variables.iter()
         .filter(|(k, _)| k.starts_with("VAR_"))
@@ -66,7 +66,7 @@ fn test_build_env() -> TreeResult<()> {
 #[rstest]
 fn test_build_env_graph() -> TreeResult<()> {
     let (variables, files, is_dag) = build_env(Path::new("./tests/resources/environments/graph/level31.env"))?;
-    let (reference, _, _) = extract_env(Path::new("./tests/resources/environments/graph/result.env"))?;
+    let (reference, _) = extract_env(Path::new("./tests/resources/environments/graph/result.env"))?;
     println!("variables: {:#?}", variables);
     println!("files: {:#?}", files);
     println!("reference: {:#?}", reference);
@@ -79,7 +79,7 @@ fn test_build_env_graph() -> TreeResult<()> {
 #[rstest]
 fn test_build_env_graph2() -> TreeResult<()> {
     let (variables, files, is_dag) = build_env(Path::new("./tests/resources/environments/graph2/level21.env"))?;
-    let (reference, _, _) = extract_env(Path::new("./tests/resources/environments/graph2/result1.env"))?;
+    let (reference, _) = extract_env(Path::new("./tests/resources/environments/graph2/result1.env"))?;
     println!("variables: {:#?}", variables);
     println!("files: {:#?}", files);
     println!("reference: {:#?}", reference);
@@ -88,7 +88,7 @@ fn test_build_env_graph2() -> TreeResult<()> {
     assert!(is_dag);
 
     let (variables, _, is_dag) = build_env(Path::new("./tests/resources/environments/graph2/level22.env"))?;
-    let (reference, _, _) = extract_env(Path::new("./tests/resources/environments/graph2/result2.env"))?;
+    let (reference, _) = extract_env(Path::new("./tests/resources/environments/graph2/result2.env"))?;
     assert_eq!(variables, reference, "The two BTreeMaps are not equal!");
     assert!(is_dag);
     Ok(())
@@ -108,7 +108,7 @@ fn test_build_env_vars_fail_wrong_parent() -> TreeResult<()> {
     match result {
         Ok(_) => panic!("Expected an error, but got OK"),
         Err(e) => {
-            let re = Regex::new(r"Invalid parent path: .*not-existing.env")?;
+            let re = Regex::new(r"Invalid parent path: .*not-existing.env").expect("Invalid regex pattern");
             assert!(re.is_match(&e.to_string()));
         }
     }
@@ -224,7 +224,7 @@ fn test_extract_env_symlink2() -> TreeResult<()> {
         .expect("Failed to execute command");
 
     // Step 3: Check stderr for the symlink warning
-    let stderr_output = String::from_utf8(output.stderr)?;
+    let stderr_output = String::from_utf8(output.stderr).expect("invalid utf8 string");
     println!("stderr_output: {}", stderr_output);
     assert!(stderr_output.contains("Warning: The file"));
 
