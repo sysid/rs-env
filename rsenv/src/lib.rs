@@ -19,6 +19,35 @@ pub mod errors;
 pub mod builder;
 pub mod arena;
 
+/// Expands environment variables in a path string
+/// Supports both $VAR and ${VAR} syntax
+fn expand_env_vars(path: &str) -> String {
+    let mut result = path.to_string();
+    
+    // Find all occurrences of $VAR or ${VAR}
+    let env_var_pattern = Regex::new(r"\$(\w+)|\$\{(\w+)\}").unwrap();
+    
+    // Collect all matches first to avoid borrow checker issues with replace_all
+    let matches: Vec<_> = env_var_pattern.captures_iter(path).collect();
+    
+    for cap in matches {
+        // Get the variable name from either $VAR or ${VAR} pattern
+        let var_name = cap.get(1).or_else(|| cap.get(2)).unwrap().as_str();
+        let var_placeholder = if cap.get(1).is_some() {
+            format!("${}", var_name)
+        } else {
+            format!("${{{}}}", var_name)
+        };
+        
+        // Replace with environment variable value or empty string if not found
+        if let Ok(var_value) = std::env::var(var_name) {
+            result = result.replace(&var_placeholder, &var_value);
+        }
+    }
+    
+    result
+}
+
 #[instrument(level = "trace")]
 pub fn get_files(file_path: &Path) -> TreeResult<Vec<PathBuf>> {
     ensure_file_exists(file_path)?;
@@ -193,7 +222,9 @@ pub fn extract_env(file_path: &Path) -> TreeResult<(BTreeMap<String, String>, Ve
             let parents: Vec<&str> = line.trim_start_matches("# rsenv:").split_whitespace().collect();
             for parent in parents {
                 if !parent.is_empty() {
-                    let parent_path = PathBuf::from(parent).to_canonical()
+                    // Expand environment variables in the path
+                    let expanded_path = expand_env_vars(parent);
+                    let parent_path = PathBuf::from(expanded_path).to_canonical()
                         .map_err(|_| TreeError::InvalidParent(PathBuf::from(parent)))?;
                     parent_paths.push(parent_path);
                 }
