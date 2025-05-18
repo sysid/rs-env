@@ -22,3 +22,6 @@ filename = "VERSION"
 filename = "./rsenv/Cargo.toml"
 search = 'version = "{current_version}"'
 replace = 'version = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "rsenv/Cargo.lock"
