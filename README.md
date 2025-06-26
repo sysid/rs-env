@@ -10,14 +10,14 @@ Especially the challenge of avoiding duplication and knowing where a particular 
 Hierarchical variable management seems to be a good solution for this problem.
 
 # Features
-- Compile a resulting set of environment variables from a linked list of `<name>.env` files.
-- Linked `.env` files form trees. Paths from leave-nodes to root (branches) form the resulting set of variables.
-- Last defined variable wins, i.e. child tops parent.
-- Smart environment selection via builtin FZF (fuzzy find).
-- Quick edit via builtin FZF.
-- Side-by-side Tree edit.
-- [direnv](https://direnv.net/) integration: Have the resulting variable list written to your `.envrc` file.
-- [JetBrains](https://www.jetbrains.com/) integration via [EnvFile](https://plugins.jetbrains.com/plugin/7861-envfile) plugin.
+- **Hierarchical inheritance**: Compile environment variables from linked `.env` files forming tree structures
+- **Variable override**: Child variables override parent variables (last defined wins)
+- **Environment variable expansion**: Support for `$VAR` and `${VAR}` syntax in file paths and rsenv comments
+- **Interactive selection**: Smart environment selection and editing via built-in FZF
+- **Multiple integrations**: 
+  - [direnv](https://direnv.net/) integration for automatic environment loading
+  - [JetBrains EnvFile plugin](https://plugins.jetbrains.com/plugin/7861-envfile) support
+- **Flexible editing**: Side-by-side tree editing and individual file editing
 
 ### Concept
 ![concept](doc/concept.png)
@@ -29,19 +29,34 @@ cargo install rs-env
 ```
 
 ### Usage
-The resulting set of environment variables comes from a merge of all linked `.env` files.
 
-- **branch**: a linear list of files, each file can have one parent (no DAG).
-- **tree**: a collection of branches (files can be part of multiple branches, but only one parent)
-- environment variables are defined in files `<name>.env` and must be prefixed with `export` command
-- See [examples](./rsenv/tests/resources/environments)
-- multiple trees/branches per project are supported
-- files are linked by adding the comment line `# rsenv: <name.env>` or via: `rsenv link <root.env> <child1>.env <child2>.env`.
-
-Publish the resulting set of variables to the shell:
+**File Linking**: Environment files are linked via comments:
 ```bash
-source <(rsenv build <leaf-node.env>)
+# rsenv: parent.env
+# rsenv: $HOME/config/base.env    # Environment variables supported
+export MY_VAR=value
 ```
+
+**Basic Commands**:
+```bash
+# Build and display environment variables
+rsenv build production.env
+
+# Load variables into current shell
+source <(rsenv build production.env)
+
+# Interactive environment selection
+rsenv select
+
+# View hierarchy structure
+rsenv tree
+```
+
+**Structure**:
+- **Environment variables** must use `export` prefix in `.env` files
+- **Tree structure** where child variables override parent variables
+- **Multiple hierarchies** supported per project
+- See [examples](./rsenv/tests/resources/environments) for detailed usage patterns
 
 ```
 Hierarchical environment variable management
@@ -87,17 +102,19 @@ Options:
 <br>
 
 ## Integrations
+
 ### direnv
-[direnv](https://direnv.net/) activates environments automatically.
-- rs-env can update the `.envrc` file with the dependency graph variables.
+[direnv](https://direnv.net/) automatically activates environments when entering directories:
+```bash
+# Update .envrc with selected environment
+rsenv envrc production.env .envrc
+```
 
-
-### JetBrains Integration
-Life injection of environment variables:
-- Plugin [EnvFile](https://plugins.jetbrains.com/plugin/7861-envfile) can be used to life-inject environment variables.
-- Use the script `runenv.sh` as the "EnvFile" script (tick executable checkbox !).
-- The environment variable `RUN_ENV` parametrizes which environment to load.
-- It will look for a file `<RUN_ENV>.env` in the specified directory.
+### JetBrains IDEs
+Use the [EnvFile plugin](https://plugins.jetbrains.com/plugin/7861-envfile) for IDE integration:
+- Configure `runenv.sh` as the EnvFile script
+- Set `RUN_ENV` environment variable to specify which environment to load
+- The plugin will automatically load variables from `<RUN_ENV>.env`
 
 [![jetbrain](doc/jetbrain.png)](doc/jetbrain.png)
 
