@@ -1,35 +1,35 @@
-use std::path::{Path, PathBuf};
 use std::collections::BTreeMap;
-use std::fs::{File, symlink_metadata};
-use std::io::{BufRead, BufReader};
 use std::env;
+use std::fs::{symlink_metadata, File};
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 
+use crate::errors::{TreeError, TreeResult};
+use crate::util::path::{ensure_file_exists, PathExt};
 use regex::Regex;
 use tracing::{debug, instrument};
 use walkdir::WalkDir;
-use crate::errors::{TreeError, TreeResult};
-use crate::util::path::{ensure_file_exists, PathExt};
 
-pub mod envrc;
-pub mod edit;
-pub mod tree_traits;
-pub mod cli;
-pub mod util;
-pub mod errors;
-pub mod builder;
 pub mod arena;
+pub mod builder;
+pub mod cli;
+pub mod edit;
+pub mod envrc;
+pub mod errors;
+pub mod tree_traits;
+pub mod util;
 
 /// Expands environment variables in a path string
 /// Supports both $VAR and ${VAR} syntax
-fn expand_env_vars(path: &str) -> String {
+pub fn expand_env_vars(path: &str) -> String {
     let mut result = path.to_string();
-    
+
     // Find all occurrences of $VAR or ${VAR}
     let env_var_pattern = Regex::new(r"\$(\w+)|\$\{(\w+)\}").unwrap();
-    
+
     // Collect all matches first to avoid borrow checker issues with replace_all
     let matches: Vec<_> = env_var_pattern.captures_iter(path).collect();
-    
+
     for cap in matches {
         // Get the variable name from either $VAR or ${VAR} pattern
         let var_name = cap.get(1).or_else(|| cap.get(2)).unwrap().as_str();
@@ -38,13 +38,13 @@ fn expand_env_vars(path: &str) -> String {
         } else {
             format!("${{{}}}", var_name)
         };
-        
+
         // Replace with environment variable value or empty string if not found
         if let Ok(var_value) = std::env::var(var_name) {
             result = result.replace(&var_placeholder, &var_value);
         }
     }
-    
+
     result
 }
 
@@ -80,8 +80,7 @@ pub fn build_env_vars(file_path: &Path) -> TreeResult<String> {
 
 #[instrument(level = "trace")]
 pub fn is_dag(dir_path: &Path) -> TreeResult<bool> {
-    let re = Regex::new(r"# rsenv: (.+)")
-        .map_err(|e| TreeError::InternalError(e.to_string()))?;
+    let re = Regex::new(r"# rsenv: (.+)").map_err(|e| TreeError::InternalError(e.to_string()))?;
 
     // Walk through each file in the directory
     for entry in WalkDir::new(dir_path) {
@@ -91,8 +90,7 @@ pub fn is_dag(dir_path: &Path) -> TreeResult<bool> {
         })?;
 
         if entry.file_type().is_file() {
-            let file = File::open(entry.path())
-                .map_err(TreeError::FileReadError)?;
+            let file = File::open(entry.path()).map_err(TreeError::FileReadError)?;
             let reader = BufReader::new(file);
 
             for line in reader.lines() {
@@ -141,10 +139,13 @@ pub fn build_env(file_path: &Path) -> TreeResult<(BTreeMap<String, String>, Vec<
         let (vars, parents) = extract_env(&current_file)?;
         is_dag = is_dag || parents.len() > 1;
 
-        debug!("vars: {:?}, parents: {:?}, is_dag: {:?}", vars, parents, is_dag);
+        debug!(
+            "vars: {:?}, parents: {:?}, is_dag: {:?}",
+            vars, parents, is_dag
+        );
 
         for (k, v) in vars {
-            variables.entry(k).or_insert(v);  // first entry wins
+            variables.entry(k).or_insert(v); // first entry wins
         }
 
         for parent in parents {
@@ -200,15 +201,18 @@ pub fn extract_env(file_path: &Path) -> TreeResult<(BTreeMap<String, String>, Ve
         .map_err(|e| TreeError::InternalError(format!("Failed to get current dir: {}", e)))?;
 
     // Change the current directory in order to construct correct parent path
-    let parent_dir = file_path.parent()
+    let parent_dir = file_path
+        .parent()
         .ok_or_else(|| TreeError::InvalidParent(file_path.clone()))?;
     env::set_current_dir(parent_dir)
         .map_err(|e| TreeError::InternalError(format!("Failed to change dir: {}", e)))?;
 
-    debug!("Current directory: {:?}", env::current_dir().unwrap_or_default());
+    debug!(
+        "Current directory: {:?}",
+        env::current_dir().unwrap_or_default()
+    );
 
-    let file = File::open(&file_path)
-        .map_err(TreeError::FileReadError)?;
+    let file = File::open(&file_path).map_err(TreeError::FileReadError)?;
     let reader = BufReader::new(file);
 
     let mut variables: BTreeMap<String, String> = BTreeMap::new();
@@ -219,19 +223,22 @@ pub fn extract_env(file_path: &Path) -> TreeResult<(BTreeMap<String, String>, Ve
 
         // Check for the rsenv comment
         if line.starts_with("# rsenv:") {
-            let parents: Vec<&str> = line.trim_start_matches("# rsenv:").split_whitespace().collect();
+            let parents: Vec<&str> = line
+                .trim_start_matches("# rsenv:")
+                .split_whitespace()
+                .collect();
             for parent in parents {
                 if !parent.is_empty() {
                     // Expand environment variables in the path
                     let expanded_path = expand_env_vars(parent);
-                    let parent_path = PathBuf::from(expanded_path).to_canonical()
+                    let parent_path = PathBuf::from(expanded_path)
+                        .to_canonical()
                         .map_err(|_| TreeError::InvalidParent(PathBuf::from(parent)))?;
                     parent_paths.push(parent_path);
                 }
             }
             debug!("parent_paths: {:?}", parent_paths);
         }
-
         // Check for the export prefix
         else if line.starts_with("export ") {
             let parts: Vec<&str> = line.split('=').collect();
@@ -253,10 +260,12 @@ pub fn extract_env(file_path: &Path) -> TreeResult<(BTreeMap<String, String>, Ve
 
 #[instrument(level = "trace")]
 fn warn_if_symlink(file_path: &Path) -> TreeResult<()> {
-    let metadata = symlink_metadata(file_path)
-        .map_err(TreeError::FileReadError)?;
+    let metadata = symlink_metadata(file_path).map_err(TreeError::FileReadError)?;
     if metadata.file_type().is_symlink() {
-        eprintln!("Warning: The file {} is a symbolic link.", file_path.display());
+        eprintln!(
+            "Warning: The file {} is a symbolic link.",
+            file_path.display()
+        );
     }
     Ok(())
 }
@@ -271,15 +280,16 @@ pub fn link(parent: &Path, child: &Path) -> TreeResult<()> {
     let child = child.to_canonical()?;
     debug!("parent: {:?} <- child: {:?}", parent, child);
 
-    let mut child_contents = std::fs::read_to_string(&child)
-        .map_err(TreeError::FileReadError)?;
+    let mut child_contents = std::fs::read_to_string(&child).map_err(TreeError::FileReadError)?;
     let mut lines: Vec<_> = child_contents.lines().map(|s| s.to_string()).collect();
 
     // Calculate the relative path from child to parent
-    let relative_path = pathdiff::diff_paths(&parent, child.parent().unwrap())
-        .ok_or_else(|| TreeError::PathResolution {
-            path: parent.clone(),
-            reason: "Failed to compute relative path".to_string(),
+    let relative_path =
+        pathdiff::diff_paths(&parent, child.parent().unwrap()).ok_or_else(|| {
+            TreeError::PathResolution {
+                path: parent.clone(),
+                reason: "Failed to compute relative path".to_string(),
+            }
         })?;
 
     // Find and count the lines that start with "# rsenv:"
@@ -312,8 +322,7 @@ pub fn link(parent: &Path, child: &Path) -> TreeResult<()> {
 
     // Write the modified content back to the child file
     child_contents = lines.join("\n");
-    std::fs::write(&child, child_contents)
-        .map_err(TreeError::FileReadError)?;
+    std::fs::write(&child, child_contents).map_err(TreeError::FileReadError)?;
 
     Ok(())
 }
@@ -323,8 +332,7 @@ pub fn unlink(child: &Path) -> TreeResult<()> {
     let child = child.to_canonical()?;
     debug!("child: {:?}", child);
 
-    let mut child_contents = std::fs::read_to_string(&child)
-        .map_err(TreeError::FileReadError)?;
+    let mut child_contents = std::fs::read_to_string(&child).map_err(TreeError::FileReadError)?;
     let mut lines: Vec<_> = child_contents.lines().map(|s| s.to_string()).collect();
 
     // Find and count the lines that start with "# rsenv:"
@@ -351,8 +359,7 @@ pub fn unlink(child: &Path) -> TreeResult<()> {
     }
     // Write the modified content back to the child file
     child_contents = lines.join("\n");
-    std::fs::write(&child, child_contents)
-        .map_err(TreeError::FileReadError)?;
+    std::fs::write(&child, child_contents).map_err(TreeError::FileReadError)?;
 
     Ok(())
 }

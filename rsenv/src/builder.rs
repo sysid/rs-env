@@ -1,14 +1,14 @@
+use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::BufReader;
 use std::io::BufRead;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use regex::Regex;
 use tracing::instrument;
 use walkdir::WalkDir;
 
+use crate::arena::{NodeData, TreeArena};
 use crate::errors::{TreeError, TreeResult};
-use crate::arena::{TreeArena, NodeData};
 use crate::util::path::PathExt;
 
 pub struct TreeBuilder {
@@ -40,7 +40,7 @@ impl TreeBuilder {
         if !directory_path.is_dir() {
             return Err(TreeError::InvalidFormat {
                 path: directory_path.to_path_buf(),
-                reason: "Not a directory".to_string()
+                reason: "Not a directory".to_string(),
             });
         }
 
@@ -80,14 +80,16 @@ impl TreeBuilder {
         let file = File::open(path).map_err(TreeError::FileReadError)?;
         let reader = BufReader::new(file);
         let abs_path = path.to_canonical()?;
-        let current_dir = abs_path.parent()
+        let current_dir = abs_path
+            .parent()
             .ok_or_else(|| TreeError::InvalidParent(path.to_path_buf()))?;
 
         for line in reader.lines() {
             let line = line.map_err(TreeError::FileReadError)?;
             if let Some(caps) = self.parent_regex.captures(&line) {
                 let parent_relative = caps.get(1).unwrap().as_str();
-                let parent_path = current_dir.join(parent_relative);
+                let expanded_path = crate::expand_env_vars(parent_relative);
+                let parent_path = current_dir.join(expanded_path);
                 let parent_canonical = parent_path.to_canonical()?;
 
                 self.relationship_cache
@@ -121,7 +123,8 @@ impl TreeBuilder {
             }
 
             let node_data = NodeData {
-                base_path: current_path.parent()
+                base_path: current_path
+                    .parent()
                     .ok_or_else(|| TreeError::InvalidParent(current_path.clone()))?
                     .to_path_buf(),
                 file_path: current_path.clone(),
