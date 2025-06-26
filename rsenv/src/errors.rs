@@ -13,19 +13,13 @@ pub enum TreeError {
     FileReadError(#[from] std::io::Error),
 
     #[error("Invalid environment file format in {path}: {reason}")]
-    InvalidFormat {
-        path: PathBuf,
-        reason: String,
-    },
+    InvalidFormat { path: PathBuf, reason: String },
 
     #[error("Cycle detected in environment hierarchy starting at: {0}")]
     CycleDetected(PathBuf),
 
     #[error("Path resolution failed: {path}, reason: {reason}")]
-    PathResolution {
-        path: PathBuf,
-        reason: String,
-    },
+    PathResolution { path: PathBuf, reason: String },
 
     #[error("Multiple parent declarations found in: {0}")]
     MultipleParents(PathBuf),

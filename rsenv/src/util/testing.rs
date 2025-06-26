@@ -10,8 +10,7 @@ use tracing_subscriber::{
 
 static TEST_SETUP: Once = Once::new();
 
-pub fn init_test_setup()
-{
+pub fn init_test_setup() {
     TEST_SETUP.call_once(|| {
         if env::var("RUST_LOG").is_err() {
             env::set_var("RUST_LOG", "trace");

@@ -34,10 +34,13 @@ fn given_valid_files_when_opening_in_editor_then_opens_successfully() -> TreeRes
 
 #[rstest]
 #[ignore = "Interactive via Makefile"]
-fn given_file_list_when_creating_vimscript_then_generates_valid_interactive_script() -> TreeResult<()> {
-    let files = [vec!["a_test.env", "b_test.env", "test.env"],
+fn given_file_list_when_creating_vimscript_then_generates_valid_interactive_script(
+) -> TreeResult<()> {
+    let files = [
+        vec!["a_test.env", "b_test.env", "test.env"],
         vec!["a_int.env", "b_int.env", "int.env"],
-        vec!["a_prod.env"]];
+        vec!["a_prod.env"],
+    ];
 
     let script = create_vimscript(
         files
@@ -64,9 +67,11 @@ fn given_file_list_when_creating_vimscript_then_generates_valid_interactive_scri
 
 #[rstest]
 fn given_file_list_when_creating_vimscript_then_generates_expected_script() {
-    let files = [vec!["a_test.env", "b_test.env", "test.env"],
+    let files = [
+        vec!["a_test.env", "b_test.env", "test.env"],
         vec!["a_int.env", "b_int.env", "int.env"],
-        vec!["a_prod.env"]];
+        vec!["a_prod.env"],
+    ];
 
     let script = create_vimscript(
         files
@@ -100,7 +105,8 @@ wincmd =
 }
 
 #[rstest]
-fn given_tree_structure_when_creating_branches_then_returns_correct_branch_paths() -> TreeResult<()> {
+fn given_tree_structure_when_creating_branches_then_returns_correct_branch_paths() -> TreeResult<()>
+{
     let mut builder = TreeBuilder::new();
     let trees = builder.build_from_directory(Path::new("./tests/resources/environments/tree"))?;
     let mut result: Vec<Vec<String>> = create_branches(&trees)
@@ -164,7 +170,8 @@ fn given_parallel_structure_when_creating_branches_then_returns_correct_paths() 
 }
 
 #[rstest]
-fn given_complex_structure_when_creating_branches_then_returns_correct_hierarchy() -> TreeResult<()> {
+fn given_complex_structure_when_creating_branches_then_returns_correct_hierarchy() -> TreeResult<()>
+{
     let mut builder = TreeBuilder::new();
     let trees =
         builder.build_from_directory(Path::new("./tests/resources/environments/complex"))?;

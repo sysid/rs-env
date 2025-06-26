@@ -108,6 +108,30 @@ test-edit:  ## test-edit
 test-vimscript:  ## test-vimscript
 	pushd $(pkg_src) && cargo test --package rsenv --test test_edit test_create_vimscript -- --exact --nocapture --ignored
 
+.PHONY: test-env-vars
+test-env-vars:  ## test-env-vars: test environment variable resolution in rsenv comments
+	@echo "=== Testing Environment Variable Resolution ==="
+	@echo "Setting up RSENV_TEST_ROOT variable..."
+	@export RSENV_TEST_ROOT=$(pkg_src)/tests/resources/environments/env_vars && \
+	echo "RSENV_TEST_ROOT=$$RSENV_TEST_ROOT" && \
+	echo "" && \
+	echo "=== Testing build command with \$$VAR syntax ===" && \
+	pushd $(pkg_src) && cargo run -- build tests/resources/environments/env_vars/development.env && \
+	echo "" && \
+	echo "=== Testing build command with \$${VAR} syntax ===" && \
+	cargo run -- build tests/resources/environments/env_vars/production.env && \
+	echo "" && \
+	echo "=== Testing tree command ===" && \
+	cargo run -- tree tests/resources/environments/env_vars && \
+	echo "" && \
+	echo "=== Testing branches command ===" && \
+	cargo run -- branches tests/resources/environments/env_vars && \
+	echo "" && \
+	echo "=== Testing files command ===" && \
+	cargo run -- files tests/resources/environments/env_vars/staging.env && \
+	echo "" && \
+	echo "✓ All tests completed successfully!"
+
 ################################################################################
 # Building, Deploying \
 BUILDING:  ## ##################################################################

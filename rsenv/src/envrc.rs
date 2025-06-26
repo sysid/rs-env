@@ -1,13 +1,15 @@
-use std::path::Path;
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
-use regex::Regex;
-use tracing::{debug, instrument};
 use crate::errors::{TreeError, TreeResult};
 use crate::util::path::ensure_file_exists;
+use regex::Regex;
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::Path;
+use tracing::{debug, instrument};
 
-pub const START_SECTION_DELIMITER: &str = "#------------------------------- rsenv start --------------------------------";
-pub const END_SECTION_DELIMITER: &str = "#-------------------------------- rsenv end ---------------------------------";
+pub const START_SECTION_DELIMITER: &str =
+    "#------------------------------- rsenv start --------------------------------";
+pub const END_SECTION_DELIMITER: &str =
+    "#-------------------------------- rsenv end ---------------------------------";
 
 #[instrument(level = "debug")]
 pub fn update_dot_envrc(target_file_path: &Path, data: &str) -> TreeResult<()> {
@@ -22,19 +24,19 @@ pub fn update_dot_envrc(target_file_path: &Path, data: &str) -> TreeResult<()> {
         end_section_delimiter = END_SECTION_DELIMITER,
     );
 
-    let file = File::open(target_file_path)
-        .map_err(TreeError::FileReadError)?;
+    let file = File::open(target_file_path).map_err(TreeError::FileReadError)?;
     let reader = BufReader::new(file);
-    let lines: Vec<String> = reader.lines()
+    let lines: Vec<String> = reader
+        .lines()
         .collect::<Result<_, _>>()
         .map_err(TreeError::FileReadError)?;
 
-    let start_index = lines.iter().position(|l| {
-        l.starts_with(START_SECTION_DELIMITER)
-    });
-    let end_index = lines.iter().position(|l| {
-        l.starts_with(END_SECTION_DELIMITER)
-    });
+    let start_index = lines
+        .iter()
+        .position(|l| l.starts_with(START_SECTION_DELIMITER));
+    let end_index = lines
+        .iter()
+        .position(|l| l.starts_with(END_SECTION_DELIMITER));
 
     let mut new_file_content = String::new();
 
@@ -62,8 +64,7 @@ pub fn update_dot_envrc(target_file_path: &Path, data: &str) -> TreeResult<()> {
 
 #[instrument(level = "debug")]
 pub fn delete_section(file_path: &Path) -> TreeResult<()> {
-    let mut file = File::open(file_path)
-        .map_err(TreeError::FileReadError)?;
+    let mut file = File::open(file_path).map_err(TreeError::FileReadError)?;
     let mut contents = String::new();
     file.read_to_string(&mut contents)
         .map_err(TreeError::FileReadError)?;
@@ -78,8 +79,7 @@ pub fn delete_section(file_path: &Path) -> TreeResult<()> {
         end_section_delimiter = END_SECTION_DELIMITER,
     );
     debug!("pattern: {}", pattern);
-    let re = Regex::new(pattern.as_str())
-        .map_err(|e| TreeError::InternalError(e.to_string()))?;
+    let re = Regex::new(pattern.as_str()).map_err(|e| TreeError::InternalError(e.to_string()))?;
 
     // Assert that only one section
     let result = re.find_iter(&contents).collect::<Vec<_>>();
@@ -91,8 +91,7 @@ pub fn delete_section(file_path: &Path) -> TreeResult<()> {
     let result = re.replace(&contents, "");
 
     // Write the result back to the file
-    let mut file = File::create(file_path)
-        .map_err(TreeError::FileReadError)?;
+    let mut file = File::create(file_path).map_err(TreeError::FileReadError)?;
     file.write_all(result.as_bytes())
         .map_err(TreeError::FileReadError)
 }

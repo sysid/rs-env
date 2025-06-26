@@ -1,6 +1,5 @@
-
-use std::fmt;
 use generational_arena::{Arena, Index};
+use std::fmt;
 use std::path::PathBuf;
 use tracing::instrument;
 
@@ -100,7 +99,8 @@ impl TreeArena {
     #[instrument(level = "trace", skip(self))]
     fn calculate_depth(&self, node_idx: Index) -> usize {
         if let Some(node) = self.get_node(node_idx) {
-            1 + node.children
+            1 + node
+                .children
                 .iter()
                 .map(|&child| self.calculate_depth(child))
                 .max()

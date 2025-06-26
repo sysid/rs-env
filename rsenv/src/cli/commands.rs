@@ -1,17 +1,17 @@
+use crate::builder::TreeBuilder;
 use crate::cli::args::{Cli, Commands};
 use crate::edit::{
     create_branches, create_vimscript, open_files_in_editor, select_file_with_suffix,
 };
 use crate::envrc::update_dot_envrc;
-use crate::builder::TreeBuilder;
 use crate::{build_env_vars, get_files, is_dag, link_all, print_files};
 use anyhow::{anyhow, Result};
+use crossterm::style::Stylize;
+use std::io::Write;
 use std::path::Path;
 use std::process;
-use std::io::Write;
-use crossterm::style::Stylize;
-use tracing::{debug, instrument};
 use tempfile::NamedTempFile;
+use tracing::{debug, instrument};
 
 pub fn execute_command(cli: &Cli) -> Result<()> {
     match &cli.command {
@@ -30,7 +30,7 @@ pub fn execute_command(cli: &Cli) -> Result<()> {
         Some(Commands::Tree { source_dir }) => _tree(source_dir),
         Some(Commands::TreeEdit { source_dir }) => _tree_edit(source_dir),
         Some(Commands::Leaves { source_dir }) => _leaves(source_dir),
-        None => Ok(())
+        None => Ok(()),
     }
 }
 
@@ -50,8 +50,7 @@ fn _envrc(source_path: &str, envrc_path: Option<&str>) -> Result<()> {
     let envrc_path = envrc_path.unwrap_or(".envrc");
     debug!(
         "source_path: {:?}, envrc_path: {:?}",
-        source_path,
-        envrc_path
+        source_path, envrc_path
     );
     let vars = build_env_vars(Path::new(source_path)).unwrap_or_else(|e| {
         eprintln!("{}", format!("Cannot build environment: {}", e).red());
@@ -138,7 +137,8 @@ fn _select(source_dir: &str) -> Result<()> {
 
 #[instrument]
 fn _link(nodes: &[String]) -> Result<()> {
-    let paths = nodes.iter()
+    let paths = nodes
+        .iter()
         .map(|s| Path::new(s).to_path_buf())
         .collect::<Vec<_>>();
     link_all(&paths);
@@ -153,7 +153,9 @@ fn _branches(source_path: &str) -> Result<()> {
     if is_dag(path).expect("Failed to determine if DAG") {
         eprintln!(
             "{}",
-            "Dependencies form a DAG, you cannot use tree based commands.".to_string().red()
+            "Dependencies form a DAG, you cannot use tree based commands."
+                .to_string()
+                .red()
         );
         process::exit(1);
     }
@@ -183,7 +185,9 @@ fn _tree(source_path: &str) -> Result<()> {
     if is_dag(path).expect("Failed to determine if DAG") {
         eprintln!(
             "{}",
-            "Dependencies form a DAG, you cannot use tree based commands.".to_string().red()
+            "Dependencies form a DAG, you cannot use tree based commands."
+                .to_string()
+                .red()
         );
         process::exit(1);
     }
@@ -211,7 +215,9 @@ fn _tree_edit(source_path: &str) -> Result<()> {
     if is_dag(path).expect("Failed to determine if DAG") {
         eprintln!(
             "{}",
-            "Dependencies form a DAG, you cannot use tree based commands.".to_string().red()
+            "Dependencies form a DAG, you cannot use tree based commands."
+                .to_string()
+                .red()
         );
         process::exit(1);
     }
@@ -251,7 +257,9 @@ fn _leaves(source_path: &str) -> Result<()> {
     if is_dag(path).expect("Failed to determine if DAG") {
         eprintln!(
             "{}",
-            "Dependencies form a DAG, you cannot use tree based commands.".to_string().red()
+            "Dependencies form a DAG, you cannot use tree based commands."
+                .to_string()
+                .red()
         );
         process::exit(1);
     }

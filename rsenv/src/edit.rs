@@ -1,16 +1,19 @@
+use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::env;
 use std::sync::Arc;
 
-use walkdir::WalkDir;
-use skim::prelude::*;
 use crossbeam::channel::bounded;
-use crossterm::{execute, terminal::{Clear, ClearType}};
+use crossterm::{
+    execute,
+    terminal::{Clear, ClearType},
+};
+use skim::prelude::*;
 use tracing::{debug, instrument};
+use walkdir::WalkDir;
 
-use crate::errors::{TreeError, TreeResult};
 use crate::arena::TreeArena;
+use crate::errors::{TreeError, TreeResult};
 
 #[instrument(level = "debug")]
 pub fn select_file_with_suffix(dir: &Path, suffix: &str) -> TreeResult<PathBuf> {
@@ -43,9 +46,9 @@ pub fn select_file_with_suffix(dir: &Path, suffix: &str) -> TreeResult<PathBuf> 
     // just like before. We then send each of these items through the tx (sender) part of the channel.
     for file in files.iter() {
         let item = Arc::new(file.to_string_lossy().into_owned()) as Arc<dyn SkimItem>;
-        tx.send(item).map_err(|e| TreeError::InternalError(
-            format!("Failed to send item through channel: {}", e)
-        ))?;
+        tx.send(item).map_err(|e| {
+            TreeError::InternalError(format!("Failed to send item through channel: {}", e))
+        })?;
     }
 
     // This step is important because Skim::run_with() needs to know when there are no more items to expect.
@@ -55,9 +58,7 @@ pub fn select_file_with_suffix(dir: &Path, suffix: &str) -> TreeResult<PathBuf> 
         .height(Some("50%"))
         .multi(false)
         .build()
-        .map_err(|e| TreeError::InternalError(
-            format!("Failed to build skim options: {}", e)
-        ))?;
+        .map_err(|e| TreeError::InternalError(format!("Failed to build skim options: {}", e)))?;
 
     // Running Skim with the Receiver: Instead of creating and passing a stream of items directly,
     // we just pass the rx (receiver) part of the channel to Skim::run_with().
@@ -68,9 +69,7 @@ pub fn select_file_with_suffix(dir: &Path, suffix: &str) -> TreeResult<PathBuf> 
     // Clear screen
     let mut stdout = std::io::stdout();
     execute!(stdout, Clear(ClearType::FromCursorDown))
-        .map_err(|e| TreeError::InternalError(
-            format!("Failed to clear screen: {}", e)
-        ))?;
+        .map_err(|e| TreeError::InternalError(format!("Failed to clear screen: {}", e)))?;
 
     // Step 3: Save the selection into a variable for later use
     selected_items
@@ -85,10 +84,13 @@ pub fn open_files_in_editor(files: Vec<PathBuf>) -> TreeResult<()> {
 
     let editor = env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
     if !editor.contains("vim") {
-        return Err(TreeError::InternalError("Only vim is supported for now".to_string()));
+        return Err(TreeError::InternalError(
+            "Only vim is supported for now".to_string(),
+        ));
     }
 
-    let file_paths: Vec<String> = files.iter()
+    let file_paths: Vec<String> = files
+        .iter()
         .map(|path| path.to_string_lossy().into_owned())
         .collect();
 
@@ -116,8 +118,10 @@ pub fn create_vimscript(files: Vec<Vec<&Path>>) -> String {
 
         if col_idx == 0 {
             // For the first column, start with 'edit' for the first file
-            script.push_str(&format!("\" Open the first set of files ('{}') in the first column\n",
-                col_files[0].display()));
+            script.push_str(&format!(
+                "\" Open the first set of files ('{}') in the first column\n",
+                col_files[0].display()
+            ));
             script.push_str(&format!("edit {}\n", col_files[0].display()));
         } else {
             // For subsequent columns, start with a 'split' for the first file in the list

@@ -1,18 +1,20 @@
 #![allow(unused_imports)]
 
-use std::collections::{BTreeMap, HashMap};
-use std::{env, fs};
-use std::path::{Path, PathBuf};
 use anyhow::Result;
 use fs_extra::{copy_items, dir};
-use rsenv::{build_env, build_env_vars, extract_env, link, link_all, print_files, tree_traits, unlink};
-use termtree::Tree;
-use rsenv::builder::TreeBuilder;
-use rsenv::arena::TreeArena;
 use generational_arena::Index;
-use rstest::rstest;
+use rsenv::arena::TreeArena;
+use rsenv::builder::TreeBuilder;
 use rsenv::util::path;
 use rsenv::util::path::normalize_path_separator;
+use rsenv::{
+    build_env, build_env_vars, extract_env, link, link_all, print_files, tree_traits, unlink,
+};
+use rstest::rstest;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
+use std::{env, fs};
+use termtree::Tree;
 
 #[rstest]
 fn given_invalid_parent_path_when_building_trees_then_returns_error() -> Result<()> {
@@ -33,11 +35,12 @@ fn given_invalid_parent_path_when_building_trees_then_returns_error() -> Result<
     Ok(())
 }
 
-
 #[rstest]
-fn given_complex_hierarchy_when_building_trees_then_returns_correct_depth_and_leaves() -> Result<()> {
+fn given_complex_hierarchy_when_building_trees_then_returns_correct_depth_and_leaves() -> Result<()>
+{
     let mut builder = TreeBuilder::new();
-    let trees = builder.build_from_directory(Path::new("./tests/resources/environments/complex"))?;
+    let trees =
+        builder.build_from_directory(Path::new("./tests/resources/environments/complex"))?;
     println!("trees: {:#?}", trees);
     for tree in &trees {
         println!("Depth of tree: {}", tree.depth());
@@ -83,7 +86,9 @@ fn given_tree_structure_when_building_trees_then_returns_correct_hierarchy() -> 
 #[rstest]
 fn given_partial_root_match_when_printing_leaf_paths_then_handles_prefix_correctly() -> Result<()> {
     let mut builder = TreeBuilder::new();
-    let trees = builder.build_from_directory(Path::new("./tests/resources/environments/max_prefix/confguard/xxx"))?;
+    let trees = builder.build_from_directory(Path::new(
+        "./tests/resources/environments/max_prefix/confguard/xxx",
+    ))?;
     assert_eq!(trees.len(), 1);
     for tree in &trees {
         let leaf_nodes = tree.leaf_nodes();
@@ -96,9 +101,10 @@ fn given_partial_root_match_when_printing_leaf_paths_then_handles_prefix_correct
 }
 
 #[rstest]
-fn given_non_root_location_when_printing_leaf_paths_then_resolves_paths_correctly()-> Result<()> {
+fn given_non_root_location_when_printing_leaf_paths_then_resolves_paths_correctly() -> Result<()> {
     let mut builder = TreeBuilder::new();
-    let trees = builder.build_from_directory(Path::new("./tests/resources/environments/tree2/confguard"))?;
+    let trees = builder
+        .build_from_directory(Path::new("./tests/resources/environments/tree2/confguard"))?;
     assert_eq!(trees.len(), 1);
 
     for tree in &trees {
@@ -129,7 +135,9 @@ fn given_non_root_location_when_printing_leaf_paths_then_resolves_paths_correctl
 #[rstest]
 fn test_print() {
     let mut builder = TreeBuilder::new();
-    let trees = builder.build_from_directory(Path::new("./tests/resources/environments/complex")).unwrap();
+    let trees = builder
+        .build_from_directory(Path::new("./tests/resources/environments/complex"))
+        .unwrap();
     for tree in &trees {
         for (idx, node) in tree.iter() {
             println!("{:?}: {}", idx, node.data.file_path.display());
@@ -155,7 +163,9 @@ fn test_try_tree() {
 #[rstest]
 fn test_print_tree() {
     let mut builder = TreeBuilder::new();
-    let trees = builder.build_from_directory(Path::new("./tests/resources/environments/complex")).unwrap();
+    let trees = builder
+        .build_from_directory(Path::new("./tests/resources/environments/complex"))
+        .unwrap();
     for tree in trees {
         if let Some(root_idx) = tree.root() {
             if let Some(root_node) = tree.get_node(root_idx) {
@@ -172,11 +182,14 @@ fn test_print_tree_recursive() {
     // let trees = build_trees(Utf8Path::new("./tests/resources/environments/complex")).unwrap();
     // let trees = build_trees(Utf8Path::new("./tests/resources/environments/tree")).unwrap();
     let mut builder = TreeBuilder::new();
-    let trees = builder.build_from_directory(Path::new("./tests/resources/environments/parallel")).unwrap();
+    let trees = builder
+        .build_from_directory(Path::new("./tests/resources/environments/parallel"))
+        .unwrap();
     for tree in &trees {
         if let Some(root_idx) = tree.root() {
             if let Some(root_node) = tree.get_node(root_idx) {
-                let mut tree_repr = Tree::new(root_node.data.file_path.to_string_lossy().to_string());
+                let mut tree_repr =
+                    Tree::new(root_node.data.file_path.to_string_lossy().to_string());
                 tree_traits::build_tree_representation(tree, root_idx, &mut tree_repr);
                 println!("{}", tree_repr);
             }
@@ -193,18 +206,24 @@ fn given_complex_structure_when_printing_tree_then_shows_nested_hierarchy() {
             └── tests/resources/environments/complex/level4.env\n";
 
     let mut builder = TreeBuilder::new();
-    let trees = builder.build_from_directory(Path::new("./tests/resources/environments/complex")).unwrap();
+    let trees = builder
+        .build_from_directory(Path::new("./tests/resources/environments/complex"))
+        .unwrap();
     assert_eq!(trees.len(), 1);
     for tree in &trees {
         if let Some(root_idx) = tree.root() {
             if let Some(root_node) = tree.get_node(root_idx) {
-                let mut tree_repr = Tree::new(root_node.data.file_path.to_string_lossy().to_string());
+                let mut tree_repr =
+                    Tree::new(root_node.data.file_path.to_string_lossy().to_string());
                 tree_traits::build_tree_representation(tree, root_idx, &mut tree_repr);
                 let tree_str = tree_repr.to_string();
                 // Convert absolute paths to relative using path helper
                 let relative_str = path::relativize_tree_str(&tree_str, "tests/");
                 println!("{}", relative_str);
-                assert_eq!(normalize_path_separator(&relative_str), normalize_path_separator(expected));
+                assert_eq!(
+                    normalize_path_separator(&relative_str),
+                    normalize_path_separator(expected)
+                );
             }
         }
     }
@@ -217,18 +236,24 @@ fn given_parallel_structure_when_printing_tree_then_shows_correct_hierarchy() {
     └── tests/resources/environments/parallel/test.env\n";
 
     let mut builder = TreeBuilder::new();
-    let trees = builder.build_from_directory(Path::new("./tests/resources/environments/parallel")).unwrap();
+    let trees = builder
+        .build_from_directory(Path::new("./tests/resources/environments/parallel"))
+        .unwrap();
     assert_eq!(trees.len(), 3);
     for tree in &trees {
         if let Some(root_idx) = tree.root() {
             if let Some(root_node) = tree.get_node(root_idx) {
-                let mut tree_repr = Tree::new(root_node.data.file_path.to_string_lossy().to_string());
+                let mut tree_repr =
+                    Tree::new(root_node.data.file_path.to_string_lossy().to_string());
                 tree_traits::build_tree_representation(tree, root_idx, &mut tree_repr);
                 let tree_str = tree_repr.to_string();
                 let relative_str = path::relativize_tree_str(&tree_str, "tests/");
                 println!("{}", relative_str);
                 if relative_str.contains("test.env") {
-                    assert_eq!(normalize_path_separator(&relative_str), normalize_path_separator(expected));
+                    assert_eq!(
+                        normalize_path_separator(&relative_str),
+                        normalize_path_separator(expected)
+                    );
                 }
             }
         }
@@ -246,19 +271,24 @@ fn given_tree_structure_when_printing_complete_tree_then_shows_all_branches() {
 └── tests/resources/environments/tree/level13.env\n";
 
     let mut builder = TreeBuilder::new();
-    let trees = builder.build_from_directory(Path::new("./tests/resources/environments/tree")).unwrap();
+    let trees = builder
+        .build_from_directory(Path::new("./tests/resources/environments/tree"))
+        .unwrap();
     assert_eq!(trees.len(), 1);
     for tree in &trees {
         if let Some(root_idx) = tree.root() {
             if let Some(root_node) = tree.get_node(root_idx) {
-                let mut tree_repr = Tree::new(root_node.data.file_path.to_string_lossy().to_string());
+                let mut tree_repr =
+                    Tree::new(root_node.data.file_path.to_string_lossy().to_string());
                 tree_traits::build_tree_representation(tree, root_idx, &mut tree_repr);
                 let tree_str = tree_repr.to_string();
                 let relative_str = path::relativize_tree_str(&tree_str, "tests/");
                 println!("{}", relative_str);
-                assert_eq!(normalize_path_separator(&relative_str), normalize_path_separator(expected));
+                assert_eq!(
+                    normalize_path_separator(&relative_str),
+                    normalize_path_separator(expected)
+                );
             }
         }
     }
 }
-
