@@ -15,11 +15,17 @@ use walkdir::WalkDir;
 use crate::arena::TreeArena;
 use crate::errors::{TreeError, TreeResult};
 
+/// Interactive file selection using fuzzy search interface.
+///
+/// Walks the directory tree to find files with the specified suffix, then
+/// presents them in a skim (fzf-like) interface for user selection.
+///
+/// Returns the selected file path or an error if no files found or selection cancelled.
 #[instrument(level = "debug")]
 pub fn select_file_with_suffix(dir: &Path, suffix: &str) -> TreeResult<PathBuf> {
     debug!("Searching for files with suffix {} in {:?}", suffix, dir);
 
-    // List all files with the given suffix
+    // Discover all files matching the suffix pattern
     let files: Vec<PathBuf> = WalkDir::new(dir)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -51,7 +57,7 @@ pub fn select_file_with_suffix(dir: &Path, suffix: &str) -> TreeResult<PathBuf> 
         })?;
     }
 
-    // This step is important because Skim::run_with() needs to know when there are no more items to expect.
+    // Signal end of items to skim
     drop(tx); // Close the channel
 
     let options = SkimOptionsBuilder::default()

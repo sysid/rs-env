@@ -11,10 +11,19 @@ use crate::arena::{NodeData, TreeArena};
 use crate::errors::{TreeError, TreeResult};
 use crate::util::path::PathExt;
 
+/// Constructs hierarchical trees from environment files by analyzing parent-child relationships.
+///
+/// The builder implements a two-phase algorithm:
+/// 1. Scan phase: Discovers all .env files and their rsenv comment relationships
+/// 2. Build phase: Constructs arena-based trees from the discovered relationships
 pub struct TreeBuilder {
+    /// Maps parent files to their child files for efficient tree construction
     relationship_cache: HashMap<PathBuf, Vec<PathBuf>>,
+    /// Tracks visited paths during tree traversal to detect cycles
     visited_paths: HashSet<PathBuf>,
+    /// Regex pattern for parsing rsenv comments with flexible spacing
     parent_regex: Regex,
+    /// All discovered .env files, including standalone files without relationships
     all_files: HashSet<PathBuf>,
 }
 
@@ -107,6 +116,13 @@ impl TreeBuilder {
         Ok(())
     }
 
+    /// Identifies root nodes for tree construction using a dual-strategy approach.
+    ///
+    /// Root nodes are files that can serve as tree roots, identified by:
+    /// 1. Traditional hierarchy roots: files that are parents but not children
+    /// 2. Standalone files: files with no parent-child relationships
+    ///
+    /// This ensures standalone .env files are included as single-node trees.
     #[instrument(level = "debug", skip(self))]
     fn find_root_nodes(&self) -> Vec<PathBuf> {
         let mut root_nodes = Vec::new();

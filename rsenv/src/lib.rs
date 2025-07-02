@@ -19,19 +19,32 @@ pub mod errors;
 pub mod tree_traits;
 pub mod util;
 
-/// Expands environment variables in a path string
-/// Supports both $VAR and ${VAR} syntax
+/// Expands environment variables in a path string using shell-style syntax.
+///
+/// Supports both `$VAR` and `${VAR}` formats. Variables that don't exist in the
+/// environment are left unexpanded (no replacement occurs).
+///
+/// # Examples
+///
+/// ```
+/// use rsenv::expand_env_vars;
+/// std::env::set_var("HOME", "/users/test");
+///
+/// assert_eq!(expand_env_vars("$HOME/config"), "/users/test/config");
+/// assert_eq!(expand_env_vars("${HOME}/config"), "/users/test/config");
+/// assert_eq!(expand_env_vars("$NONEXISTENT/path"), "$NONEXISTENT/path");
+/// ```
 pub fn expand_env_vars(path: &str) -> String {
     let mut result = path.to_string();
 
-    // Find all occurrences of $VAR or ${VAR}
+    // Pattern captures both $VAR (group 1) and ${VAR} (group 2) syntax
     let env_var_pattern = Regex::new(r"\$(\w+)|\$\{(\w+)\}").unwrap();
 
-    // Collect all matches first to avoid borrow checker issues with replace_all
+    // Collect matches first to avoid borrow checker conflicts during replacement
     let matches: Vec<_> = env_var_pattern.captures_iter(path).collect();
 
     for cap in matches {
-        // Get the variable name from either $VAR or ${VAR} pattern
+        // Extract variable name from whichever capture group matched
         let var_name = cap.get(1).or_else(|| cap.get(2)).unwrap().as_str();
         let var_placeholder = if cap.get(1).is_some() {
             format!("${}", var_name)
@@ -39,7 +52,7 @@ pub fn expand_env_vars(path: &str) -> String {
             format!("${{{}}}", var_name)
         };
 
-        // Replace with environment variable value or empty string if not found
+        // Only replace if the environment variable exists
         if let Ok(var_value) = std::env::var(var_name) {
             result = result.replace(&var_placeholder, &var_value);
         }
@@ -107,14 +120,18 @@ pub fn is_dag(dir_path: &Path) -> TreeResult<bool> {
     Ok(false)
 }
 
-/// Recursively builds map of environment variables from the specified file and its parents.
+/// Builds a complete environment variable map by traversing the hierarchy starting from a file.
 ///
-/// This function reads the specified `file_path` and extracts environment variables from it.
-/// It recognizes `export` statements to capture key-value pairs and uses special `# rsenv:`
-/// comments to identify parent files for further extraction.
+/// Implements a breadth-first traversal algorithm that processes all parent files
+/// referenced by `# rsenv:` comments. Variable precedence follows these rules:
+/// - Child variables override parent variables
+/// - When multiple parents exist, rightmost sibling wins
+/// - First encountered value wins during traversal (enables child override)
 ///
-/// child wins against parent
-/// rightmost sibling wins
+/// Returns a tuple containing:
+/// - Variable map with resolved values
+/// - List of all processed files in traversal order  
+/// - Boolean indicating if the structure contains multiple parents (DAG detection)
 #[instrument(level = "debug")]
 pub fn build_env(file_path: &Path) -> TreeResult<(BTreeMap<String, String>, Vec<PathBuf>, bool)> {
     warn_if_symlink(file_path)?;

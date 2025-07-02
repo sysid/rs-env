@@ -298,7 +298,6 @@ fn given_tree_structure_when_printing_complete_tree_then_shows_all_branches() {
     }
 }
 
-
 #[rstest]
 fn given_mixed_standalone_and_hierarchical_files_when_getting_leaves_then_returns_correct_leaves(
 ) -> Result<()> {
