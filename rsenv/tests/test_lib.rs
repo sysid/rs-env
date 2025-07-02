@@ -269,3 +269,60 @@ fn given_symlinked_file_when_extracting_env_then_outputs_warning() -> TreeResult
     fs::remove_file("./tests/resources/environments/complex/symlink.env")?;
     Ok(())
 }
+
+#[rstest]
+fn given_rsenv_comment_with_flexible_spacing_when_extracting_env_then_parses_correctly(
+) -> TreeResult<()> {
+    let tempdir = tempdir()?;
+    let temp_path = tempdir.path();
+
+    // Create parent file
+    let parent_file = temp_path.join("parent.env");
+    fs::write(&parent_file, "export PARENT_VAR=parent_value\n")?;
+
+    // Test different spacing patterns
+    let test_cases = vec![
+        ("# rsenv:parent.env", "no space after colon"),
+        ("# rsenv: parent.env", "one space after colon"),
+        ("# rsenv:  parent.env", "two spaces after colon"),
+        ("# rsenv:   parent.env", "three spaces after colon"),
+        ("# rsenv:\tparent.env", "tab after colon"),
+        ("# rsenv: \tparent.env", "space and tab after colon"),
+    ];
+
+    for (rsenv_comment, description) in test_cases {
+        let child_file = temp_path.join(format!("child_{}.env", description.replace(" ", "_")));
+        let content = format!("{}\nexport CHILD_VAR=child_value\n", rsenv_comment);
+        fs::write(&child_file, content)?;
+
+        let (variables, parents) = extract_env(&child_file)?;
+
+        // Verify that the parent was parsed correctly
+        assert_eq!(
+            parents.len(),
+            1,
+            "Failed to parse parent for case: {}",
+            description
+        );
+        assert_eq!(
+            parents[0].canonicalize()?,
+            parent_file.canonicalize()?,
+            "Wrong parent path for case: {}",
+            description
+        );
+
+        // Verify that variables are correct
+        assert_eq!(variables.get("CHILD_VAR"), Some(&"child_value".to_string()));
+
+        // Test build_env to ensure full integration works
+        let (env_vars, files, _) = build_env(&child_file)?;
+        assert_eq!(
+            env_vars.get("PARENT_VAR"),
+            Some(&"parent_value".to_string())
+        );
+        assert_eq!(env_vars.get("CHILD_VAR"), Some(&"child_value".to_string()));
+        assert_eq!(files.len(), 2);
+    }
+
+    Ok(())
+}

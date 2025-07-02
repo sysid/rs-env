@@ -80,7 +80,7 @@ pub fn build_env_vars(file_path: &Path) -> TreeResult<String> {
 
 #[instrument(level = "trace")]
 pub fn is_dag(dir_path: &Path) -> TreeResult<bool> {
-    let re = Regex::new(r"# rsenv: (.+)").map_err(|e| TreeError::InternalError(e.to_string()))?;
+    let re = Regex::new(r"# rsenv:\s*(.+)").map_err(|e| TreeError::InternalError(e.to_string()))?;
 
     // Walk through each file in the directory
     for entry in WalkDir::new(dir_path) {

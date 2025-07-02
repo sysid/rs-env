@@ -28,7 +28,7 @@ impl TreeBuilder {
         Self {
             relationship_cache: HashMap::new(),
             visited_paths: HashSet::new(),
-            parent_regex: Regex::new(r"# rsenv: (.+)").unwrap(),
+            parent_regex: Regex::new(r"# rsenv:\s*(.+)").unwrap(),
         }
     }
 
