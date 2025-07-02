@@ -15,6 +15,7 @@ pub struct TreeBuilder {
     relationship_cache: HashMap<PathBuf, Vec<PathBuf>>,
     visited_paths: HashSet<PathBuf>,
     parent_regex: Regex,
+    all_files: HashSet<PathBuf>,
 }
 
 impl Default for TreeBuilder {
@@ -29,6 +30,7 @@ impl TreeBuilder {
             relationship_cache: HashMap::new(),
             visited_paths: HashSet::new(),
             parent_regex: Regex::new(r"# rsenv:\s*(.+)").unwrap(),
+            all_files: HashSet::new(),
         }
     }
 
@@ -68,7 +70,11 @@ impl TreeBuilder {
                 reason: e.to_string(),
             })?;
 
-            if entry.file_type().is_file() {
+            if entry.file_type().is_file()
+                && entry.path().extension().is_some_and(|ext| ext == "env")
+            {
+                let abs_path = entry.path().to_canonical()?;
+                self.all_files.insert(abs_path.clone());
                 self.process_file(entry.path())?;
             }
         }
@@ -103,11 +109,29 @@ impl TreeBuilder {
 
     #[instrument(level = "debug", skip(self))]
     fn find_root_nodes(&self) -> Vec<PathBuf> {
-        self.relationship_cache
-            .keys()
-            .filter(|path| !self.relationship_cache.values().any(|v| v.contains(path)))
-            .cloned()
-            .collect()
+        let mut root_nodes = Vec::new();
+
+        // Find files that are parents but not children (traditional root nodes)
+        for path in self.relationship_cache.keys() {
+            if !self.relationship_cache.values().any(|v| v.contains(path)) {
+                root_nodes.push(path.clone());
+            }
+        }
+
+        // Find standalone files (files not in any relationship)
+        for file_path in &self.all_files {
+            let is_parent = self.relationship_cache.contains_key(file_path);
+            let is_child = self
+                .relationship_cache
+                .values()
+                .any(|v| v.contains(file_path));
+
+            if !is_parent && !is_child {
+                root_nodes.push(file_path.clone());
+            }
+        }
+
+        root_nodes
     }
 
     #[instrument(level = "debug", skip(self))]
