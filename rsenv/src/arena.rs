@@ -3,9 +3,12 @@ use std::fmt;
 use std::path::PathBuf;
 use tracing::instrument;
 
+/// Data payload for tree nodes representing environment files.
 #[derive(Debug, Clone)]
 pub struct NodeData {
+    /// Directory containing the environment file
     pub base_path: PathBuf,
+    /// Full path to the environment file
     pub file_path: PathBuf,
 }
 
@@ -15,16 +18,26 @@ impl fmt::Display for NodeData {
     }
 }
 
+/// Tree node in the arena-based hierarchy structure.
 #[derive(Debug)]
 pub struct TreeNode {
+    /// Environment file data for this node
     pub data: NodeData,
+    /// Index of parent node in the arena, None for root nodes
     pub parent: Option<Index>,
+    /// Indices of child nodes in the arena
     pub children: Vec<Index>,
 }
 
+/// Arena-based tree structure for efficient hierarchy management.
+///
+/// Uses generational arena for memory-safe node references and O(1) lookups.
+/// Each tree represents one complete environment hierarchy.
 #[derive(Debug)]
 pub struct TreeArena {
+    /// Arena storage for all tree nodes
     arena: Arena<TreeNode>,
+    /// Index of the root node, None for empty trees
     root: Option<Index>,
 }
 
@@ -110,6 +123,10 @@ impl TreeArena {
         }
     }
 
+    /// Collects all leaf nodes (nodes with no children) in the tree.
+    ///
+    /// Returns file paths as strings for easy display and processing.
+    /// Empty trees return an empty vector.
     #[instrument(level = "debug", skip(self))]
     pub fn leaf_nodes(&self) -> Vec<String> {
         let mut leaves = Vec::new();

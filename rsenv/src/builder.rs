@@ -11,10 +11,20 @@ use crate::arena::{NodeData, TreeArena};
 use crate::errors::{TreeError, TreeResult};
 use crate::util::path::PathExt;
 
+/// Constructs hierarchical trees from environment files by analyzing parent-child relationships.
+///
+/// The builder implements a two-phase algorithm:
+/// 1. Scan phase: Discovers all .env files and their rsenv comment relationships
+/// 2. Build phase: Constructs arena-based trees from the discovered relationships
 pub struct TreeBuilder {
+    /// Maps parent files to their child files for efficient tree construction
     relationship_cache: HashMap<PathBuf, Vec<PathBuf>>,
+    /// Tracks visited paths during tree traversal to detect cycles
     visited_paths: HashSet<PathBuf>,
+    /// Regex pattern for parsing rsenv comments with flexible spacing
     parent_regex: Regex,
+    /// All discovered .env files, including standalone files without relationships
+    all_files: HashSet<PathBuf>,
 }
 
 impl Default for TreeBuilder {
@@ -28,7 +38,8 @@ impl TreeBuilder {
         Self {
             relationship_cache: HashMap::new(),
             visited_paths: HashSet::new(),
-            parent_regex: Regex::new(r"# rsenv: (.+)").unwrap(),
+            parent_regex: Regex::new(r"# rsenv:\s*(.+)").unwrap(),
+            all_files: HashSet::new(),
         }
     }
 
@@ -68,7 +79,11 @@ impl TreeBuilder {
                 reason: e.to_string(),
             })?;
 
-            if entry.file_type().is_file() {
+            if entry.file_type().is_file()
+                && entry.path().extension().is_some_and(|ext| ext == "env")
+            {
+                let abs_path = entry.path().to_canonical()?;
+                self.all_files.insert(abs_path.clone());
                 self.process_file(entry.path())?;
             }
         }
@@ -101,13 +116,38 @@ impl TreeBuilder {
         Ok(())
     }
 
+    /// Identifies root nodes for tree construction using a dual-strategy approach.
+    ///
+    /// Root nodes are files that can serve as tree roots, identified by:
+    /// 1. Traditional hierarchy roots: files that are parents but not children
+    /// 2. Standalone files: files with no parent-child relationships
+    ///
+    /// This ensures standalone .env files are included as single-node trees.
     #[instrument(level = "debug", skip(self))]
     fn find_root_nodes(&self) -> Vec<PathBuf> {
-        self.relationship_cache
-            .keys()
-            .filter(|path| !self.relationship_cache.values().any(|v| v.contains(path)))
-            .cloned()
-            .collect()
+        let mut root_nodes = Vec::new();
+
+        // Find files that are parents but not children (traditional root nodes)
+        for path in self.relationship_cache.keys() {
+            if !self.relationship_cache.values().any(|v| v.contains(path)) {
+                root_nodes.push(path.clone());
+            }
+        }
+
+        // Find standalone files (files not in any relationship)
+        for file_path in &self.all_files {
+            let is_parent = self.relationship_cache.contains_key(file_path);
+            let is_child = self
+                .relationship_cache
+                .values()
+                .any(|v| v.contains(file_path));
+
+            if !is_parent && !is_child {
+                root_nodes.push(file_path.clone());
+            }
+        }
+
+        root_nodes
     }
 
     #[instrument(level = "debug", skip(self))]

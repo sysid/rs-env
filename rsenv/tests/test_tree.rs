@@ -44,7 +44,8 @@ fn given_complex_hierarchy_when_building_trees_then_returns_correct_depth_and_le
     println!("trees: {:#?}", trees);
     for tree in &trees {
         println!("Depth of tree: {}", tree.depth());
-        assert_eq!(tree.depth(), 5);
+        // The first tree should be the hierarchy with depth 5, the second should be the standalone file with depth 1
+        assert!(tree.depth() == 5 || tree.depth() == 1);
     }
     for tree in &trees {
         let leaf_nodes = tree.leaf_nodes();
@@ -53,7 +54,8 @@ fn given_complex_hierarchy_when_building_trees_then_returns_correct_depth_and_le
             println!("{}", leaf);
         }
         assert_eq!(leaf_nodes.len(), 1);
-        assert!(leaf_nodes[0].ends_with("level4.env"));
+        // Each tree should have exactly one leaf: either level4.env or result.env
+        assert!(leaf_nodes[0].ends_with("level4.env") || leaf_nodes[0].ends_with("result.env"));
     }
     Ok(())
 }
@@ -209,7 +211,7 @@ fn given_complex_structure_when_printing_tree_then_shows_nested_hierarchy() {
     let trees = builder
         .build_from_directory(Path::new("./tests/resources/environments/complex"))
         .unwrap();
-    assert_eq!(trees.len(), 1);
+    assert_eq!(trees.len(), 2); // One hierarchy tree + one standalone file (result.env)
     for tree in &trees {
         if let Some(root_idx) = tree.root() {
             if let Some(root_node) = tree.get_node(root_idx) {
@@ -220,10 +222,13 @@ fn given_complex_structure_when_printing_tree_then_shows_nested_hierarchy() {
                 // Convert absolute paths to relative using path helper
                 let relative_str = path::relativize_tree_str(&tree_str, "tests/");
                 println!("{}", relative_str);
-                assert_eq!(
-                    normalize_path_separator(&relative_str),
-                    normalize_path_separator(expected)
-                );
+                // Only check the hierarchical tree, not the standalone result.env tree
+                if relative_str.contains("dot.envrc") {
+                    assert_eq!(
+                        normalize_path_separator(&relative_str),
+                        normalize_path_separator(expected)
+                    );
+                }
             }
         }
     }
@@ -291,4 +296,31 @@ fn given_tree_structure_when_printing_complete_tree_then_shows_all_branches() {
             }
         }
     }
+}
+
+#[rstest]
+fn given_mixed_standalone_and_hierarchical_files_when_getting_leaves_then_returns_correct_leaves(
+) -> Result<()> {
+    let mut builder = TreeBuilder::new();
+    let trees =
+        builder.build_from_directory(Path::new("./tests/resources/environments/parallel"))?;
+
+    let mut all_leaves = Vec::new();
+    for tree in &trees {
+        let leaf_nodes = tree.leaf_nodes();
+        all_leaves.extend(leaf_nodes);
+    }
+
+    // Should return only the leaf nodes from hierarchical trees (test.env, int.env, prod.env)
+    // but not the standalone files that are part of hierarchies (a_test.env, b_test.env, etc.)
+    assert_eq!(all_leaves.len(), 3);
+    assert!(all_leaves.iter().any(|leaf| leaf.ends_with("test.env")));
+    assert!(all_leaves.iter().any(|leaf| leaf.ends_with("int.env")));
+    assert!(all_leaves.iter().any(|leaf| leaf.ends_with("prod.env")));
+
+    // These should NOT be leaves as they are part of hierarchies
+    assert!(!all_leaves.iter().any(|leaf| leaf.ends_with("a_test.env")));
+    assert!(!all_leaves.iter().any(|leaf| leaf.ends_with("b_test.env")));
+
+    Ok(())
 }

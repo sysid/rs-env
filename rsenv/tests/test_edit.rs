@@ -191,13 +191,16 @@ fn given_complex_structure_when_creating_branches_then_returns_correct_hierarchy
         .collect();
     result.sort();
 
-    let mut expected = vec![vec![
-        "level4.env",
-        "level3.env",
-        "level2.env",
-        "level1.env",
-        "dot.envrc",
-    ]];
+    let mut expected = vec![
+        vec![
+            "level4.env",
+            "level3.env",
+            "level2.env",
+            "level1.env",
+            "dot.envrc",
+        ],
+        vec!["result.env"], // result.env is a standalone file, so it creates its own single-node tree
+    ];
     expected.sort();
     assert_eq!(result, expected);
     Ok(())

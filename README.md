@@ -1,125 +1,254 @@
-# rs-env
+# rsenv
 
-> [Hierarchical environment variable management](https://sysid.github.io/hierarchical-environment-variable-management/)
+**Hierarchical environment variable management for modern development workflows**
 
-## Why
-Managing environment variables for different stages, regions, etc. is an unavoidable chore
-when working on cloud projects.
+> [Documentation](https://sysid.github.io/hierarchical-environment-variable-management/)
 
-Especially the challenge of avoiding duplication and knowing where a particular value is coming from.
-Hierarchical variable management seems to be a good solution for this problem.
+## Overview
 
-# Features
-- **Hierarchical inheritance**: Compile environment variables from linked `.env` files forming tree structures
-- **Variable override**: Child variables override parent variables (last defined wins)
-- **Environment variable expansion**: Support for `$VAR` and `${VAR}` syntax in file paths and rsenv comments
-- **Interactive selection**: Smart environment selection and editing via built-in FZF
-- **Multiple integrations**: 
-  - [direnv](https://direnv.net/) integration for automatic environment loading
-  - [JetBrains EnvFile plugin](https://plugins.jetbrains.com/plugin/7861-envfile) support
-- **Flexible editing**: Side-by-side tree editing and individual file editing
+Managing environment variables across different environments (development, staging, production) and configurations (regions, features, services) is a common challenge in cloud-native projects. `rsenv` solves this by implementing hierarchical inheritance where child configurations automatically inherit and can override parent values.
+
+**Key Benefits:**
+- **Zero Duplication**: Share common variables across environments while customizing specific values
+- **Clear Provenance**: Easily trace where each variable value originates in the hierarchy  
+- **Type Safety**: Built-in validation and structured configuration management
+- **Developer Experience**: Interactive selection, editing, and integration with popular tools
+
+## Features
+
+### Core Functionality
+- **Hierarchical Inheritance**: Build environment trees from `.env` files with parent-child relationships
+- **Smart Override Logic**: Child variables automatically override parent values with clear precedence rules
+- **Standalone File Support**: Automatically detect and include independent `.env` files as single-node trees
+- **Environment Expansion**: Full support for `$VAR` and `${VAR}` syntax in paths and comments
+- **Flexible Linking**: Link files with comments supporting variable spacing: `# rsenv: parent.env`
+
+### Interactive Tools
+- **Fuzzy Selection**: Built-in fuzzy finder (skim) for rapid environment discovery and selection
+- **Smart Editing**: Edit entire hierarchies side-by-side or individual files with full context
+- **Tree Visualization**: Display hierarchical relationships and identify leaf nodes
+- **Branch Analysis**: Linear representation of all environment chains
+
+### Integrations
+- **[direnv](https://direnv.net/)**: Automatic environment activation when entering directories
+- **[JetBrains IDEs](https://plugins.jetbrains.com/plugin/7861-envfile)**: Native IDE integration via EnvFile plugin
+- **Shell Integration**: Generate completion scripts for bash, zsh, fish, and powershell
 
 ### Concept
 ![concept](doc/concept.png)
 
 
-### Installation
+## Installation
+
+### From crates.io
 ```bash
 cargo install rs-env
 ```
 
-### Usage
-
-**File Linking**: Environment files are linked via comments:
+### From source
 ```bash
-# rsenv: parent.env
-# rsenv: $HOME/config/base.env    # Environment variables supported
-export MY_VAR=value
+git clone https://github.com/sysid/rs-env
+cd rs-env/rsenv
+cargo install --path .
 ```
 
-**Basic Commands**:
+## Quick Start
+
+### 1. File Structure
+Create linked environment files using `# rsenv:` comments:
+
 ```bash
-# Build and display environment variables
+# base.env
+export DATABASE_HOST=localhost
+export LOG_LEVEL=info
+
+# production.env
+# rsenv: base.env
+export DATABASE_HOST=prod.example.com
+export LOG_LEVEL=warn
+export ENVIRONMENT=production
+```
+
+### 2. Basic Usage
+```bash
+# Build complete environment from hierarchy
 rsenv build production.env
 
-# Load variables into current shell
+# Load into current shell
 source <(rsenv build production.env)
 
-# Interactive environment selection
-rsenv select
+# Interactive selection with fuzzy finder
+rsenv select environments/
 
-# View hierarchy structure
-rsenv tree
+# View tree structure
+rsenv tree environments/
+
+# Find all leaf environments
+rsenv leaves environments/
 ```
 
-**Structure**:
-- **Environment variables** must use `export` prefix in `.env` files
-- **Tree structure** where child variables override parent variables
-- **Multiple hierarchies** supported per project
-- See [examples](./rsenv/tests/resources/environments) for detailed usage patterns
+### 3. Advanced Features
+```bash
+# Edit entire hierarchy side-by-side
+rsenv tree-edit environments/
 
-```
-Hierarchical environment variable management
+# Update direnv integration
+rsenv envrc production.env
 
-Usage: rsenv [OPTIONS] [NAME] [COMMAND]
-
-Commands:
-  build        Build and display the complete set of environment variables
-  envrc        Write environment variables to .envrc file (requires direnv)
-  files        List all files in the environment hierarchy
-  edit-leaf    Edit an environment file and all its parent files
-  edit         Interactively select and edit an environment hierarchy
-  select-leaf  Update .envrc with selected environment (requires direnv)
-  select       Interactively select environment and update .envrc (requires direnv)
-  link         Create parent-child relationships between environment files
-  branches     Show all branches (linear representation)
-  tree         Show all trees (hierarchical representation)
-  tree-edit    Edit all environment hierarchies side-by-side (requires vim)
-  leaves       List all leaf environment files
-  help         Print this message or the help of the given subcommand(s)
-
-Arguments:
-  [NAME]  Name of the configuration to operate on (optional)
-
-Options:
-  -d, --debug...              Enable debug logging. Multiple flags (-d, -dd, -ddd) increase verbosity
-      --generate <GENERATOR>  Generate shell completion scripts [possible values: bash, elvish, fish, powershell, zsh]
-      --info                  Display version and configuration information
-  -h, --help                  Print help
-  -V, --version               Print version
+# Link files programmatically
+rsenv link base.env staging.env production.env
 ```
 
-#### Basic
+## File Format
+
+### Environment Files
+- Use `export VAR=value` syntax (shell-compatible)
+- Support single and double quotes
+- Include `# rsenv: parent.env` comments for hierarchy
+
+### Linking Syntax
+```bash
+# Basic parent reference
+# rsenv: parent.env
+
+# Multiple parents (creates DAG structure)
+# rsenv: base.env shared.env
+
+# Environment variable expansion
+# rsenv: $HOME/config/base.env
+
+# Flexible spacing (all valid)
+# rsenv:parent.env
+# rsenv: parent.env  
+# rsenv:   parent.env
+```
+
+## Command Reference
+
+### Core Commands
+| Command | Description | Example |
+|---------|-------------|---------|
+| `build` | Build complete environment from hierarchy | `rsenv build prod.env` |
+| `leaves` | List all leaf environment files | `rsenv leaves environments/` |
+| `tree` | Display hierarchical structure | `rsenv tree environments/` |
+| `branches` | Show linear representation of all chains | `rsenv branches environments/` |
+
+### Interactive Commands  
+| Command | Description | Example |
+|---------|-------------|---------|
+| `select` | Interactive environment selection + direnv update | `rsenv select environments/` |
+| `edit` | Interactive selection and editing | `rsenv edit environments/` |
+| `tree-edit` | Side-by-side editing of hierarchies | `rsenv tree-edit environments/` |
+
+### Management Commands
+| Command | Description | Example |
+|---------|-------------|---------|
+| `envrc` | Update .envrc file for direnv | `rsenv envrc prod.env .envrc` |
+| `files` | List all files in hierarchy | `rsenv files prod.env` |
+| `link` | Create parent-child relationships | `rsenv link base.env prod.env` |
+
+### Global Options
+- `-d, --debug`: Enable debug logging (use multiple times for increased verbosity)
+- `--generate`: Generate shell completion scripts (bash, zsh, fish, powershell)
+- `--info`: Display version and configuration information
+
+## Examples
+
+### Basic Workflow
 <a href="https://asciinema.org/a/605946?autoplay=1&speed=1.5" target="_blank"><img src="https://asciinema.org/a/605946.svg" /></a>
-<br>
 
-#### Select via FZF
+### Interactive Selection  
 <a href="https://asciinema.org/a/605951?autoplay=1&speed=1.5" target="_blank"><img src="https://asciinema.org/a/605951.svg" /></a>
-<br>
 
-#### Tree and Branch structure (Smart edit)
+### Tree Editing
 <a href="https://asciinema.org/a/605950?autoplay=1&speed=1.5" target="_blank"><img src="https://asciinema.org/a/605950.svg" /></a>
-<br>
 
 ## Integrations
 
-### direnv
-[direnv](https://direnv.net/) automatically activates environments when entering directories:
+### direnv Integration
+[direnv](https://direnv.net/) provides automatic environment activation:
+
 ```bash
-# Update .envrc with selected environment
+# Generate .envrc for automatic loading
 rsenv envrc production.env .envrc
+
+# Interactive selection with direnv update
+rsenv select environments/
+
+# Manual direnv commands
+direnv allow    # Enable .envrc
+direnv reload   # Refresh environment
 ```
 
 ### JetBrains IDEs
-Use the [EnvFile plugin](https://plugins.jetbrains.com/plugin/7861-envfile) for IDE integration:
-- Configure `runenv.sh` as the EnvFile script
-- Set `RUN_ENV` environment variable to specify which environment to load
-- The plugin will automatically load variables from `<RUN_ENV>.env`
+Integration via [EnvFile plugin](https://plugins.jetbrains.com/plugin/7861-envfile):
+
+1. Install the EnvFile plugin
+2. Create a run configuration script:
+   ```bash
+   #!/bin/bash
+   # runenv.sh
+   rsenv build "${RUN_ENV}.env"
+   ```
+3. Configure the plugin to use `runenv.sh`
+4. Set `RUN_ENV` environment variable in your run configuration
 
 [![jetbrain](doc/jetbrain.png)](doc/jetbrain.png)
+
+### Shell Integration
+Generate completion scripts for your shell:
+
+```bash
+# Bash
+rsenv --generate bash > ~/.bash_completion.d/rsenv
+
+# Zsh  
+rsenv --generate zsh > ~/.zsh/completions/_rsenv
+
+# Fish
+rsenv --generate fish > ~/.config/fish/completions/rsenv.fish
+```
 
 
 
 ## Development
-- Tests for "skim" need valid terminal, so they are run via Makefile.
-- Test for `rsenv select`: run debug target and check rsenv .envrc file.
+
+### Building from Source
+```bash
+git clone https://github.com/sysid/rs-env
+cd rs-env/rsenv
+cargo build --release
+```
+
+### Running Tests
+```bash
+# Run all tests (single-threaded to prevent conflicts)
+cargo test -- --test-threads=1
+
+# Run with debug output
+RUST_LOG=debug cargo test -- --test-threads=1
+
+# Test via Makefile (includes interactive tests)
+make test
+```
+
+### Project Structure
+- **`src/lib.rs`**: Core environment expansion and tree building logic
+- **`src/builder.rs`**: TreeBuilder for constructing hierarchical structures  
+- **`src/arena.rs`**: Arena-based tree data structures
+- **`src/cli/`**: Command-line interface and command implementations
+- **`tests/`**: Comprehensive test suite with example environments
+
+### Testing Notes
+- Interactive tests using skim require a valid terminal and are run via Makefile
+- Tests run single-threaded to prevent file system conflicts
+- Test resources in `tests/resources/environments/` demonstrate complex hierarchies
+
+### Contributing
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Ensure all tests pass: `cargo test -- --test-threads=1`
+5. Run formatting: `cargo fmt`
+6. Run linting: `cargo clippy`
+7. Submit a pull request
