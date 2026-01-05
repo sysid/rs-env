@@ -1,119 +1,1017 @@
-#![allow(unused_imports)]
+//! rsenv: Unified development environment manager
+//!
+//! Consolidates hierarchical environment variables (rsenv), file guarding (confguard),
+//! and file swapping (rplc) into a single tool.
 
-use anyhow::{Context, Result};
-use clap::{Args, Command, CommandFactory, Parser, Subcommand, ValueHint};
-use clap_complete::{generate, Generator, Shell};
-use colored::Colorize;
-use rsenv::cli::args::{Cli, Commands};
-use rsenv::cli::commands::execute_command;
-use rsenv::edit::{
-    create_branches, create_vimscript, open_files_in_editor, select_file_with_suffix,
+use std::io;
+use std::process::ExitCode;
+use std::sync::Arc;
+
+use clap::{CommandFactory, Parser};
+use tracing_subscriber::EnvFilter;
+
+use rsenv::application::envrc::update_dot_envrc;
+use rsenv::application::services::{EnvironmentService, SopsService, SwapService, VaultService};
+use rsenv::cli::args::{
+    Cli, Commands, ConfigCommands, EnvCommands, GuardCommands, InitCommands, SopsCommands,
+    SwapCommands,
 };
-use rsenv::envrc::update_dot_envrc;
-use rsenv::{build_env_vars, get_files, is_dag, link, link_all, print_files};
-use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
-use std::rc::Rc;
-use std::{env, io, process};
-use tracing::level_filters::LevelFilter;
-use tracing_subscriber::filter::filter_fn;
-use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, Layer};
+use rsenv::config::{global_config_dir, global_config_path, vault_config_path, Settings};
+use rsenv::domain::TreeBuilder;
+use rsenv::exitcode;
+use rsenv::infrastructure::traits::RealCommandRunner;
+use rsenv::infrastructure::traits::{
+    Editor, EnvironmentEditor, RealFileSystem, SelectionItem, Selector, SkimSelector,
+};
 
-fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
-    generate(gen, cmd, cmd.get_name().to_string(), &mut io::stdout());
-}
+fn main() -> ExitCode {
+    // Initialize logging from RUST_LOG env var
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
-fn main() {
     let cli = Cli::parse();
 
-    if let Some(generator) = cli.generator {
-        let mut cmd = Cli::command();
-        eprintln!("Generating completion file for {generator:?}...");
-        print_completions(generator, &mut cmd);
-    }
-    if cli.info {
-        use clap::CommandFactory; // Trait which returns the current command
-        if let Some(a) = Cli::command().get_author() {
-            println!("AUTHOR: {}", a)
+    match run(cli) {
+        Ok(()) => ExitCode::from(exitcode::OK as u8),
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(e.exit_code() as u8)
         }
-        if let Some(v) = Cli::command().get_version() {
-            println!("VERSION: {}", v)
-        }
-    }
-
-    setup_logging(cli.debug);
-
-    if let Err(e) = execute_command(&cli) {
-        eprintln!("{}", format!("Error: {}", e).red());
-        std::process::exit(1);
     }
 }
 
-fn setup_logging(verbosity: u8) {
-    tracing::debug!("INIT: Attempting logger init from main.rs");
+fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
+    // Determine project directory
+    let project_dir = cli.project_dir.or_else(|| std::env::current_dir().ok());
 
-    let filter = match verbosity {
-        0 => LevelFilter::WARN,
-        1 => LevelFilter::INFO,
-        2 => LevelFilter::DEBUG,
-        3 => LevelFilter::TRACE,
-        _ => {
-            eprintln!("Don't be crazy, max is -d -d -d");
-            LevelFilter::TRACE
+    // Two-phase config loading:
+    // 1. Discover vault from project's .envrc symlink (no Settings needed)
+    // 2. Load settings with vault path for local config
+    let fs = Arc::new(RealFileSystem);
+    let vault_path = project_dir
+        .as_deref()
+        .and_then(|p| VaultService::discover_vault_path(fs.as_ref(), p).ok())
+        .flatten();
+    // Use vault if found, else project dir for local config lookup
+    let config_dir = vault_path.or(project_dir.clone());
+    let settings = Settings::load(config_dir.as_deref()).map_err(|e| {
+        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+    })?;
+
+    match cli.command {
+        Some(Commands::Init {
+            project,
+            absolute,
+            command,
+        }) => handle_init(project.or(project_dir), absolute, command, &settings),
+        Some(Commands::Config { command }) => handle_config(command, &settings, project_dir),
+        Some(Commands::Env { command }) => handle_env(command, project_dir),
+        Some(Commands::Guard { command }) => handle_guard(command, project_dir, &settings),
+        Some(Commands::Info) => handle_info(project_dir, &settings),
+        Some(Commands::Sops { command }) => handle_sops(command, project_dir, &settings),
+        Some(Commands::Swap { command }) => handle_swap(command, project_dir, &settings),
+        Some(Commands::Completion { shell }) => {
+            generate_completions(shell);
+            Ok(())
         }
-    };
-
-    // Create a noisy module filter (Gotcha: empty matches all!)
-    let noisy_modules = ["x"];
-    let module_filter = filter_fn(move |metadata| {
-        !noisy_modules
-            .iter()
-            .any(|name| metadata.target().starts_with(name))
-    });
-
-    // Create a subscriber with formatted output directed to stderr
-    let fmt_layer = fmt::layer()
-        .with_writer(std::io::stderr) // Set writer first
-        .with_target(true)
-        .with_thread_names(false)
-        .with_span_events(FmtSpan::ENTER)
-        .with_span_events(FmtSpan::CLOSE);
-
-    // Apply filters to the layer
-    let filtered_layer = fmt_layer.with_filter(filter).with_filter(module_filter);
-
-    tracing_subscriber::registry().with(filtered_layer).init();
-
-    // Log initial debug level
-    match filter {
-        LevelFilter::INFO => tracing::info!("Debug mode: info"),
-        LevelFilter::DEBUG => tracing::debug!("Debug mode: debug"),
-        LevelFilter::TRACE => tracing::debug!("Debug mode: trace"),
-        _ => {}
+        None => {
+            // No command: show help
+            Cli::command().print_help().ok();
+            println!();
+            Ok(())
+        }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rsenv::util::testing;
-    use tracing::info;
+fn handle_env(
+    command: EnvCommands,
+    project_dir: Option<std::path::PathBuf>,
+) -> rsenv::cli::CliResult<()> {
+    let fs = Arc::new(RealFileSystem);
+    let service = EnvironmentService::new(fs);
 
-    #[ctor::ctor]
-    fn init() {
-        testing::init_test_setup();
+    match command {
+        EnvCommands::Build { file } => {
+            let result = service.build(&file).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            // Output as shell-sourceable format
+            for (key, value) in &result.variables {
+                println!("export {}={:?}", key, value);
+            }
+            Ok(())
+        }
+        EnvCommands::Envrc { file, envrc } => {
+            let fs: Arc<dyn rsenv::infrastructure::traits::FileSystem> = Arc::new(RealFileSystem);
+            let envrc_path = envrc.unwrap_or_else(|| std::path::PathBuf::from(".envrc"));
+            let output = service.build(&file).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            let mut exports = String::new();
+            for (k, v) in &output.variables {
+                exports.push_str(&format!("export {}={}\n", k, v));
+            }
+
+            update_dot_envrc(&fs, &envrc_path, &exports).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+            println!("Updated {}", envrc_path.display());
+            Ok(())
+        }
+        EnvCommands::Files { file } => {
+            let files = service.get_files(&file).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+            for f in files {
+                println!("{}", f.display());
+            }
+            Ok(())
+        }
+        EnvCommands::Tree { dir } => {
+            let search_dir = dir
+                .or(project_dir)
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+            if service.is_dag(&search_dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })? {
+                return Err(rsenv::cli::CliError::Usage(
+                    "Dependencies form a DAG, cannot use tree-based commands.".to_string(),
+                ));
+            }
+
+            let mut builder = TreeBuilder::new();
+            let trees = builder.build_from_directory(&search_dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                    rsenv::application::ApplicationError::Domain(e),
+                ))
+            })?;
+
+            println!("Found {} trees:", trees.len());
+            for tree in &trees {
+                if let Some(root_idx) = tree.root() {
+                    if let Some(root_node) = tree.get_node(root_idx) {
+                        println!("\n{}", root_node.data.file_path.display());
+                    }
+                }
+            }
+            Ok(())
+        }
+        EnvCommands::Link { files } => {
+            if files.len() < 2 {
+                return Err(rsenv::cli::CliError::Usage(
+                    "Link requires at least 2 files".to_string(),
+                ));
+            }
+            service.link_chain(&files).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+            let chain: Vec<_> = files.iter().map(|p| p.display().to_string()).collect();
+            println!("Linked: {}", chain.join(" <- "));
+            Ok(())
+        }
+        EnvCommands::Unlink { file } => {
+            service.unlink(&file).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+            println!("Unlinked {}", file.display());
+            Ok(())
+        }
+        EnvCommands::Select { dir } => {
+            let search_dir = dir
+                .or(project_dir)
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+            let hierarchy = service.get_hierarchy(&search_dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if hierarchy.files.is_empty() {
+                println!("No .env files found in {}", search_dir.display());
+                return Ok(());
+            }
+
+            // Build selection items
+            let items: Vec<SelectionItem> = hierarchy
+                .files
+                .iter()
+                .map(|f| SelectionItem {
+                    display: f
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| f.path.to_string_lossy().to_string()),
+                    value: f.path.to_string_lossy().to_string(),
+                })
+                .collect();
+
+            // Present selector
+            let selector = SkimSelector;
+            let selected = selector
+                .select_one(&items, "Select environment: ")
+                .map_err(|e| rsenv::cli::CliError::Usage(format!("selection failed: {e}")))?;
+
+            match selected {
+                Some(item) => {
+                    // Build the selected environment
+                    let result = service
+                        .build(&std::path::PathBuf::from(&item.value))
+                        .map_err(|e| {
+                            rsenv::cli::CliError::Infra(
+                                rsenv::infrastructure::InfraError::Application(e),
+                            )
+                        })?;
+
+                    // Output as shell-sourceable format
+                    for (key, value) in &result.variables {
+                        println!("export {}={:?}", key, value);
+                    }
+                }
+                None => {
+                    // User cancelled
+                    eprintln!("Selection cancelled");
+                }
+            }
+            Ok(())
+        }
+        EnvCommands::Edit { dir } => {
+            let search_dir = dir
+                .or(project_dir)
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+            let hierarchy = service.get_hierarchy(&search_dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if hierarchy.files.is_empty() {
+                println!("No .env files found in {}", search_dir.display());
+                return Ok(());
+            }
+
+            // Build selection items
+            let items: Vec<SelectionItem> = hierarchy
+                .files
+                .iter()
+                .map(|f| SelectionItem {
+                    display: f
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| f.path.to_string_lossy().to_string()),
+                    value: f.path.to_string_lossy().to_string(),
+                })
+                .collect();
+
+            // Present selector
+            let selector = SkimSelector;
+            let selected = selector
+                .select_one(&items, "Edit environment: ")
+                .map_err(|e| rsenv::cli::CliError::Usage(format!("selection failed: {e}")))?;
+
+            match selected {
+                Some(item) => {
+                    // Open in editor
+                    let editor = EnvironmentEditor;
+                    let path = std::path::PathBuf::from(&item.value);
+                    editor.open(&path).map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
+                            format!("open editor for {}", path.display()),
+                            e,
+                        ))
+                    })?;
+                    println!("Edited {}", item.display);
+                }
+                None => {
+                    eprintln!("Selection cancelled");
+                }
+            }
+            Ok(())
+        }
+        EnvCommands::Branches { dir } => {
+            let dir = dir
+                .or(project_dir)
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+            if service.is_dag(&dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })? {
+                return Err(rsenv::cli::CliError::Usage(
+                    "Dependencies form a DAG, cannot use tree-based commands.".to_string(),
+                ));
+            }
+
+            let mut builder = TreeBuilder::new();
+            let trees = builder.build_from_directory(&dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                    rsenv::application::ApplicationError::Domain(e),
+                ))
+            })?;
+
+            println!("Found {} trees:", trees.len());
+            for tree in &trees {
+                if let Some(root_idx) = tree.root() {
+                    if let Some(root_node) = tree.get_node(root_idx) {
+                        println!("\nTree Root: {}", root_node.data.file_path.display());
+                    }
+                }
+            }
+            Ok(())
+        }
+        EnvCommands::EditLeaf { file } => {
+            let files = service.get_files(&file).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if files.is_empty() {
+                println!("No files in hierarchy");
+                return Ok(());
+            }
+
+            // Open all files in editor with -O (vertical split)
+            let editor_cmd = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
+            let file_args: Vec<String> = files
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect();
+
+            std::process::Command::new(&editor_cmd)
+                .arg("-O")
+                .args(&file_args)
+                .status()
+                .map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
+                        format!("open editor {}", editor_cmd),
+                        e,
+                    ))
+                })?;
+
+            println!("Edited {} files", files.len());
+            Ok(())
+        }
+        EnvCommands::TreeEdit { dir } => {
+            let dir = dir
+                .or(project_dir)
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+            if service.is_dag(&dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })? {
+                return Err(rsenv::cli::CliError::Usage(
+                    "Dependencies form a DAG, cannot use tree-based commands.".to_string(),
+                ));
+            }
+
+            let mut builder = TreeBuilder::new();
+            let trees = builder.build_from_directory(&dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                    rsenv::application::ApplicationError::Domain(e),
+                ))
+            })?;
+
+            // Collect branches: for each leaf, get the parent chain (leaf → root)
+            let mut branches: Vec<Vec<std::path::PathBuf>> = Vec::new();
+            for tree in &trees {
+                for leaf in tree.leaf_nodes() {
+                    let leaf_path = std::path::Path::new(&leaf);
+                    if let Ok(files) = service.get_files(leaf_path) {
+                        if !files.is_empty() {
+                            branches.push(files);
+                        }
+                    }
+                }
+            }
+
+            if branches.is_empty() {
+                println!("No environment files found");
+                return Ok(());
+            }
+
+            println!("Editing {} branches...", branches.len());
+
+            // Generate vimscript for grid layout
+            let vimscript = create_vimscript(&branches);
+
+            // Write vimscript to temp file
+            use std::io::Write;
+            let mut tmpfile = tempfile::NamedTempFile::new().map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
+                    "create temp file".to_string(),
+                    e,
+                ))
+            })?;
+            tmpfile.write_all(vimscript.as_bytes()).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
+                    "write vimscript".to_string(),
+                    e,
+                ))
+            })?;
+
+            // Run vim with -S to source the script
+            let status = std::process::Command::new("vim")
+                .arg("-S")
+                .arg(tmpfile.path())
+                .status()
+                .map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
+                        "run vim".to_string(),
+                        e,
+                    ))
+                })?;
+
+            println!("Vim: {}", status);
+            Ok(())
+        }
+        EnvCommands::Leaves { dir } => {
+            let dir = dir
+                .or(project_dir)
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+            if service.is_dag(&dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })? {
+                return Err(rsenv::cli::CliError::Usage(
+                    "Dependencies form a DAG, cannot use tree-based commands.".to_string(),
+                ));
+            }
+
+            let mut builder = TreeBuilder::new();
+            let trees = builder.build_from_directory(&dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                    rsenv::application::ApplicationError::Domain(e),
+                ))
+            })?;
+
+            for tree in &trees {
+                for leaf in tree.leaf_nodes() {
+                    println!("{}", leaf);
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn handle_config(
+    command: ConfigCommands,
+    settings: &Settings,
+    project_dir: Option<std::path::PathBuf>,
+) -> rsenv::cli::CliResult<()> {
+    match command {
+        ConfigCommands::Show => {
+            let toml = settings.to_toml().map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+            println!("{toml}");
+            Ok(())
+        }
+        ConfigCommands::Init { global } => {
+            let template = Settings::template();
+
+            if global {
+                // Create global config
+                if let Some(dir) = global_config_dir() {
+                    std::fs::create_dir_all(&dir).map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
+                            format!("create config dir: {}", dir.display()),
+                            e,
+                        ))
+                    })?;
+
+                    let path = dir.join("rsenv.toml");
+                    if path.exists() {
+                        return Err(rsenv::cli::CliError::Usage(format!(
+                            "config already exists: {}",
+                            path.display()
+                        )));
+                    }
+
+                    std::fs::write(&path, &template).map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
+                            format!("write config: {}", path.display()),
+                            e,
+                        ))
+                    })?;
+
+                    println!("Created: {}", path.display());
+                } else {
+                    return Err(rsenv::cli::CliError::Usage(
+                        "cannot determine config directory".into(),
+                    ));
+                }
+            } else {
+                // Smart fallback: try vault first, then project directory
+                let current_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
+
+                let fs = Arc::new(RealFileSystem);
+                let vault_path = VaultService::discover_vault_path(fs.as_ref(), &current_dir)
+                    .map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                            e,
+                        ))
+                    })?;
+
+                // Use vault if initialized, otherwise use project directory directly
+                let target_dir = vault_path.unwrap_or_else(|| current_dir.clone());
+                let path = vault_config_path(&target_dir);
+
+                if path.exists() {
+                    return Err(rsenv::cli::CliError::Usage(format!(
+                        "config already exists: {}",
+                        path.display()
+                    )));
+                }
+
+                std::fs::write(&path, &template).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
+                        format!("write config: {}", path.display()),
+                        e,
+                    ))
+                })?;
+
+                println!("Created: {}", path.display());
+            }
+            Ok(())
+        }
+        ConfigCommands::Path => {
+            println!("Global config: {:?}", global_config_path());
+
+            let current_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
+            let fs = Arc::new(RealFileSystem);
+
+            match VaultService::discover_vault_path(fs.as_ref(), &current_dir) {
+                Ok(Some(vault_dir)) => {
+                    println!("Local config:  {}", vault_config_path(&vault_dir).display());
+                }
+                _ => {
+                    println!("Local config:  (project not initialized)");
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn handle_init(
+    project_dir: Option<std::path::PathBuf>,
+    absolute: bool,
+    command: Option<InitCommands>,
+    settings: &Settings,
+) -> rsenv::cli::CliResult<()> {
+    match command {
+        Some(InitCommands::Reset { project }) => {
+            // Use project from subcommand if provided, otherwise use parent's project_dir
+            let project_dir = project
+                .or(project_dir)
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+            handle_init_reset(project_dir, settings)
+        }
+        None => {
+            // Default: create vault
+            let project_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
+            handle_init_create(project_dir, absolute, settings)
+        }
+    }
+}
+
+fn handle_init_create(
+    project_dir: std::path::PathBuf,
+    absolute: bool,
+    settings: &Settings,
+) -> rsenv::cli::CliResult<()> {
+    let fs = Arc::new(RealFileSystem);
+    let settings = Arc::new(settings.clone());
+    let service = VaultService::new(fs, settings);
+
+    let vault = service.init(&project_dir, absolute).map_err(|e| {
+        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+    })?;
+
+    println!("Initialized vault for {}", project_dir.display());
+    println!("  Vault:       {}", vault.path.display());
+    println!("  Sentinel ID: {}", vault.sentinel_id);
+    Ok(())
+}
+
+fn handle_init_reset(
+    project_dir: std::path::PathBuf,
+    settings: &Settings,
+) -> rsenv::cli::CliResult<()> {
+    let fs = Arc::new(RealFileSystem);
+    let settings_arc = Arc::new(settings.clone());
+    let service = VaultService::new(fs.clone(), settings_arc);
+
+    // Get vault info before reset for display
+    let vault = service.get(&project_dir).map_err(|e| {
+        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+    })?;
+
+    let vault_path = vault.as_ref().map(|v| v.path.clone());
+
+    // Confirm before reset
+    println!("This will:");
+    println!("  - Restore all guarded files to project");
+    println!("  - Remove .envrc symlink");
+    if let Some(ref path) = vault_path {
+        println!("  - Leave vault directory at {}", path.display());
+    }
+    print!("Continue? [y/N] ");
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).map_err(|e| {
+        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Io {
+            context: "read confirmation".to_string(),
+            source: e,
+        })
+    })?;
+
+    if !input.trim().eq_ignore_ascii_case("y") {
+        println!("Aborted.");
+        return Ok(());
     }
 
-    // https://docs.rs/clap/latest/clap/_derive/_tutorial/index.html#testing
-    #[test]
-    fn verify_cli() {
-        use clap::CommandFactory;
-        Cli::command().debug_assert();
-        info!("Debug mode: info");
+    let restored_count = service.reset(&project_dir).map_err(|e| {
+        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+    })?;
+
+    println!("Reset vault for {}", project_dir.display());
+    println!("  Restored {} guarded file(s)", restored_count);
+    println!("  Removed .envrc symlink");
+    if let Some(path) = vault_path {
+        println!();
+        println!("Note: Vault directory remains at {}", path.display());
+        println!("      Delete manually if no longer needed.");
     }
+    Ok(())
+}
+
+fn handle_guard(
+    command: GuardCommands,
+    project_dir: Option<std::path::PathBuf>,
+    settings: &Settings,
+) -> rsenv::cli::CliResult<()> {
+    let fs = Arc::new(RealFileSystem);
+    let settings = Arc::new(settings.clone());
+    let service = VaultService::new(fs.clone(), settings);
+
+    match command {
+        GuardCommands::Add { file, absolute } => {
+            let guarded = service.guard(&file, absolute).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+            println!("Guarded: {}", file.display());
+            println!("  Vault: {}", guarded.vault_path.display());
+            Ok(())
+        }
+        GuardCommands::List => {
+            let project_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
+
+            let vault = service.get(&project_dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            match vault {
+                Some(v) => {
+                    let guarded_dir = v.path.join("guarded");
+                    if !guarded_dir.exists() {
+                        println!("No guarded files");
+                        return Ok(());
+                    }
+
+                    println!("Guarded files in {}:", project_dir.display());
+                    for entry in walkdir::WalkDir::new(&guarded_dir)
+                        .into_iter()
+                        .filter_map(|e| e.ok())
+                        .filter(|e| e.file_type().is_file())
+                    {
+                        if let Ok(rel) = entry.path().strip_prefix(&guarded_dir) {
+                            println!("  {}", rel.display());
+                        }
+                    }
+                    Ok(())
+                }
+                None => {
+                    println!("Vault not initialized for {}", project_dir.display());
+                    Ok(())
+                }
+            }
+        }
+        GuardCommands::Restore { file } => {
+            service.unguard(&file).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+            println!("Restored: {}", file.display());
+            Ok(())
+        }
+    }
+}
+
+fn handle_info(
+    project_dir: Option<std::path::PathBuf>,
+    settings: &Settings,
+) -> rsenv::cli::CliResult<()> {
+    let project_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
+
+    let fs = Arc::new(RealFileSystem);
+    let settings = Arc::new(settings.clone());
+    let service = VaultService::new(fs, settings);
+
+    println!("Project: {}", project_dir.display());
+
+    let vault = service.get(&project_dir).map_err(|e| {
+        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+    })?;
+
+    match vault {
+        Some(v) => {
+            println!("Vault:   {}", v.path.display());
+            println!("ID:      {}", v.sentinel_id);
+
+            // Count guarded files
+            let guarded_dir = v.path.join("guarded");
+            if guarded_dir.exists() {
+                let count = walkdir::WalkDir::new(&guarded_dir)
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().is_file())
+                    .count();
+                println!("Guarded: {} files", count);
+            } else {
+                println!("Guarded: 0 files");
+            }
+        }
+        None => {
+            println!("Vault:   (not initialized)");
+            println!();
+            println!("Run 'rsenv init' to create a vault for this project.");
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_sops(
+    command: SopsCommands,
+    project_dir: Option<std::path::PathBuf>,
+    settings: &Settings,
+) -> rsenv::cli::CliResult<()> {
+    let fs = Arc::new(RealFileSystem);
+    let cmd = Arc::new(RealCommandRunner);
+    let settings = Arc::new(settings.clone());
+    let service = SopsService::new(fs, cmd, settings);
+
+    match command {
+        SopsCommands::Encrypt { dir } => {
+            let base_dir = dir.or(project_dir);
+            let encrypted = service.encrypt_all(base_dir.as_deref()).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if encrypted.is_empty() {
+                println!("No files to encrypt");
+            } else {
+                println!("Encrypted {} files:", encrypted.len());
+                for path in &encrypted {
+                    println!("  {}", path.display());
+                }
+            }
+            Ok(())
+        }
+        SopsCommands::Decrypt { dir } => {
+            let base_dir = dir.or(project_dir);
+            let decrypted = service.decrypt_all(base_dir.as_deref()).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if decrypted.is_empty() {
+                println!("No files to decrypt");
+            } else {
+                println!("Decrypted {} files:", decrypted.len());
+                for path in &decrypted {
+                    println!("  {}", path.display());
+                }
+            }
+            Ok(())
+        }
+        SopsCommands::Clean { dir } => {
+            let base_dir = dir.or(project_dir);
+            let deleted = service.clean(base_dir.as_deref()).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if deleted.is_empty() {
+                println!("No plaintext files to clean");
+            } else {
+                println!("Deleted {} plaintext files:", deleted.len());
+                for path in &deleted {
+                    println!("  {}", path.display());
+                }
+            }
+            Ok(())
+        }
+        SopsCommands::Status { dir } => {
+            let base_dir = dir.or(project_dir);
+            let status = service.status(base_dir.as_deref()).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            println!("SOPS Status:");
+            println!();
+
+            if !status.pending_encrypt.is_empty() {
+                println!("Pending encryption ({}):", status.pending_encrypt.len());
+                for path in &status.pending_encrypt {
+                    println!("  {}", path.display());
+                }
+                println!();
+            }
+
+            if !status.encrypted.is_empty() {
+                println!("Already encrypted ({}):", status.encrypted.len());
+                for path in &status.encrypted {
+                    println!("  {}", path.display());
+                }
+                println!();
+            }
+
+            if !status.pending_clean.is_empty() {
+                println!("Pending clean ({}):", status.pending_clean.len());
+                for path in &status.pending_clean {
+                    println!("  {}", path.display());
+                }
+            }
+
+            if status.pending_encrypt.is_empty()
+                && status.encrypted.is_empty()
+                && status.pending_clean.is_empty()
+            {
+                println!("  No matching files found");
+            }
+
+            Ok(())
+        }
+    }
+}
+
+fn handle_swap(
+    command: SwapCommands,
+    project_dir: Option<std::path::PathBuf>,
+    settings: &Settings,
+) -> rsenv::cli::CliResult<()> {
+    let project_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
+
+    let fs = Arc::new(RealFileSystem);
+    let settings = Arc::new(settings.clone());
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    match command {
+        SwapCommands::In { files } => {
+            if files.is_empty() {
+                return Err(rsenv::cli::CliError::Usage("no files specified".into()));
+            }
+
+            let swapped = service.swap_in(&project_dir, &files).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            println!("Swapped in {} files:", swapped.len());
+            for file in &swapped {
+                println!(
+                    "  {} <- {}",
+                    file.project_path.display(),
+                    file.vault_path.display()
+                );
+            }
+            Ok(())
+        }
+        SwapCommands::Out { files } => {
+            if files.is_empty() {
+                return Err(rsenv::cli::CliError::Usage("no files specified".into()));
+            }
+
+            let swapped = service.swap_out(&project_dir, &files).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            println!("Swapped out {} files:", swapped.len());
+            for file in &swapped {
+                println!("  {} (restored original)", file.project_path.display());
+            }
+            Ok(())
+        }
+        SwapCommands::Init { files } => {
+            if files.is_empty() {
+                return Err(rsenv::cli::CliError::Usage("no files specified".into()));
+            }
+
+            let initialized = service.swap_init(&project_dir, &files).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            println!("Initialized {} files in vault:", initialized.len());
+            for file in &initialized {
+                println!(
+                    "  {} -> {}",
+                    file.project_path.display(),
+                    file.vault_path.display()
+                );
+            }
+            Ok(())
+        }
+        SwapCommands::Status => {
+            let status = service.status(&project_dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if status.is_empty() {
+                println!("No swappable files found");
+                return Ok(());
+            }
+
+            println!("Swap Status:");
+            for file in &status {
+                let state_str = match &file.state {
+                    rsenv::domain::SwapState::Out => "out".to_string(),
+                    rsenv::domain::SwapState::In { hostname } => format!("in ({})", hostname),
+                };
+                println!("  {} [{}]", file.project_path.display(), state_str);
+            }
+            Ok(())
+        }
+        SwapCommands::AllOut { base_dir } => {
+            let search_dir = base_dir.unwrap_or(project_dir);
+
+            let processed = service.swap_out_all(&search_dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if processed.is_empty() {
+                println!("No projects with active swaps found");
+            } else {
+                println!("Swapped out files in {} projects:", processed.len());
+                for dir in &processed {
+                    println!("  {}", dir.display());
+                }
+            }
+            Ok(())
+        }
+        SwapCommands::Delete { files } => {
+            if files.is_empty() {
+                return Err(rsenv::cli::CliError::Usage("no files specified".into()));
+            }
+
+            let deleted = service.delete(&project_dir, &files).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            println!("Deleted {} files from swap:", deleted.len());
+            for file in &deleted {
+                println!("  {}", file.project_path.display());
+            }
+            Ok(())
+        }
+    }
+}
+
+fn generate_completions(shell: clap_complete::Shell) {
+    let mut cmd = Cli::command();
+    clap_complete::generate(shell, &mut cmd, "rsenv", &mut io::stdout());
+}
+
+/// Generate vimscript for grid layout of env file branches.
+///
+/// Each branch (leaf → root chain) becomes a column.
+/// Files within each column are stacked vertically.
+fn create_vimscript(branches: &[Vec<std::path::PathBuf>]) -> String {
+    let mut script = String::new();
+
+    for (col_idx, col_files) in branches.iter().enumerate() {
+        if col_files.is_empty() {
+            continue;
+        }
+
+        if col_idx == 0 {
+            // First column: start with 'edit' for the first file
+            script.push_str(&format!("edit {}\n", col_files[0].display()));
+        } else {
+            // Subsequent columns: split and move right
+            script.push_str(&format!("split {}\n", col_files[0].display()));
+            script.push_str("wincmd L\n");
+        }
+
+        // Rest of files in this column: add as vertical splits
+        for file in &col_files[1..] {
+            script.push_str(&format!("split {}\n", file.display()));
+        }
+    }
+
+    // Equalize window sizes and jump to top-left
+    script.push_str("\nwincmd =\n");
+    script.push_str("1wincmd w\n");
+
+    script
 }

@@ -1,140 +1,190 @@
 # rsenv
 
-**Hierarchical environment variable management for modern development workflows**
+Hierarchical environment management with secure vault storage.
 
-> [Documentation](https://sysid.github.io/hierarchical-environment-variable-management/) | [Wiki](https://github.com/sysid/rs-env/wiki)
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
+[![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org/)
 
-[![Crates.io](https://img.shields.io/crates/v/rsenv.svg)](https://crates.io/crates/rsenv)
-[![License](https://img.shields.io/badge/licensee-MIT-blue.svg)](LICENSE)
+## Overview
 
-## Why rs-env?
+rsenv is a CLI tool for managing development environments. It combines:
 
-Managing environment variables across different environments (development, staging, production) and
-configurations (regions, features, services) creates massive duplication in traditional `.env`
-files. 
+- **Hierarchical env files** with parent linking (`# rsenv: parent.env`)
+- **Vault storage** for sensitive files (symlinked back to project)
+- **File swapping** for development-specific configs
+- **SOPS encryption** for securing vault contents
 
-**rs-env solves this** by implementing hierarchical inheritance where child configurations
-automatically inherit and override parent values.
+## Features
 
-## How It Works
+- Build merged environment variables from hierarchical env files
+- Guard sensitive files by moving them to a vault with symlinks
+- Swap files in/out for development vs production configs
+- Interactive fuzzy selection with skim
+- Shell integration with direnv
+- Optional SOPS encryption for vault contents
 
-Environment files form **directed acyclic graphs (DAGs)** where:
-1. Child files link to parents via `# rsenv: parent.env` comments
-2. Variables are inherited and merged from parent to child
-3. Child values override parent values (last defined wins)
-4. The `build` command compiles the complete environment
+## Getting Started
 
-![Concept](doc/concept.png)
+### Prerequisites
 
-## Quick Demo
+- Rust toolchain (1.70+)
+- [direnv](https://direnv.net/) (recommended)
+- [SOPS](https://github.com/getsops/sops) (optional, for encryption)
 
-<a href="https://asciinema.org/a/605946?autoplay=1&speed=1.5" target="_blank"><img src="https://asciinema.org/a/605946.svg" /></a>
-
-## Installation
+### Installation
 
 ```bash
-# From crates.io
-cargo install rs-env
-
-# From source
-git clone https://github.com/sysid/rs-env
-cd rs-env/rsenv
+cd rsenv
 cargo install --path .
 ```
 
-**Requirements**: Rust 1.70+ ([Install Rust](https://rustup.rs/))
-
-## 30-Second Example
-
-Create a hierarchy where child environments inherit from parents:
+### Quick Start
 
 ```bash
-# base.env - Shared configuration
-export DATABASE_HOST=localhost
-export LOG_LEVEL=info
+# Initialize vault for current project
+rsenv init
 
-# production.env - Inherits from base, overrides specific values
+# Guard a sensitive file (moves to vault, creates symlink)
+rsenv guard add .env
+
+# View environment hierarchy
+rsenv env tree
+
+# Build merged environment from leaf file
+rsenv env build envs/prod.env
+
+# Interactively select and activate environment
+rsenv env select
+```
+
+## CLI Reference
+
+| Command | Subcommands | Description |
+|---------|-------------|-------------|
+| `init` | `reset` | Create vault for project, or reset (undo) initialization |
+| `env` | `build`, `envrc`, `files`, `select`, `tree`, `branches`, `edit`, `edit-leaf`, `tree-edit`, `leaves`, `link`, `unlink` | Environment hierarchy management |
+| `guard` | `add`, `list`, `restore` | Guard sensitive files (move to vault with symlink) |
+| `swap` | `in`, `out`, `init`, `status`, `all-out` | Swap files between project and vault |
+| `sops` | `encrypt`, `decrypt`, `clean`, `status` | SOPS encryption/decryption |
+| `config` | `show`, `init`, `path` | Configuration management |
+| `info` | - | Show project and vault status |
+| `completion` | - | Generate shell completions |
+
+### Global Options
+
+```
+-v, --verbose         Enable verbose output
+-C, --project-dir     Project directory (defaults to current directory)
+```
+
+### Environment Hierarchy
+
+Link env files with a comment directive:
+
+```bash
+# envs/prod.env
 # rsenv: base.env
-export DATABASE_HOST=prod-db.example.com
-export LOG_LEVEL=error
-export ENVIRONMENT=production
+export API_URL=https://api.prod.example.com
 ```
 
-Build the complete environment:
+Build merged variables (children override parents):
 
 ```bash
-# Build production environment
-rsenv build production.env
-
-# Load into your shell
-source <(rsenv build production.env)
-
-# Verify
-echo $DATABASE_HOST  # prod-db.example.com (from production.env)
-echo $LOG_LEVEL      # error (from production.env)
+rsenv env build envs/prod.env
+# Outputs: export KEY="value" format
 ```
 
-**Result**: `production.env` inherits `base.env` variables and overrides what changes. The `# rsenv: base.env` comment creates the parent-child link.
-
-## Core Features
-
-### Hierarchical Inheritance
-- Build environment trees from `.env` files with parent-child relationships
-- Smart override logic: child variables automatically override parent values
-- Standalone file support: independent `.env` files work as single-node trees
-
-### Interactive Tools
-- **Fuzzy Selection** - Built-in fuzzy finder for rapid environment discovery
-- **Smart Editing** - Edit entire hierarchies side-by-side or individual files
-- **Tree Visualization** - Display relationships and identify leaf nodes
-
-### Integrations
-- **[direnv](https://direnv.net/)** - Automatic environment activation when entering directories
-- **[JetBrains IDEs](https://plugins.jetbrains.com/plugin/7861-envfile)** - Native IDE integration via EnvFile plugin
-- **Shell Completion** - bash, zsh, fish, and powershell support
-
-## Essential Commands
-
-| Command | Purpose |
-|---------|---------|
-| `rsenv build <file>` | Build complete environment from hierarchy |
-| `rsenv select <dir>` | Interactive selection + direnv update |
-| `rsenv tree <dir>` | Display hierarchical structure |
-| `rsenv edit <dir>` | Interactive selection and editing |
-
-**[Full Command Reference](https://github.com/sysid/rs-env/wiki/Command-Reference)**
-
-## Documentation
-
-**New to rs-env?** Start with the [Quick Start Guide](https://github.com/sysid/rs-env/wiki/Quick-Start)
-
-**Comprehensive documentation** is available in the [rs-env Wiki](https://github.com/sysid/rs-env/wiki):
-
-- **Getting Started**: [Quick Start](https://github.com/sysid/rs-env/wiki/Quick-Start), [Installation](https://github.com/sysid/rs-env/wiki/Installation), [Core Concepts](https://github.com/sysid/rs-env/wiki/Core-Concepts)
-- **Core Features**: [Building Environments](https://github.com/sysid/rs-env/wiki/Building-Environments), [Viewing Hierarchies](https://github.com/sysid/rs-env/wiki/Viewing-Hierarchies), [File Format](https://github.com/sysid/rs-env/wiki/File-Format)
-- **Interactive Tools**: [Interactive Selection](https://github.com/sysid/rs-env/wiki/Interactive-Selection), [Tree Editing](https://github.com/sysid/rs-env/wiki/Tree-Editing)
-- **Integrations**: [direnv](https://github.com/sysid/rs-env/wiki/direnv-Integration), [JetBrains IDEs](https://github.com/sysid/rs-env/wiki/JetBrains-IDEs), [Shell Completion](https://github.com/sysid/rs-env/wiki/Shell-Completion)
-- **Advanced**: [Managing Links](https://github.com/sysid/rs-env/wiki/Managing-Links), [Complex Hierarchies](https://github.com/sysid/rs-env/wiki/Complex-Hierarchies)
-- **Reference**: [Command Reference](https://github.com/sysid/rs-env/wiki/Command-Reference), [Troubleshooting](https://github.com/sysid/rs-env/wiki/Troubleshooting)
-
-## Contributing
-
-Contributions are welcome! See the [Development Guide](https://github.com/sysid/rs-env/wiki/Development) for details on building, testing, and contributing.
+### File Guarding
 
 ```bash
-# Quick start for contributors
-git clone https://github.com/sysid/rs-env
-cd rs-env/rsenv
+# Move .env to vault, replace with symlink
+rsenv guard add .env
+
+# List guarded files
+rsenv guard list
+
+# Restore file from vault
+rsenv guard restore .env
+```
+
+### File Swapping
+
+```bash
+# Initialize: move project file to vault for first-time setup
+rsenv swap init config.yaml
+
+# Swap in development version
+rsenv swap in config.yaml
+
+# Swap out (restore original)
+rsenv swap out config.yaml
+
+# Check status
+rsenv swap status
+```
+
+## Configuration
+
+Config files are loaded in order (later overrides earlier):
+
+1. Defaults
+2. Global: `~/.config/rsenv/rsenv.toml`
+3. Local: `<vault>/.rsenv.toml`
+4. Environment variables: `RSENV_*`
+
+### Create Config
+
+```bash
+# Create local config (in vault)
+rsenv config init
+
+# Create global config
+rsenv config init --global
+
+# Show effective config
+rsenv config show
+```
+
+### Key Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `vault_base_dir` | `~/.rsenv/vaults` | Where vaults are stored |
+| `editor` | `$EDITOR` or `vim` | Editor for `env edit` commands |
+| `sops.gpg_key` | - | GPG key for SOPS encryption |
+| `sops.age_key` | - | Age key for SOPS encryption |
+
+## Development
+
+```bash
+cd rsenv
+
+# Build
+cargo build
+
+# Test (single-threaded required)
 cargo test -- --test-threads=1
-cargo build --release
+
+# Format and lint
+cargo fmt
+cargo clippy
 ```
+
+### Pre-commit Hooks
+
+```bash
+# Install pre-commit (if not already installed)
+pip install pre-commit
+
+# Install hooks
+pre-commit install
+
+# Run manually
+pre-commit run --all-files
+```
+
+Hooks run: `cargo fmt`, `cargo clippy`, `cargo check`, plus file hygiene checks.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Links
-
-- 📦 [crates.io Package](https://crates.io/crates/rsenv)
-- 📖 [Wiki Documentation](https://github.com/sysid/rs-env/wiki)
-- 🐛 [Issue Tracker](https://github.com/sysid/rs-env/issues)
+BSD-3-Clause
