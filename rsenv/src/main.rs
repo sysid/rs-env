@@ -568,6 +568,11 @@ fn handle_init(
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
             handle_init_reset(project_dir, settings)
         }
+        Some(InitCommands::Reconnect { envrc_path }) => {
+            // project_dir comes from -C/--project-dir (or cwd)
+            let project_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
+            handle_init_reconnect(envrc_path, project_dir, settings)
+        }
         None => {
             // Default: create vault
             let project_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
@@ -645,6 +650,25 @@ fn handle_init_reset(
         println!("Note: Vault directory remains at {}", path.display());
         println!("      Delete manually if no longer needed.");
     }
+    Ok(())
+}
+
+fn handle_init_reconnect(
+    envrc_path: std::path::PathBuf,
+    project_dir: std::path::PathBuf,
+    settings: &Settings,
+) -> rsenv::cli::CliResult<()> {
+    let fs = Arc::new(RealFileSystem);
+    let settings_arc = Arc::new(settings.clone());
+    let service = VaultService::new(fs, settings_arc);
+
+    let vault = service.reconnect(&envrc_path, &project_dir).map_err(|e| {
+        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+    })?;
+
+    println!("Reconnected {} to vault", project_dir.display());
+    println!("  Vault:       {}", vault.path.display());
+    println!("  Sentinel ID: {}", vault.sentinel_id);
     Ok(())
 }
 

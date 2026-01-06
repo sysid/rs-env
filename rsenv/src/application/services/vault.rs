@@ -284,6 +284,143 @@ impl VaultService {
         }))
     }
 
+    /// Reconnect a project to its vault by re-creating the .envrc symlink.
+    ///
+    /// Use this when the .envrc symlink is deleted or when the project has moved.
+    /// Updates state.sourceDir in dot.envrc if the project path has changed.
+    ///
+    /// # Arguments
+    /// * `dot_envrc_path` - Path to the dot.envrc file in the vault
+    /// * `project_dir` - Path to the project directory (may be new location)
+    ///
+    /// # Returns
+    /// The Vault that was reconnected
+    pub fn reconnect(&self, dot_envrc_path: &Path, project_dir: &Path) -> ApplicationResult<Vault> {
+        // Verify dot.envrc exists
+        if !self.fs.exists(dot_envrc_path) {
+            return Err(ApplicationError::OperationFailed {
+                context: format!("dot.envrc not found: {}", dot_envrc_path.display()),
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "file not found",
+                )),
+            });
+        }
+
+        // Read and parse metadata
+        let content = self.fs.read_to_string(dot_envrc_path).map_err(|e| {
+            ApplicationError::OperationFailed {
+                context: format!("read dot.envrc: {}", dot_envrc_path.display()),
+                source: Box::new(e),
+            }
+        })?;
+
+        let metadata = crate::application::envrc::parse_rsenv_metadata(&content).ok_or_else(|| {
+            ApplicationError::OperationFailed {
+                context: format!("no rsenv section in: {}", dot_envrc_path.display()),
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "not an rsenv-managed file",
+                )),
+            }
+        })?;
+
+        // Canonicalize project_dir
+        let project_dir =
+            self.fs
+                .canonicalize(project_dir)
+                .map_err(|e| ApplicationError::OperationFailed {
+                    context: format!("canonicalize project dir: {}", project_dir.display()),
+                    source: Box::new(e),
+                })?;
+
+        // Get vault path (parent of dot.envrc)
+        let dot_envrc_path = self.fs.canonicalize(dot_envrc_path).map_err(|e| {
+            ApplicationError::OperationFailed {
+                context: format!("canonicalize dot.envrc: {}", dot_envrc_path.display()),
+                source: Box::new(e),
+            }
+        })?;
+
+        let vault_path =
+            dot_envrc_path
+                .parent()
+                .ok_or_else(|| ApplicationError::OperationFailed {
+                    context: format!("invalid vault path: {}", dot_envrc_path.display()),
+                    source: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "cannot determine vault directory",
+                    )),
+                })?;
+
+        // Check if .envrc already exists in project
+        let envrc_link = project_dir.join(".envrc");
+        if self.fs.exists(&envrc_link) {
+            if self.fs.is_symlink(&envrc_link) {
+                // Check if it already points to the correct target
+                if let Ok(target) = self.fs.read_link(&envrc_link) {
+                    let resolved = if target.is_relative() {
+                        project_dir.join(&target)
+                    } else {
+                        target
+                    };
+                    if let Ok(resolved) = self.fs.canonicalize(&resolved) {
+                        if resolved == dot_envrc_path {
+                            // Already correctly linked - idempotent success
+                            return Ok(Vault {
+                                path: vault_path.to_path_buf(),
+                                sentinel_id: metadata.sentinel,
+                            });
+                        }
+                    }
+                }
+                // Symlink exists but points elsewhere - error
+                return Err(ApplicationError::OperationFailed {
+                    context: format!(".envrc symlink exists but points elsewhere: {}", envrc_link.display()),
+                    source: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::AlreadyExists,
+                        "symlink points to different target",
+                    )),
+                });
+            } else {
+                // Regular file exists - cannot overwrite
+                return Err(ApplicationError::OperationFailed {
+                    context: format!("cannot overwrite existing .envrc file: {}", envrc_link.display()),
+                    source: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::AlreadyExists,
+                        "regular file exists",
+                    )),
+                });
+            }
+        }
+
+        // Update state.sourceDir if project path changed
+        let project_dir_str = project_dir.to_string_lossy().to_string();
+        if metadata.source_dir != project_dir_str {
+            crate::application::envrc::update_source_dir(&self.fs, &dot_envrc_path, &project_dir_str)?;
+        }
+
+        // Create .envrc symlink (relative or absolute based on metadata)
+        let symlink_result = if metadata.relative {
+            self.fs.symlink_relative(&dot_envrc_path, &envrc_link)
+        } else {
+            self.fs.symlink(&dot_envrc_path, &envrc_link)
+        };
+        symlink_result.map_err(|e| ApplicationError::OperationFailed {
+            context: format!(
+                "create .envrc symlink: {} -> {}",
+                envrc_link.display(),
+                dot_envrc_path.display()
+            ),
+            source: Box::new(e),
+        })?;
+
+        Ok(Vault {
+            path: vault_path.to_path_buf(),
+            sentinel_id: metadata.sentinel,
+        })
+    }
+
     /// Generate a short ID for the vault (8 hex characters).
     fn generate_short_id() -> String {
         use std::time::{SystemTime, UNIX_EPOCH};

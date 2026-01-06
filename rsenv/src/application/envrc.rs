@@ -170,6 +170,87 @@ pub fn remove_swapped_marker(
     Ok(())
 }
 
+/// Metadata extracted from rsenv section in dot.envrc.
+#[derive(Debug, Clone)]
+pub struct RsenvMetadata {
+    pub relative: bool,
+    pub sentinel: String,
+    pub source_dir: String,
+}
+
+/// Parse rsenv metadata from dot.envrc content.
+/// Returns None if no rsenv section found or metadata is incomplete.
+pub fn parse_rsenv_metadata(content: &str) -> Option<RsenvMetadata> {
+    // Check for rsenv section
+    if !content.contains(START_SECTION_DELIMITER) {
+        return None;
+    }
+
+    let mut relative: Option<bool> = None;
+    let mut sentinel: Option<String> = None;
+    let mut source_dir: Option<String> = None;
+
+    for line in content.lines() {
+        let line = line.trim();
+
+        if line.starts_with("# config.relative = ") {
+            let value = line.strip_prefix("# config.relative = ")?;
+            relative = Some(value == "true");
+        } else if line.starts_with("# state.sentinel = '") {
+            let value = line
+                .strip_prefix("# state.sentinel = '")?
+                .strip_suffix('\'')?;
+            sentinel = Some(value.to_string());
+        } else if line.starts_with("# state.sourceDir = '") {
+            let value = line
+                .strip_prefix("# state.sourceDir = '")?
+                .strip_suffix('\'')?;
+            source_dir = Some(value.to_string());
+        }
+    }
+
+    Some(RsenvMetadata {
+        relative: relative?,
+        sentinel: sentinel?,
+        source_dir: source_dir?,
+    })
+}
+
+/// Update state.sourceDir in dot.envrc file.
+pub fn update_source_dir(
+    fs: &Arc<dyn FileSystem>,
+    path: &Path,
+    new_source_dir: &str,
+) -> ApplicationResult<()> {
+    let content = fs
+        .read_to_string(path)
+        .map_err(|e| ApplicationError::OperationFailed {
+            context: format!("read dot.envrc at {}", path.display()),
+            source: Box::new(e),
+        })?;
+
+    // Replace the state.sourceDir line
+    let re = Regex::new(r"# state\.sourceDir = '[^']*'").map_err(|e| {
+        ApplicationError::OperationFailed {
+            context: "compile regex".to_string(),
+            source: Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e.to_string(),
+            )),
+        }
+    })?;
+
+    let new_content = re.replace(&content, format!("# state.sourceDir = '{}'", new_source_dir));
+
+    fs.write(path, &new_content)
+        .map_err(|e| ApplicationError::OperationFailed {
+            context: format!("write dot.envrc at {}", path.display()),
+            source: Box::new(e),
+        })?;
+
+    Ok(())
+}
+
 /// Delete rsenv section from file.
 pub fn delete_section(fs: &Arc<dyn FileSystem>, file_path: &Path) -> ApplicationResult<()> {
     let content = fs

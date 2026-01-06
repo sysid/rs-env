@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueHint};
 
 /// Unified development environment manager: hierarchical env vars, file guarding, and swap-in/out
 #[derive(Parser, Debug)]
@@ -83,6 +83,12 @@ pub enum InitCommands {
     Reset {
         /// Project directory
         project: Option<PathBuf>,
+    },
+    /// Reconnect a project to its vault (re-create .envrc symlink)
+    Reconnect {
+        /// Path to dot.envrc file in vault
+        #[arg(value_hint = ValueHint::FilePath)]
+        envrc_path: PathBuf,
     },
 }
 

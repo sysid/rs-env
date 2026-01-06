@@ -948,3 +948,153 @@ fn given_nested_directory_when_guard_then_preserves_structure_in_vault() {
         "Should contain 'secrets' in path"
     );
 }
+
+// ============================================================
+// reconnect() tests
+// ============================================================
+
+#[test]
+fn given_deleted_symlink_when_reconnect_then_recreates_symlink() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    let settings = Arc::new(test_settings(vault_base));
+    let fs = Arc::new(RealFileSystem);
+    let service = VaultService::new(fs, settings);
+
+    // Init project
+    let vault = service.init(&project_dir, false).unwrap();
+    let dot_envrc_path = vault.path.join("dot.envrc");
+
+    // Delete the .envrc symlink
+    let envrc_path = project_dir.join(".envrc");
+    std::fs::remove_file(&envrc_path).unwrap();
+    assert!(!envrc_path.exists());
+
+    // Act
+    let reconnected = service.reconnect(&dot_envrc_path, &project_dir).unwrap();
+
+    // Assert
+    assert!(envrc_path.is_symlink());
+    assert_eq!(reconnected.sentinel_id, vault.sentinel_id);
+}
+
+#[test]
+fn given_moved_project_when_reconnect_then_updates_source_dir() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    let old_project_dir = temp.path().join("old_location");
+    let new_project_dir = temp.path().join("new_location");
+    std::fs::create_dir_all(&old_project_dir).unwrap();
+    std::fs::create_dir_all(&new_project_dir).unwrap();
+
+    let settings = Arc::new(test_settings(vault_base));
+    let fs = Arc::new(RealFileSystem);
+    let service = VaultService::new(fs, settings);
+
+    // Init at old location
+    let vault = service.init(&old_project_dir, false).unwrap();
+    let dot_envrc_path = vault.path.join("dot.envrc");
+
+    // Delete the old symlink
+    std::fs::remove_file(old_project_dir.join(".envrc")).unwrap();
+
+    // Act - reconnect at new location
+    let _reconnected = service.reconnect(&dot_envrc_path, &new_project_dir).unwrap();
+
+    // Assert - new symlink exists
+    let new_envrc_path = new_project_dir.join(".envrc");
+    assert!(new_envrc_path.is_symlink());
+
+    // Assert - state.sourceDir was updated in dot.envrc
+    let content = std::fs::read_to_string(&dot_envrc_path).unwrap();
+    let new_dir_canonical = std::fs::canonicalize(&new_project_dir).unwrap();
+    assert!(
+        content.contains(&new_dir_canonical.to_string_lossy().to_string()),
+        "dot.envrc should contain new project path"
+    );
+}
+
+#[test]
+fn given_already_linked_when_reconnect_then_returns_success() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    let settings = Arc::new(test_settings(vault_base));
+    let fs = Arc::new(RealFileSystem);
+    let service = VaultService::new(fs, settings);
+
+    // Init project (symlink exists)
+    let vault = service.init(&project_dir, false).unwrap();
+    let dot_envrc_path = vault.path.join("dot.envrc");
+
+    // Act - reconnect when already connected (idempotent)
+    let result = service.reconnect(&dot_envrc_path, &project_dir);
+
+    // Assert - should succeed
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap().sentinel_id, vault.sentinel_id);
+}
+
+#[test]
+fn given_not_rsenv_file_when_reconnect_then_returns_error() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    std::fs::create_dir_all(&vault_base).unwrap();
+
+    // Create a file without rsenv section
+    let fake_envrc = vault_base.join("not-rsenv.envrc");
+    std::fs::write(&fake_envrc, "# just a regular file\nexport FOO=bar\n").unwrap();
+
+    let settings = Arc::new(test_settings(vault_base));
+    let fs = Arc::new(RealFileSystem);
+    let service = VaultService::new(fs, settings);
+
+    // Act
+    let result = service.reconnect(&fake_envrc, &project_dir);
+
+    // Assert
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("no rsenv section"));
+}
+
+#[test]
+fn given_envrc_exists_as_file_when_reconnect_then_returns_error() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    let settings = Arc::new(test_settings(vault_base));
+    let fs = Arc::new(RealFileSystem);
+    let service = VaultService::new(fs, settings);
+
+    // Init project
+    let vault = service.init(&project_dir, false).unwrap();
+    let dot_envrc_path = vault.path.join("dot.envrc");
+
+    // Replace symlink with regular file
+    let envrc_path = project_dir.join(".envrc");
+    std::fs::remove_file(&envrc_path).unwrap();
+    std::fs::write(&envrc_path, "regular file").unwrap();
+
+    // Act
+    let result = service.reconnect(&dot_envrc_path, &project_dir);
+
+    // Assert
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("cannot overwrite"));
+}
