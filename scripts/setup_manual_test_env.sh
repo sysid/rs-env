@@ -30,8 +30,8 @@ success() { echo -e "${GREEN}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 
 # Determine test root
-# TEST_ROOT="${1:-$(mktemp -d)}"
-TEST_ROOT="$HOME/xxx"
+TEST_ROOT="${1:-$(mktemp -d)}"
+# TEST_ROOT="$HOME/xxx"
 
 info "Setting up manual test environment at: $TEST_ROOT"
 
