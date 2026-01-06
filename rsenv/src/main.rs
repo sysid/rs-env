@@ -549,6 +549,80 @@ fn handle_config(
             }
             Ok(())
         }
+        ConfigCommands::Edit { global } => {
+            let fs = Arc::new(RealFileSystem);
+            let template = Settings::template();
+
+            // 1. Determine config path
+            let (config_path, vault_dir) = if global {
+                let path = global_config_path().ok_or_else(|| {
+                    rsenv::cli::CliError::Usage("cannot determine global config directory".into())
+                })?;
+                (path, None)
+            } else {
+                // Vault-local config requires vault context
+                let current_dir =
+                    project_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap());
+                let vault_path = VaultService::discover_vault_path(fs.as_ref(), &current_dir)
+                    .map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                            e,
+                        ))
+                    })?
+                    .ok_or_else(|| {
+                        rsenv::cli::CliError::Usage(
+                            "not in a vault-initialized project (use --global for global config)"
+                                .into(),
+                        )
+                    })?;
+                let path = vault_config_path(&vault_path);
+                (path, Some(vault_path))
+            };
+
+            // 2. Create with template if doesn't exist
+            if !config_path.exists() {
+                if let Some(parent) = config_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
+                            format!("create config dir: {}", parent.display()),
+                            e,
+                        ))
+                    })?;
+                }
+                std::fs::write(&config_path, &template).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
+                        format!("write config template: {}", config_path.display()),
+                        e,
+                    ))
+                })?;
+            }
+
+            // 3. Open in editor
+            let editor = EnvironmentEditor;
+            editor.open(&config_path).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
+                    format!("open editor for {}", config_path.display()),
+                    e,
+                ))
+            })?;
+
+            // 4. Sync gitignore after edit (match edited scope)
+            let global_settings = Settings::load_global_only().map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+            let gitignore_service = GitignoreService::new(fs, global_settings);
+            let sync_result: Result<(), _> = if global {
+                gitignore_service.sync_global().map(|_| ())
+            } else {
+                gitignore_service.sync_vault(vault_dir.as_ref().unwrap()).map(|_| ())
+            };
+            if let Err(e) = sync_result {
+                eprintln!("Warning: gitignore sync failed: {}", e);
+            }
+
+            println!("Edited: {}", config_path.display());
+            Ok(())
+        }
     }
 }
 

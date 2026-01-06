@@ -300,4 +300,11 @@ pub enum ConfigCommands {
 
     /// Show config paths
     Path,
+
+    /// Edit config file
+    Edit {
+        /// Edit global config
+        #[arg(short, long)]
+        global: bool,
+    },
 }
