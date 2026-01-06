@@ -1,5 +1,8 @@
 # rsenv
 
+> V2 is a refactoring of V1 which delivers same functionality plus a lot more! The UX has changed
+> (MIGRATION.md under docs/)
+
 Hierarchical environment management with secure vault storage.
 
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
