@@ -13,6 +13,7 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use crate::application::ApplicationError;
+use crate::domain::expand_env_vars;
 
 /// SOPS encryption configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -96,6 +97,18 @@ pub fn vault_config_path(vault_dir: &Path) -> PathBuf {
 }
 
 impl Settings {
+    /// Expand shell variables and tilde in path-like fields.
+    ///
+    /// Handles `~`, `$VAR`, and `${VAR}` syntax.
+    fn expand_paths(&mut self) {
+        // Expand vault_base_dir
+        let expanded = expand_env_vars(self.vault_base_dir.to_string_lossy().as_ref());
+        self.vault_base_dir = PathBuf::from(expanded);
+
+        // Expand editor (may contain path like ~/bin/myeditor)
+        self.editor = expand_env_vars(&self.editor);
+    }
+
     /// Load settings with layered precedence.
     ///
     /// # Arguments
@@ -159,7 +172,12 @@ impl Settings {
 
         // Build and deserialize
         let config = builder.build().map_err(config_err)?;
-        config.try_deserialize().map_err(config_err)
+        let mut settings: Self = config.try_deserialize().map_err(config_err)?;
+
+        // Expand ~ and $VAR in path-like fields
+        settings.expand_paths();
+
+        Ok(settings)
     }
 
     /// Show the effective configuration as TOML.
@@ -229,5 +247,55 @@ mod tests {
         let sops = SopsConfig::default();
         assert!(sops.file_extensions_enc.contains(&"env".to_string()));
         assert!(sops.file_extensions_dec.contains(&"enc".to_string()));
+    }
+
+    #[test]
+    fn given_tilde_in_vault_base_dir_when_expand_paths_then_expands_to_home() {
+        let mut settings = Settings {
+            vault_base_dir: PathBuf::from("~/.rsenv/vaults"),
+            editor: "~/bin/myeditor".to_string(),
+            sops: SopsConfig::default(),
+        };
+
+        settings.expand_paths();
+
+        let home = std::env::var("HOME").expect("HOME should be set");
+        let vault_str = settings.vault_base_dir.to_string_lossy();
+        assert!(
+            vault_str.starts_with(&home),
+            "vault_base_dir should start with home dir: {}",
+            vault_str
+        );
+        assert!(
+            !vault_str.contains('~'),
+            "vault_base_dir should not contain tilde: {}",
+            vault_str
+        );
+        assert!(
+            settings.editor.starts_with(&home),
+            "editor should start with home dir: {}",
+            settings.editor
+        );
+    }
+
+    #[test]
+    fn given_env_var_in_path_when_expand_paths_then_expands_variable() {
+        let mut settings = Settings {
+            vault_base_dir: PathBuf::from("$HOME/.rsenv/vaults"),
+            editor: "${HOME}/bin/myeditor".to_string(),
+            sops: SopsConfig::default(),
+        };
+
+        settings.expand_paths();
+
+        let home = std::env::var("HOME").expect("HOME should be set");
+        assert!(
+            settings.vault_base_dir.to_string_lossy().starts_with(&home),
+            "vault_base_dir should expand $HOME"
+        );
+        assert!(
+            settings.editor.starts_with(&home),
+            "editor should expand ${{HOME}}"
+        );
     }
 }
