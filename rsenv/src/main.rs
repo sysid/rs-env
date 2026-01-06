@@ -579,8 +579,11 @@ fn handle_config(
                 (path, Some(vault_path))
             };
 
-            // 2. Create with template if doesn't exist
-            if !config_path.exists() {
+            // 2. Track if config existed before
+            let existed_before = config_path.exists();
+
+            // 3. Create with template if doesn't exist
+            if !existed_before {
                 if let Some(parent) = config_path.parent() {
                     std::fs::create_dir_all(parent).map_err(|e| {
                         rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
@@ -597,7 +600,7 @@ fn handle_config(
                 })?;
             }
 
-            // 3. Open in editor
+            // 4. Open in editor
             let editor = EnvironmentEditor;
             editor.open(&config_path).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
@@ -606,7 +609,27 @@ fn handle_config(
                 ))
             })?;
 
-            // 4. Sync gitignore after edit (match edited scope)
+            // 5. Check if user actually made changes
+            let config_changed = if existed_before {
+                true // Assume changes if file existed (can't easily detect)
+            } else {
+                // Config didn't exist before - check if it was saved with changes
+                if config_path.exists() {
+                    let content = std::fs::read_to_string(&config_path).unwrap_or_default();
+                    content.trim() != template.trim()
+                } else {
+                    false // File deleted or never saved
+                }
+            };
+
+            // 6. Clean up if no changes (only for newly created files)
+            if !existed_before && !config_changed {
+                let _ = std::fs::remove_file(&config_path);
+                println!("No changes made");
+                return Ok(());
+            }
+
+            // 7. Sync gitignore after edit (match edited scope)
             let global_settings = Settings::load_global_only().map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
