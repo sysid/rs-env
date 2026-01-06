@@ -232,30 +232,42 @@ pub enum SwapCommands {
 pub enum SopsCommands {
     /// Encrypt matching files
     Encrypt {
-        /// Directory (default: vault)
-        #[arg(short, long)]
+        /// Directory (default: project vault)
+        #[arg(short, long, conflicts_with = "global")]
         dir: Option<PathBuf>,
+        /// Encrypt all vaults (entire vault_base_dir)
+        #[arg(short, long, conflicts_with = "dir")]
+        global: bool,
     },
 
     /// Decrypt .enc files
     Decrypt {
-        /// Directory (default: vault)
-        #[arg(short, long)]
+        /// Directory (default: project vault)
+        #[arg(short, long, conflicts_with = "global")]
         dir: Option<PathBuf>,
+        /// Decrypt all vaults (entire vault_base_dir)
+        #[arg(short, long, conflicts_with = "dir")]
+        global: bool,
     },
 
     /// Delete unencrypted originals
     Clean {
-        /// Directory (default: vault)
-        #[arg(short, long)]
+        /// Directory (default: project vault)
+        #[arg(short, long, conflicts_with = "global")]
         dir: Option<PathBuf>,
+        /// Clean all vaults (entire vault_base_dir)
+        #[arg(short, long, conflicts_with = "dir")]
+        global: bool,
     },
 
     /// Show encryption status
     Status {
-        /// Directory (default: vault)
-        #[arg(short, long)]
+        /// Directory (default: project vault)
+        #[arg(short, long, conflicts_with = "global")]
         dir: Option<PathBuf>,
+        /// Show status for all vaults (entire vault_base_dir)
+        #[arg(short, long, conflicts_with = "dir")]
+        global: bool,
     },
 
     /// Sync .gitignore with config patterns

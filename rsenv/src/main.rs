@@ -56,7 +56,7 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
         .and_then(|p| VaultService::discover_vault_path(fs.as_ref(), p).ok())
         .flatten();
     // Use vault if found, else project dir for local config lookup
-    let config_dir = vault_path.or(project_dir.clone());
+    let config_dir = vault_path.clone().or(project_dir.clone());
     let settings = Settings::load(config_dir.as_deref()).map_err(|e| {
         rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
     })?;
@@ -71,7 +71,7 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
         Some(Commands::Env { command }) => handle_env(command, project_dir),
         Some(Commands::Guard { command }) => handle_guard(command, project_dir, &settings),
         Some(Commands::Info) => handle_info(project_dir, &settings),
-        Some(Commands::Sops { command }) => handle_sops(command, project_dir, &settings),
+        Some(Commands::Sops { command }) => handle_sops(command, vault_path, &settings),
         Some(Commands::Swap { command }) => handle_swap(command, project_dir, &settings),
         Some(Commands::Completion { shell }) => {
             generate_completions(shell);
@@ -860,20 +860,40 @@ fn handle_info(
     Ok(())
 }
 
+fn resolve_sops_dir(
+    dir: Option<std::path::PathBuf>,
+    global: bool,
+    vault_path: Option<&std::path::Path>,
+    vault_base_dir: &std::path::Path,
+) -> rsenv::cli::CliResult<std::path::PathBuf> {
+    if global {
+        Ok(vault_base_dir.to_path_buf())
+    } else if let Some(d) = dir {
+        Ok(d)
+    } else if let Some(v) = vault_path {
+        Ok(v.to_path_buf())
+    } else {
+        Err(rsenv::cli::CliError::Usage(
+            "No vault found. Run 'rsenv init' first, or use --dir or --global.".into(),
+        ))
+    }
+}
+
 fn handle_sops(
     command: SopsCommands,
-    project_dir: Option<std::path::PathBuf>,
+    vault_path: Option<std::path::PathBuf>,
     settings: &Settings,
 ) -> rsenv::cli::CliResult<()> {
     let fs = Arc::new(RealFileSystem);
     let cmd = Arc::new(RealCommandRunner);
-    let settings = Arc::new(settings.clone());
-    let service = SopsService::new(fs, cmd, settings);
+    let settings_arc = Arc::new(settings.clone());
+    let service = SopsService::new(fs, cmd, settings_arc);
 
     match command {
-        SopsCommands::Encrypt { dir } => {
-            let base_dir = dir.or(project_dir);
-            let encrypted = service.encrypt_all(base_dir.as_deref()).map_err(|e| {
+        SopsCommands::Encrypt { dir, global } => {
+            let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &settings.vault_base_dir)?;
+            println!("Encrypting in: {}", base_dir.display());
+            let encrypted = service.encrypt_all(Some(&base_dir)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
@@ -887,9 +907,10 @@ fn handle_sops(
             }
             Ok(())
         }
-        SopsCommands::Decrypt { dir } => {
-            let base_dir = dir.or(project_dir);
-            let decrypted = service.decrypt_all(base_dir.as_deref()).map_err(|e| {
+        SopsCommands::Decrypt { dir, global } => {
+            let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &settings.vault_base_dir)?;
+            println!("Decrypting in: {}", base_dir.display());
+            let decrypted = service.decrypt_all(Some(&base_dir)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
@@ -903,9 +924,10 @@ fn handle_sops(
             }
             Ok(())
         }
-        SopsCommands::Clean { dir } => {
-            let base_dir = dir.or(project_dir);
-            let deleted = service.clean(base_dir.as_deref()).map_err(|e| {
+        SopsCommands::Clean { dir, global } => {
+            let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &settings.vault_base_dir)?;
+            println!("Cleaning in: {}", base_dir.display());
+            let deleted = service.clean(Some(&base_dir)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
@@ -919,13 +941,13 @@ fn handle_sops(
             }
             Ok(())
         }
-        SopsCommands::Status { dir } => {
-            let base_dir = dir.or(project_dir);
-            let status = service.status(base_dir.as_deref()).map_err(|e| {
+        SopsCommands::Status { dir, global } => {
+            let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &settings.vault_base_dir)?;
+            let status = service.status(Some(&base_dir)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
-            println!("SOPS Status:");
+            println!("SOPS Status for: {}", base_dir.display());
             println!();
 
             if !status.pending_encrypt.is_empty() {
@@ -970,7 +992,7 @@ fn handle_sops(
             let vault_dir = if global {
                 None
             } else {
-                project_dir.clone()
+                vault_path.clone()
             };
 
             // Get status first to show what would change
@@ -1060,7 +1082,7 @@ fn handle_sops(
             let vault_dir = if global {
                 None
             } else {
-                project_dir.clone()
+                vault_path.clone()
             };
 
             let status = gitignore_service.status(vault_dir.as_deref()).map_err(|e| {
@@ -1116,7 +1138,7 @@ fn handle_sops(
             let vault_dir = if global {
                 None
             } else {
-                project_dir.clone()
+                vault_path.clone()
             };
 
             let (global_cleaned, vault_cleaned) =

@@ -152,16 +152,17 @@ impl SopsService {
             ("--pgp", key.as_str())
         };
 
-        // Special handling for .env files
-        let is_env_file = input
+        // Special handling for .env files (dotenv format)
+        // Note: .envrc files are shell scripts, NOT dotenv - they use default SOPS format
+        let is_dotenv_file = input
             .extension()
             .and_then(|e| e.to_str())
-            .map(|e| e == "env" || e == "envrc")
+            .map(|e| e == "env")
             .unwrap_or(false);
 
         let mut args: Vec<&str> = vec!["-e", key_flag, key_value];
 
-        if is_env_file {
+        if is_dotenv_file {
             args.extend(&["--input-type", "dotenv", "--output-type", "dotenv"]);
         }
 
@@ -214,16 +215,17 @@ impl SopsService {
             });
         };
 
-        // Special handling for .env files
-        let is_env_file = output
+        // Special handling for .env files (dotenv format)
+        // Note: .envrc files are shell scripts, NOT dotenv - they use default SOPS format
+        let is_dotenv_file = output
             .extension()
             .and_then(|e| e.to_str())
-            .map(|e| e == "env" || e == "envrc")
+            .map(|e| e == "env")
             .unwrap_or(false);
 
         let mut args: Vec<&str> = vec!["-d"];
 
-        if is_env_file {
+        if is_dotenv_file {
             args.extend(&["--input-type", "dotenv", "--output-type", "dotenv"]);
         }
 
