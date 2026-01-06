@@ -17,7 +17,7 @@ use rsenv::cli::args::{
     SwapCommands,
 };
 use rsenv::config::{global_config_dir, global_config_path, vault_config_path, Settings};
-use rsenv::domain::TreeBuilder;
+use rsenv::domain::{TreeBuilder, TreeNodeConvert};
 use rsenv::exitcode;
 use rsenv::infrastructure::traits::RealCommandRunner;
 use rsenv::infrastructure::traits::{
@@ -150,13 +150,9 @@ fn handle_env(
                 ))
             })?;
 
-            println!("Found {} trees:", trees.len());
+            println!("Found {} trees:\n", trees.len());
             for tree in &trees {
-                if let Some(root_idx) = tree.root() {
-                    if let Some(root_node) = tree.get_node(root_idx) {
-                        println!("\n{}", root_node.data.file_path.display());
-                    }
-                }
+                println!("{}", tree.to_tree_string());
             }
             Ok(())
         }

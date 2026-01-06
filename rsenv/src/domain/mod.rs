@@ -6,8 +6,10 @@ pub mod arena;
 pub mod builder;
 pub mod entities;
 pub mod error;
+pub mod tree_traits;
 
 pub use arena::{create_branches, NodeData, TreeArena, TreeNode};
 pub use builder::TreeBuilder;
 pub use entities::*;
 pub use error::DomainError;
+pub use tree_traits::TreeNodeConvert;
