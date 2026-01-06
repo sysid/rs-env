@@ -5,11 +5,13 @@
 //! but are themselves concrete structs, not traits.
 
 mod environment;
+mod gitignore;
 mod sops;
 mod swap;
 mod vault;
 
 pub use environment::{EnvHierarchy, EnvOutput, EnvironmentService};
+pub use gitignore::{GitignoreDiff, GitignoreService, GitignoreStatus, VaultGitignoreStatus};
 pub use sops::SopsService;
 pub use swap::SwapService;
 pub use vault::VaultService;

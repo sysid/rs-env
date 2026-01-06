@@ -257,6 +257,33 @@ pub enum SopsCommands {
         #[arg(short, long)]
         dir: Option<PathBuf>,
     },
+
+    /// Sync .gitignore with config patterns
+    #[command(name = "gitignore-sync")]
+    GitignoreSync {
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        yes: bool,
+        /// Only sync global gitignore (skip per-vault)
+        #[arg(long)]
+        global: bool,
+    },
+
+    /// Show gitignore sync status
+    #[command(name = "gitignore-status")]
+    GitignoreStatus {
+        /// Only show global gitignore status
+        #[arg(long)]
+        global: bool,
+    },
+
+    /// Remove rsenv-managed section from .gitignore
+    #[command(name = "gitignore-clean")]
+    GitignoreClean {
+        /// Only clean global gitignore
+        #[arg(long)]
+        global: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

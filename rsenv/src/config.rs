@@ -180,6 +180,105 @@ impl Settings {
         Ok(settings)
     }
 
+    /// Load ONLY global config (defaults + XDG config file).
+    ///
+    /// Does NOT include vault-local config or environment variables.
+    /// Used to determine which patterns belong in the global .gitignore.
+    pub fn load_global_only() -> Result<Self, ApplicationError> {
+        let mut builder = Config::builder();
+
+        // 1. Start with defaults
+        let defaults = Settings::default();
+        builder = builder
+            .set_default(
+                "vault_base_dir",
+                defaults.vault_base_dir.to_string_lossy().to_string(),
+            )
+            .map_err(config_err)?
+            .set_default("editor", defaults.editor.clone())
+            .map_err(config_err)?
+            .set_default(
+                "sops.file_extensions_enc",
+                defaults.sops.file_extensions_enc.clone(),
+            )
+            .map_err(config_err)?
+            .set_default(
+                "sops.file_extensions_dec",
+                defaults.sops.file_extensions_dec.clone(),
+            )
+            .map_err(config_err)?
+            .set_default("sops.file_names_enc", defaults.sops.file_names_enc.clone())
+            .map_err(config_err)?
+            .set_default("sops.file_names_dec", defaults.sops.file_names_dec.clone())
+            .map_err(config_err)?;
+
+        // 2. Global config only (no vault-local, no env vars)
+        if let Some(global_path) = global_config_path() {
+            if global_path.exists() {
+                builder = builder.add_source(File::from(global_path).required(false));
+            }
+        }
+
+        // Build and deserialize
+        let config = builder.build().map_err(config_err)?;
+        let mut settings: Self = config.try_deserialize().map_err(config_err)?;
+
+        // Expand ~ and $VAR in path-like fields
+        settings.expand_paths();
+
+        Ok(settings)
+    }
+
+    /// Load ONLY vault-local config if it exists.
+    ///
+    /// Returns None if no vault-local config file exists.
+    /// Used to determine which patterns belong in the per-vault .gitignore.
+    pub fn load_vault_only(vault_dir: &Path) -> Result<Option<Self>, ApplicationError> {
+        let local_path = vault_config_path(vault_dir);
+        if !local_path.exists() {
+            return Ok(None);
+        }
+
+        let mut builder = Config::builder();
+
+        // Start with defaults (needed for deserialization)
+        let defaults = Settings::default();
+        builder = builder
+            .set_default(
+                "vault_base_dir",
+                defaults.vault_base_dir.to_string_lossy().to_string(),
+            )
+            .map_err(config_err)?
+            .set_default("editor", defaults.editor.clone())
+            .map_err(config_err)?
+            .set_default(
+                "sops.file_extensions_enc",
+                defaults.sops.file_extensions_enc.clone(),
+            )
+            .map_err(config_err)?
+            .set_default(
+                "sops.file_extensions_dec",
+                defaults.sops.file_extensions_dec.clone(),
+            )
+            .map_err(config_err)?
+            .set_default("sops.file_names_enc", defaults.sops.file_names_enc.clone())
+            .map_err(config_err)?
+            .set_default("sops.file_names_dec", defaults.sops.file_names_dec.clone())
+            .map_err(config_err)?;
+
+        // Only vault-local config
+        builder = builder.add_source(File::from(local_path).required(true));
+
+        // Build and deserialize
+        let config = builder.build().map_err(config_err)?;
+        let mut settings: Self = config.try_deserialize().map_err(config_err)?;
+
+        // Expand ~ and $VAR in path-like fields
+        settings.expand_paths();
+
+        Ok(Some(settings))
+    }
+
     /// Show the effective configuration as TOML.
     pub fn to_toml(&self) -> Result<String, ApplicationError> {
         toml::to_string_pretty(self).map_err(|e| ApplicationError::Config {
