@@ -1,20 +1,25 @@
 # rsenv
 
-> Hierarchical environment management with secure vault storage
+> Hierarchical environment management with secure vault storage.
 
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org/)
 
 ## What is rsenv?
 
-Managing environment variables across development, staging, and production shouldn't require copy-paste or risk exposing secrets. rsenv solves this with **hierarchical env files** that inherit from parents and a **vault system** that keeps sensitive files outside your repository while remaining fully functional through symlinks.
+Managing environment variables across development, staging, and production shouldn't require
+copy-paste or risk exposing secrets. rsenv solves this with **hierarchical env files** that inherit
+from parents and a **vault system** that keeps sensitive files outside your repository while
+remaining fully functional through symlinks.
+
+This is a complete rewrite of V1 with 100% functional compatibility and a lot of new features.
 
 ## Features
 
 - **Hierarchical env files** - Link files with `# rsenv: parent.env`, children override parents
 - **Vault storage** - Move sensitive files outside your project, replaced by symlinks
-- **File swapping** - Toggle between dev and prod configs without touching version control
-- **SOPS encryption** - Encrypt vault contents with GPG or Age keys
+- **File swapping** - Overwrite files with locala custom versions, but keep them out of version control
+- **SOPS encryption** - Encrypt sensitive files in the vault with GPG or Age
 - **Shell integration** - Works seamlessly with direnv
 
 [See all features in the wiki](https://github.com/sysid/rs-env/wiki)
@@ -52,7 +57,7 @@ rsenv env select            # Interactive environment selection
 
 **Features**: [Environment Variables](https://github.com/sysid/rs-env/wiki/Environment-Variables) · [Vault Management](https://github.com/sysid/rs-env/wiki/Vault-Management) · [File Swapping](https://github.com/sysid/rs-env/wiki/File-Swapping) · [SOPS Encryption](https://github.com/sysid/rs-env/wiki/SOPS-Encryption)
 
-**Reference**: [Commands](https://github.com/sysid/rs-env/wiki/Command-Reference) · [Configuration](https://github.com/sysid/rs-env/wiki/Configuration) · [Troubleshooting](https://github.com/sysid/rs-env/wiki/Troubleshooting) · [Migration Guide](https://github.com/sysid/rs-env/wiki/Migration-Guide)
+**Reference**: [Commands](https://github.com/sysid/rs-env/wiki/Command-Reference) · [Configuration](https://github.com/sysid/rs-env/wiki/Configuration) · [Troubleshooting](https://github.com/sysid/rs-env/wiki/Troubleshooting) · [Migration Guide](https://github.com/sysid/rs-env/wiki/MIGRATION)
 
 ## License
 
