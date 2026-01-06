@@ -1,6 +1,6 @@
 [package]
 name = "rsenv"
-version = "2.0.0-alpha.1"
+version = "2.0.0-beta.0"
 edition = "2021"
 authors = ["sysid"]
 description = "Unified development environment manager: hierarchical env vars, file guarding, and swap-in/out"
