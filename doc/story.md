@@ -2,6 +2,7 @@ Use-Case:
 
 - work on many projects, repos from various teams
 - need personal project attached space which is persisted, versioned
+- e.g. patched docker-compose.yml, custom Java test classes
 - personal space cannot become part of official repo
 
 Solution:

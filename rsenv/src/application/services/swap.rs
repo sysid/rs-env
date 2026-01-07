@@ -347,13 +347,9 @@ impl SwapService {
             // 1. Check for existing swap (sentinel in VAULT)
             if let Some((_, existing_host)) = self.find_any_sentinel(&swap_dir, relative) {
                 if existing_host == hostname {
-                    return Err(ApplicationError::OperationFailed {
-                        context: format!("{} is already swapped in", project_file.display()),
-                        source: Box::new(std::io::Error::new(
-                            std::io::ErrorKind::AlreadyExists,
-                            "already swapped",
-                        )),
-                    });
+                    // Idempotent: already swapped in by same host, skip
+                    eprintln!("{} already swapped in, skipping", project_file.display());
+                    continue;
                 } else {
                     return Err(ApplicationError::OperationFailed {
                         context: format!(
@@ -627,14 +623,9 @@ impl SwapService {
                         .with_path_context("remove sentinel", &sentinel_path)?;
                 }
                 None => {
-                    // Not swapped in
-                    return Err(ApplicationError::OperationFailed {
-                        context: format!("{} is not swapped in", project_file.display()),
-                        source: Box::new(std::io::Error::new(
-                            std::io::ErrorKind::NotFound,
-                            "not swapped in",
-                        )),
-                    });
+                    // Idempotent: not swapped in, skip
+                    eprintln!("{} not swapped in, skipping", project_file.display());
+                    continue;
                 }
             }
 

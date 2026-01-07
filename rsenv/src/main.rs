@@ -1283,10 +1283,10 @@ fn handle_swap(
             output::header("Swap Status:");
             for file in &status {
                 let state_str = match &file.state {
-                    rsenv::domain::SwapState::Out => "out".to_string(),
-                    rsenv::domain::SwapState::In { hostname } => format!("in ({})", hostname),
+                    rsenv::domain::SwapState::Out => "out".normal(),
+                    rsenv::domain::SwapState::In { hostname } => format!("in ({})", hostname).green(),
                 };
-                output::detail(&format!("{} [{}]", file.project_path.display(), state_str));
+                println!("  {} [{}]", file.project_path.display(), state_str);
             }
             Ok(())
         }

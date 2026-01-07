@@ -129,7 +129,7 @@ fn given_file_with_vault_override_when_swap_in_then_replaces_project_file() {
 }
 
 #[test]
-fn given_already_swapped_file_when_swap_in_then_returns_error() {
+fn given_already_swapped_file_when_swap_in_then_succeeds_idempotently() {
     // Arrange
     let temp = TempDir::new().unwrap();
     let (project_dir, vault_path, settings) = setup_project(&temp);
@@ -151,8 +151,9 @@ fn given_already_swapped_file_when_swap_in_then_returns_error() {
         .unwrap();
     let result = service.swap_in(&project_dir, &[project_file]);
 
-    // Assert - second swap should fail
-    assert!(result.is_err());
+    // Assert - second swap should succeed (idempotent) with empty result
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_empty(), "no files should be swapped on second call");
 }
 
 #[test]
@@ -295,7 +296,7 @@ fn given_modified_file_when_swap_out_then_modifications_captured_in_vault() {
 }
 
 #[test]
-fn given_not_swapped_file_when_swap_out_then_returns_error() {
+fn given_not_swapped_file_when_swap_out_then_succeeds_idempotently() {
     // Arrange
     let temp = TempDir::new().unwrap();
     let (project_dir, vault_path, settings) = setup_project(&temp);
@@ -315,8 +316,9 @@ fn given_not_swapped_file_when_swap_out_then_returns_error() {
     // Act - swap out without swapping in
     let result = service.swap_out(&project_dir, &[project_file]);
 
-    // Assert - should error because not swapped in
-    assert!(result.is_err());
+    // Assert - should succeed (idempotent) with empty result
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_empty(), "no files should be swapped out");
 }
 
 // ============================================================
