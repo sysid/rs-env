@@ -1,24 +1,38 @@
-# rsenv
+<img src="doc/logo.png" alt="rsenv logo" width="240">
 
 > Hierarchical environment management with secure vault storage.
 
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org/)
 
-## What is rsenv?
+## Why?
 
-Managing environment variables across development, staging, and production shouldn't require
-copy-paste or risk exposing secrets. rsenv solves this with **hierarchical env files** that inherit
-from parents and a **vault system** that keeps sensitive files outside your repository while
-remaining fully functional through symlinks.
+- You work on many projects, with different teams, many repos.
+- You need a personal workspace, which is attached to the project, but does not become part of its
+  official repository (e.g. patched docker-compose.yml, bespoke Java test classes, etc.)
+- environment configurations are not DRY, they share variables, often follow even a hierarchy
+  (globlal -> company -> region -> stage)
+
+<img src="doc/illustration.png" alt="rsenv illustration" width="100%">
+
+**Solution:**
+1. File/directory overrides: when work starts swap worksapce data in, after replace with
+   original files, keep your personal changes in separate repo (vault)
+2. Model environments as hierarchical tree and keep it DRY
+
+**Benefit:**
+- Version conrolled personal workspace per project with custom secure configuration
+- Only footprint in the original repo is **one symlink** to link the project and your workspace
+  (.envrc)
 
 This is a complete rewrite of V1 with 100% functional compatibility and a lot of new features.
+
 
 ## Features
 
 - **Hierarchical env files** - Link files with `# rsenv: parent.env`, children override parents
 - **Vault storage** - Move sensitive files outside your project, replaced by symlinks
-- **File swapping** - Overwrite files with locala custom versions, but keep them out of version control
+- **File swapping** - Overwrite files with personal versions for the duration of your work-session
 - **SOPS encryption** - Encrypt sensitive files in the vault with GPG or Age
 - **Shell integration** - Works seamlessly with direnv
 
