@@ -367,7 +367,10 @@ impl EnvironmentService {
                         if let Some(caps) = re.captures(line) {
                             let parents: Vec<&str> = caps[1].split_whitespace().collect();
                             if parents.len() > 1 {
-                                debug!("is_dag: found multi-parent file {}", entry.path().display());
+                                debug!(
+                                    "is_dag: found multi-parent file {}",
+                                    entry.path().display()
+                                );
                                 return Ok(true);
                             }
                         }

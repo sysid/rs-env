@@ -335,15 +335,16 @@ impl VaultService {
             }
         })?;
 
-        let metadata = crate::application::envrc::parse_rsenv_metadata(&content).ok_or_else(|| {
-            ApplicationError::OperationFailed {
-                context: format!("no rsenv section in: {}", dot_envrc_path.display()),
-                source: Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "not an rsenv-managed file",
-                )),
-            }
-        })?;
+        let metadata =
+            crate::application::envrc::parse_rsenv_metadata(&content).ok_or_else(|| {
+                ApplicationError::OperationFailed {
+                    context: format!("no rsenv section in: {}", dot_envrc_path.display()),
+                    source: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "not an rsenv-managed file",
+                    )),
+                }
+            })?;
 
         // Canonicalize project_dir
         let project_dir =
@@ -396,7 +397,10 @@ impl VaultService {
                 }
                 // Symlink exists but points elsewhere - error
                 return Err(ApplicationError::OperationFailed {
-                    context: format!(".envrc symlink exists but points elsewhere: {}", envrc_link.display()),
+                    context: format!(
+                        ".envrc symlink exists but points elsewhere: {}",
+                        envrc_link.display()
+                    ),
                     source: Box::new(std::io::Error::new(
                         std::io::ErrorKind::AlreadyExists,
                         "symlink points to different target",
@@ -405,7 +409,10 @@ impl VaultService {
             } else {
                 // Regular file exists - cannot overwrite
                 return Err(ApplicationError::OperationFailed {
-                    context: format!("cannot overwrite existing .envrc file: {}", envrc_link.display()),
+                    context: format!(
+                        "cannot overwrite existing .envrc file: {}",
+                        envrc_link.display()
+                    ),
                     source: Box::new(std::io::Error::new(
                         std::io::ErrorKind::AlreadyExists,
                         "regular file exists",
@@ -417,7 +424,11 @@ impl VaultService {
         // Update state.sourceDir if project path changed
         let project_dir_str = project_dir.to_string_lossy().to_string();
         if metadata.source_dir != project_dir_str {
-            crate::application::envrc::update_source_dir(&self.fs, &dot_envrc_path, &project_dir_str)?;
+            crate::application::envrc::update_source_dir(
+                &self.fs,
+                &dot_envrc_path,
+                &project_dir_str,
+            )?;
         }
 
         // Create .envrc symlink (relative or absolute based on metadata)
@@ -518,12 +529,13 @@ impl VaultService {
 # state.timestamp = '{timestamp}'
 # state.sourceDir = '{source_dir}'
 export RSENV_VAULT={vault_var}
-#dotenv $RSENV_VAULT/envs/local.env"#,
+{vars_marker}"#,
             sentinel_id = sentinel_id,
             relative = relative,
             timestamp = timestamp,
             source_dir = source_dir,
             vault_var = vault_var,
+            vars_marker = crate::application::envrc::VARS_SECTION_DELIMITER,
         )
     }
 
@@ -682,10 +694,7 @@ export RSENV_VAULT={vault_var}
             })?;
 
         // Move file from vault back to project
-        debug!(
-            "unguard: restoring {} from vault",
-            file.display()
-        );
+        debug!("unguard: restoring {} from vault", file.display());
         self.fs
             .rename(&vault_path, file)
             .map_err(|e| ApplicationError::OperationFailed {

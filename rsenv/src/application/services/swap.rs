@@ -143,10 +143,8 @@ impl SwapService {
                 .filter(|e| e.file_type().is_file() && e.file_name() == ".gitignore")
             {
                 let gitignore = entry.path();
-                let disabled = gitignore.with_file_name(format!(
-                    ".gitignore{}",
-                    GITIGNORE_DISABLED_SUFFIX
-                ));
+                let disabled =
+                    gitignore.with_file_name(format!(".gitignore{}", GITIGNORE_DISABLED_SUFFIX));
                 debug!(
                     "disable_gitignore: {} -> {}",
                     gitignore.display(),
@@ -156,12 +154,11 @@ impl SwapService {
                     .rename(gitignore, &disabled)
                     .with_path_context("neutralize .gitignore", gitignore)?;
             }
-        } else if path.file_name().map(|n| n == ".gitignore").unwrap_or(false) && self.fs.exists(path) {
+        } else if path.file_name().map(|n| n == ".gitignore").unwrap_or(false)
+            && self.fs.exists(path)
+        {
             // Standalone .gitignore file
-            let disabled = path.with_file_name(format!(
-                ".gitignore{}",
-                GITIGNORE_DISABLED_SUFFIX
-            ));
+            let disabled = path.with_file_name(format!(".gitignore{}", GITIGNORE_DISABLED_SUFFIX));
             debug!(
                 "disable_gitignore: {} -> {}",
                 path.display(),
@@ -189,8 +186,7 @@ impl SwapService {
                 .into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| {
-                    e.file_type().is_file()
-                        && e.file_name().to_string_lossy() == disabled_name
+                    e.file_type().is_file() && e.file_name().to_string_lossy() == disabled_name
                 })
             {
                 let disabled = entry.path();
@@ -324,10 +320,8 @@ impl SwapService {
                     .map(|n| n == ".gitignore")
                     .unwrap_or(false)
             {
-                let disabled = vault_file.with_file_name(format!(
-                    ".gitignore{}",
-                    GITIGNORE_DISABLED_SUFFIX
-                ));
+                let disabled =
+                    vault_file.with_file_name(format!(".gitignore{}", GITIGNORE_DISABLED_SUFFIX));
                 debug!(
                     "swap_in: .gitignore not found, checking neutralized form={}, exists={}",
                     disabled.display(),
@@ -423,18 +417,20 @@ impl SwapService {
                     project_file.display(),
                     backup_path.display()
                 );
-                self.fs.move_path(&project_file, &backup_path).map_err(|e| {
-                    // Cleanup sentinel on failure
-                    let _ = self.fs.remove_any(&sentinel_path);
-                    ApplicationError::OperationFailed {
-                        context: format!(
-                            "backup {} to {}",
-                            project_file.display(),
-                            backup_path.display()
-                        ),
-                        source: Box::new(e),
-                    }
-                })?;
+                self.fs
+                    .move_path(&project_file, &backup_path)
+                    .map_err(|e| {
+                        // Cleanup sentinel on failure
+                        let _ = self.fs.remove_any(&sentinel_path);
+                        ApplicationError::OperationFailed {
+                            context: format!(
+                                "backup {} to {}",
+                                project_file.display(),
+                                backup_path.display()
+                            ),
+                            source: Box::new(e),
+                        }
+                    })?;
             }
 
             // 5. MOVE vault content to project (vault file removed)

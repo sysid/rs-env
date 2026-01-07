@@ -170,7 +170,9 @@ impl GitignoreService {
     pub fn status(&self, vault_dir: Option<&Path>) -> ApplicationResult<GitignoreStatus> {
         debug!(
             "status: vault_dir={}",
-            vault_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "none".into())
+            vault_dir
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "none".into())
         );
         let global_path = self.global_gitignore_path();
         let global_config_patterns = self.global_patterns();
@@ -218,7 +220,9 @@ impl GitignoreService {
     pub fn is_synced(&self, vault_dir: Option<&Path>) -> ApplicationResult<bool> {
         debug!(
             "is_synced: vault_dir={}",
-            vault_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "none".into())
+            vault_dir
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "none".into())
         );
         let status = self.status(vault_dir)?;
         let global_synced = status.global_diff.in_sync;
@@ -276,7 +280,10 @@ impl GitignoreService {
             if managed_section.is_empty() {
                 String::new()
             } else {
-                format!("{}\n# Encrypted files are safe to commit\n!*.enc\n", managed_section)
+                format!(
+                    "{}\n# Encrypted files are safe to commit\n!*.enc\n",
+                    managed_section
+                )
             }
         } else {
             // Append to existing content
@@ -294,12 +301,12 @@ impl GitignoreService {
         // Create parent directory if needed
         if let Some(parent) = gitignore_path.parent() {
             if !self.fs.exists(parent) {
-                self.fs.create_dir_all(parent).map_err(|e| {
-                    ApplicationError::OperationFailed {
+                self.fs
+                    .create_dir_all(parent)
+                    .map_err(|e| ApplicationError::OperationFailed {
                         context: format!("create directory: {}", parent.display()),
                         source: Box::new(e),
-                    }
-                })?;
+                    })?;
             }
         }
 
@@ -315,7 +322,10 @@ impl GitignoreService {
 
     /// Sync global gitignore.
     pub fn sync_global(&self) -> ApplicationResult<GitignoreDiff> {
-        debug!("sync_global: path={}", self.global_gitignore_path().display());
+        debug!(
+            "sync_global: path={}",
+            self.global_gitignore_path().display()
+        );
         let global_path = self.global_gitignore_path();
         let patterns = self.global_patterns();
         let current = self.current_patterns(&global_path)?;
@@ -374,7 +384,9 @@ impl GitignoreService {
     ) -> ApplicationResult<(GitignoreDiff, Option<GitignoreDiff>)> {
         debug!(
             "sync_all: vault_dir={}",
-            vault_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "none".into())
+            vault_dir
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "none".into())
         );
         let global_diff = self.sync_global()?;
         let vault_diff = if let Some(vd) = vault_dir {
@@ -402,12 +414,12 @@ impl GitignoreService {
 
         // Only write if something changed
         if cleaned.trim() != content.trim() {
-            self.fs
-                .write(gitignore_path, cleaned.trim())
-                .map_err(|e| ApplicationError::OperationFailed {
+            self.fs.write(gitignore_path, cleaned.trim()).map_err(|e| {
+                ApplicationError::OperationFailed {
                     context: format!("write .gitignore: {}", gitignore_path.display()),
                     source: Box::new(e),
-                })?;
+                }
+            })?;
             Ok(true)
         } else {
             Ok(false)
@@ -416,7 +428,10 @@ impl GitignoreService {
 
     /// Clean managed section from global gitignore.
     pub fn clean_global(&self) -> ApplicationResult<bool> {
-        debug!("clean_global: path={}", self.global_gitignore_path().display());
+        debug!(
+            "clean_global: path={}",
+            self.global_gitignore_path().display()
+        );
         let global_path = self.global_gitignore_path();
         let result = self.clean_gitignore_file(&global_path)?;
         debug!("clean_global: section_removed={}", result);
@@ -436,7 +451,9 @@ impl GitignoreService {
     pub fn clean_all(&self, vault_dir: Option<&Path>) -> ApplicationResult<(bool, bool)> {
         debug!(
             "clean_all: vault_dir={}",
-            vault_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "none".into())
+            vault_dir
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "none".into())
         );
         let global_cleaned = self.clean_global()?;
         let vault_cleaned = if let Some(vd) = vault_dir {

@@ -99,7 +99,9 @@ impl SopsService {
     pub fn status(&self, base_dir: Option<&Path>) -> ApplicationResult<SopsStatus> {
         debug!(
             "status: base_dir={}",
-            base_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "default".into())
+            base_dir
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "default".into())
         );
         let dir = base_dir.map(PathBuf::from).unwrap_or_else(|| {
             // Default to vault base dir if no dir specified
@@ -288,7 +290,9 @@ impl SopsService {
     pub fn encrypt_all(&self, base_dir: Option<&Path>) -> ApplicationResult<Vec<PathBuf>> {
         debug!(
             "encrypt_all: base_dir={}",
-            base_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "default".into())
+            base_dir
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "default".into())
         );
         let dir = base_dir
             .map(PathBuf::from)
@@ -331,7 +335,9 @@ impl SopsService {
     pub fn decrypt_all(&self, base_dir: Option<&Path>) -> ApplicationResult<Vec<PathBuf>> {
         debug!(
             "decrypt_all: base_dir={}",
-            base_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "default".into())
+            base_dir
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "default".into())
         );
         let dir = base_dir
             .map(PathBuf::from)
@@ -368,7 +374,9 @@ impl SopsService {
     pub fn clean(&self, base_dir: Option<&Path>) -> ApplicationResult<Vec<PathBuf>> {
         debug!(
             "clean: base_dir={}",
-            base_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "default".into())
+            base_dir
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "default".into())
         );
         let status = self.status(base_dir)?;
 

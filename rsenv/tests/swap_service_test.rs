@@ -153,7 +153,10 @@ fn given_already_swapped_file_when_swap_in_then_succeeds_idempotently() {
 
     // Assert - second swap should succeed (idempotent) with empty result
     assert!(result.is_ok());
-    assert!(result.unwrap().is_empty(), "no files should be swapped on second call");
+    assert!(
+        result.unwrap().is_empty(),
+        "no files should be swapped on second call"
+    );
 }
 
 #[test]
@@ -1036,7 +1039,9 @@ fn given_directory_with_nested_gitignore_when_swap_out_then_gitignore_neutralize
         "nested .gitignore should be neutralized"
     );
     assert!(
-        vault_config.join("nested/.gitignore.rsenv-disabled").exists(),
+        vault_config
+            .join("nested/.gitignore.rsenv-disabled")
+            .exists(),
         "nested .gitignore.rsenv-disabled should exist"
     );
 }
@@ -1221,7 +1226,10 @@ fn given_bare_gitignore_in_vault_dir_when_swap_in_then_rejects_with_error() {
     let result = service.swap_in(&project_dir, &[project_subdir.clone()]);
 
     // Assert - should fail with informative error
-    assert!(result.is_err(), "swap_in should reject bare .gitignore in directory");
+    assert!(
+        result.is_err(),
+        "swap_in should reject bare .gitignore in directory"
+    );
     let err = result.unwrap_err().to_string();
     assert!(
         err.contains(".gitignore"),
@@ -1267,7 +1275,10 @@ fn given_gitignore_full_cycle_when_swap_in_out_then_content_preserved() {
         "after swap_in: .gitignore should be restored in project"
     );
     let content = std::fs::read_to_string(project_subdir.join(".gitignore")).unwrap();
-    assert!(content.contains("*.local"), "content preserved after swap_in");
+    assert!(
+        content.contains("*.local"),
+        "content preserved after swap_in"
+    );
 
     // Step 3: Modify .gitignore while swapped in
     std::fs::write(project_subdir.join(".gitignore"), "*.local\n*.tmp\n").unwrap();
@@ -1435,7 +1446,10 @@ fn given_swapped_in_file_when_delete_then_fails_with_hostname() {
     // Assert
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("swapped in"), "error should mention swapped in");
+    assert!(
+        err.contains("swapped in"),
+        "error should mention swapped in"
+    );
     assert!(err.contains(&hostname), "error should mention hostname");
 }
 

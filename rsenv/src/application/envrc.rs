@@ -10,6 +10,8 @@ use crate::infrastructure::traits::FileSystem;
 
 pub const START_SECTION_DELIMITER: &str =
     "#------------------------------- rsenv start --------------------------------";
+pub const VARS_SECTION_DELIMITER: &str =
+    "#-------------------------------- rsenv vars --------------------------------";
 pub const END_SECTION_DELIMITER: &str =
     "#-------------------------------- rsenv end ---------------------------------";
 
@@ -71,6 +73,148 @@ pub fn update_dot_envrc(
         _ => {
             let mut result = content.clone();
             result.push_str(&section);
+            result
+        }
+    };
+
+    fs.write(target_file_path, &new_content)
+        .map_err(|e| ApplicationError::OperationFailed {
+            context: format!("write .envrc at {}", target_file_path.display()),
+            source: Box::new(e),
+        })?;
+
+    Ok(())
+}
+
+/// Update only the vars section of an existing rsenv section.
+/// Preserves the header (between start and vars markers) and only modifies
+/// the content between vars and end markers.
+///
+/// If the file has a legacy section (no vars marker), it will auto-migrate
+/// by inserting the vars marker.
+///
+/// Returns error if no rsenv section exists.
+pub fn update_vars_section(
+    fs: &Arc<dyn FileSystem>,
+    target_file_path: &Path,
+    vars_data: &str,
+) -> ApplicationResult<()> {
+    let content =
+        fs.read_to_string(target_file_path)
+            .map_err(|e| ApplicationError::OperationFailed {
+                context: format!("read .envrc at {}", target_file_path.display()),
+                source: Box::new(e),
+            })?;
+
+    let lines: Vec<&str> = content.lines().collect();
+
+    let start_index = lines
+        .iter()
+        .position(|l| l.starts_with(START_SECTION_DELIMITER));
+    let end_index = lines
+        .iter()
+        .position(|l| l.starts_with(END_SECTION_DELIMITER));
+    let vars_index = lines
+        .iter()
+        .position(|l| l.starts_with(VARS_SECTION_DELIMITER));
+
+    // Must have start and end markers
+    let (start_idx, end_idx) = match (start_index, end_index) {
+        (Some(s), Some(e)) if s < e => (s, e),
+        _ => {
+            return Err(ApplicationError::OperationFailed {
+                context: format!(
+                    "no rsenv section found in {}. Run 'rsenv init' first.",
+                    target_file_path.display()
+                ),
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "rsenv section not found",
+                )),
+            });
+        }
+    };
+
+    // Normalize vars data
+    let vars_normalized = if vars_data.is_empty() {
+        String::new()
+    } else if vars_data.ends_with('\n') {
+        vars_data.to_string()
+    } else {
+        format!("{}\n", vars_data)
+    };
+
+    let new_content = match vars_index {
+        Some(vars_idx) if vars_idx > start_idx && vars_idx < end_idx => {
+            // Normal case: all three markers present
+            // Keep: pre-section + start marker + header (up to vars marker) + vars marker + new vars + end marker + post-section
+            let mut result = String::new();
+
+            // Pre-section content
+            if start_idx > 0 {
+                result.push_str(&lines[..start_idx].join("\n"));
+                result.push('\n');
+            }
+
+            // Header section (start marker through vars marker inclusive)
+            result.push_str(&lines[start_idx..=vars_idx].join("\n"));
+            result.push('\n');
+
+            // New vars content
+            result.push_str(&vars_normalized);
+
+            // End marker
+            result.push_str(END_SECTION_DELIMITER);
+            result.push('\n');
+
+            // Post-section content
+            if end_idx + 1 < lines.len() {
+                result.push_str(&lines[end_idx + 1..].join("\n"));
+                if !result.ends_with('\n') {
+                    result.push('\n');
+                }
+            }
+
+            result
+        }
+        _ => {
+            // Legacy migration: no vars marker, insert one
+            eprintln!(
+                "Warning: Migrating legacy rsenv section format in {}",
+                target_file_path.display()
+            );
+
+            let mut result = String::new();
+
+            // Pre-section content
+            if start_idx > 0 {
+                result.push_str(&lines[..start_idx].join("\n"));
+                result.push('\n');
+            }
+
+            // Header section (start marker to end marker, exclusive)
+            result.push_str(&lines[start_idx..end_idx].join("\n"));
+            result.push('\n');
+
+            // Insert vars marker
+            result.push_str(VARS_SECTION_DELIMITER);
+            result.push('\n');
+
+            // New vars content
+            result.push_str(&vars_normalized);
+
+            // End marker
+            result.push_str(END_SECTION_DELIMITER);
+            result.push('\n');
+
+            // Post-section content
+            if end_idx + 1 < lines.len() {
+                result.push_str(&lines[end_idx + 1..].join("\n"));
+                if !result.ends_with('\n') {
+                    result.push('\n');
+                }
+            }
+
             result
         }
     };
@@ -240,7 +384,10 @@ pub fn update_source_dir(
         }
     })?;
 
-    let new_content = re.replace(&content, format!("# state.sourceDir = '{}'", new_source_dir));
+    let new_content = re.replace(
+        &content,
+        format!("# state.sourceDir = '{}'", new_source_dir),
+    );
 
     fs.write(path, &new_content)
         .map_err(|e| ApplicationError::OperationFailed {

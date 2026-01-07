@@ -149,10 +149,16 @@ old_pattern
     // Missing: *.envrc, dot_pypirc
     assert_eq!(status.global_diff.to_add.len(), 2);
     assert!(status.global_diff.to_add.contains(&"*.envrc".to_string()));
-    assert!(status.global_diff.to_add.contains(&"dot_pypirc".to_string()));
+    assert!(status
+        .global_diff
+        .to_add
+        .contains(&"dot_pypirc".to_string()));
     // Extra: old_pattern
     assert_eq!(status.global_diff.to_remove.len(), 1);
-    assert!(status.global_diff.to_remove.contains(&"old_pattern".to_string()));
+    assert!(status
+        .global_diff
+        .to_remove
+        .contains(&"old_pattern".to_string()));
 }
 
 // ============================================================
@@ -256,7 +262,10 @@ fn given_already_synced_when_sync_then_no_changes() {
 dot_pypirc
 # rsenv-managed end"#;
     std::fs::write(&gitignore_path, content).unwrap();
-    let original_mtime = std::fs::metadata(&gitignore_path).unwrap().modified().unwrap();
+    let original_mtime = std::fs::metadata(&gitignore_path)
+        .unwrap()
+        .modified()
+        .unwrap();
 
     let settings = test_settings(temp.path().to_path_buf(), test_sops_config());
     let fs = Arc::new(RealFileSystem);
@@ -268,7 +277,10 @@ dot_pypirc
     // Assert
     assert!(diff.in_sync);
     // File shouldn't have been rewritten (mtime unchanged)
-    let new_mtime = std::fs::metadata(&gitignore_path).unwrap().modified().unwrap();
+    let new_mtime = std::fs::metadata(&gitignore_path)
+        .unwrap()
+        .modified()
+        .unwrap();
     assert_eq!(original_mtime, new_mtime);
 }
 
@@ -561,7 +573,10 @@ fn given_gitignore_with_comments_in_managed_section_when_extract_then_ignores_co
     // Missing: dot_pypirc
     assert!(!status.global_diff.in_sync);
     assert_eq!(status.global_diff.to_add.len(), 1);
-    assert!(status.global_diff.to_add.contains(&"dot_pypirc".to_string()));
+    assert!(status
+        .global_diff
+        .to_add
+        .contains(&"dot_pypirc".to_string()));
 }
 
 #[test]
@@ -580,11 +595,17 @@ fn given_patterns_are_sorted_when_sync_then_output_is_deterministic() {
     let lines: Vec<&str> = content.lines().collect();
 
     // Find the pattern lines (after start marker, before end marker)
-    let start_idx = lines.iter().position(|l| l.contains("rsenv-managed start")).unwrap();
-    let end_idx = lines.iter().position(|l| l.contains("rsenv-managed end")).unwrap();
+    let start_idx = lines
+        .iter()
+        .position(|l| l.contains("rsenv-managed start"))
+        .unwrap();
+    let end_idx = lines
+        .iter()
+        .position(|l| l.contains("rsenv-managed end"))
+        .unwrap();
 
     // Get pattern lines (skip comments)
-    let pattern_lines: Vec<&&str> = lines[start_idx+1..end_idx]
+    let pattern_lines: Vec<&&str> = lines[start_idx + 1..end_idx]
         .iter()
         .filter(|l| !l.starts_with('#') && !l.is_empty())
         .collect();

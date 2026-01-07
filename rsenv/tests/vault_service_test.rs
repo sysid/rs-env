@@ -1004,7 +1004,9 @@ fn given_moved_project_when_reconnect_then_updates_source_dir() {
     std::fs::remove_file(old_project_dir.join(".envrc")).unwrap();
 
     // Act - reconnect at new location
-    let _reconnected = service.reconnect(&dot_envrc_path, &new_project_dir).unwrap();
+    let _reconnected = service
+        .reconnect(&dot_envrc_path, &new_project_dir)
+        .unwrap();
 
     // Assert - new symlink exists
     let new_envrc_path = new_project_dir.join(".envrc");
