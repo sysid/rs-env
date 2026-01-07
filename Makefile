@@ -60,8 +60,8 @@ build-debug:  ## Build debug version
 .PHONY: all
 all: clean build install  ## Clean, build release, and install
 
-.PHONY: all-fast
-all-fast: clean build-debug install-debug  ## Clean, build debug, and install
+.PHONY: all-debug
+all-debug: clean build-debug install-debug  ## Clean, build debug, and install
 
 ################################################################################
 # Installation                                                                 #

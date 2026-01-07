@@ -1120,6 +1120,48 @@ fn given_standalone_gitignore_when_swap_init_then_neutralized() {
 }
 
 #[test]
+fn given_standalone_neutralized_gitignore_when_swap_in_then_gitignore_restored() {
+    // This is the bug scenario: after swap_init, standalone .gitignore becomes
+    // .gitignore.rsenv-disabled in vault. swap_in should find it and restore it.
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create original .gitignore in project (for backup)
+    let project_gitignore = project_dir.join("subdir/.gitignore");
+    std::fs::create_dir_all(project_dir.join("subdir")).unwrap();
+    std::fs::write(&project_gitignore, "original\n").unwrap();
+
+    // Create NEUTRALIZED .gitignore in vault (simulating after swap_init)
+    let swap_dir = vault_path.join("swap/subdir");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(
+        swap_dir.join(".gitignore.rsenv-disabled"),
+        "override content\n",
+    )
+    .unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act - swap in standalone .gitignore (neutralized form)
+    let result = service.swap_in(&project_dir, &[project_gitignore.clone()]);
+
+    // Assert - should succeed and .gitignore should exist in project with vault content
+    assert!(result.is_ok(), "swap_in should succeed: {:?}", result.err());
+    assert!(
+        project_gitignore.exists(),
+        ".gitignore should exist in project"
+    );
+    let content = std::fs::read_to_string(&project_gitignore).unwrap();
+    assert!(
+        content.contains("override"),
+        "should have vault content, got: {}",
+        content
+    );
+}
+
+#[test]
 fn given_bare_gitignore_in_vault_when_swap_in_then_rejects_with_error() {
     // Arrange
     let temp = TempDir::new().unwrap();
@@ -1236,6 +1278,82 @@ fn given_gitignore_full_cycle_when_swap_in_out_then_content_preserved() {
     assert!(
         swap_dir.join(".gitignore.rsenv-disabled").exists(),
         "after swap_out: .gitignore should be neutralized again"
+    );
+
+    // Verify modifications were captured
+    let vault_content =
+        std::fs::read_to_string(swap_dir.join(".gitignore.rsenv-disabled")).unwrap();
+    assert!(
+        vault_content.contains("*.tmp"),
+        "modifications should be captured in vault"
+    );
+}
+
+#[test]
+fn given_standalone_gitignore_full_cycle_when_init_swap_in_swap_out_then_works() {
+    // Full cycle for STANDALONE .gitignore file (not inside a directory)
+    // This is the exact scenario that was broken: init -> swap_in -> modify -> swap_out
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create standalone .gitignore in project subdirectory
+    let project_gitignore = project_dir.join("subdir/.gitignore");
+    std::fs::create_dir_all(project_dir.join("subdir")).unwrap();
+    std::fs::write(&project_gitignore, "*.local\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Step 1: Init (moves standalone .gitignore to vault, neutralizes it)
+    service
+        .swap_init(&project_dir, &[project_gitignore.clone()])
+        .unwrap();
+
+    let swap_dir = vault_path.join("swap/subdir");
+    assert!(
+        !swap_dir.join(".gitignore").exists(),
+        "after init: bare .gitignore should NOT exist in vault"
+    );
+    assert!(
+        swap_dir.join(".gitignore.rsenv-disabled").exists(),
+        "after init: .gitignore should be neutralized in vault"
+    );
+    assert!(
+        !project_gitignore.exists(),
+        "after init: .gitignore should be gone from project"
+    );
+
+    // Step 2: Swap in (finds neutralized form and restores .gitignore to project)
+    service
+        .swap_in(&project_dir, &[project_gitignore.clone()])
+        .unwrap();
+
+    assert!(
+        project_gitignore.exists(),
+        "after swap_in: .gitignore should exist in project"
+    );
+    let content = std::fs::read_to_string(&project_gitignore).unwrap();
+    assert!(
+        content.contains("*.local"),
+        "after swap_in: content should be preserved"
+    );
+
+    // Step 3: Modify while swapped in
+    std::fs::write(&project_gitignore, "*.local\n*.tmp\n").unwrap();
+
+    // Step 4: Swap out (moves modified .gitignore back to vault, neutralizes it)
+    service
+        .swap_out(&project_dir, &[project_gitignore.clone()])
+        .unwrap();
+
+    assert!(
+        swap_dir.join(".gitignore.rsenv-disabled").exists(),
+        "after swap_out: .gitignore should be neutralized in vault"
+    );
+    assert!(
+        !swap_dir.join(".gitignore").exists(),
+        "after swap_out: bare .gitignore should NOT exist in vault"
     );
 
     // Verify modifications were captured

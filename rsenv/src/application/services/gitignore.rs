@@ -8,6 +8,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tracing::debug;
+
 use crate::application::{ApplicationError, ApplicationResult};
 use crate::config::{vault_config_path, Settings, SopsConfig};
 use crate::infrastructure::traits::FileSystem;
@@ -166,6 +168,10 @@ impl GitignoreService {
     /// # Arguments
     /// * `vault_dir` - Optional vault directory to also check per-vault status
     pub fn status(&self, vault_dir: Option<&Path>) -> ApplicationResult<GitignoreStatus> {
+        debug!(
+            "status: vault_dir={}",
+            vault_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "none".into())
+        );
         let global_path = self.global_gitignore_path();
         let global_config_patterns = self.global_patterns();
         let global_current_patterns = self.current_patterns(&global_path)?;
@@ -188,6 +194,11 @@ impl GitignoreService {
             None
         };
 
+        debug!(
+            "status: global_in_sync={}, vault_in_sync={}",
+            global_diff.in_sync,
+            vault.as_ref().map(|v| v.diff.in_sync).unwrap_or(true)
+        );
         Ok(GitignoreStatus {
             global_path,
             global_diff,
@@ -205,6 +216,10 @@ impl GitignoreService {
 
     /// Check if all gitignores are in sync (global + vault if applicable).
     pub fn is_synced(&self, vault_dir: Option<&Path>) -> ApplicationResult<bool> {
+        debug!(
+            "is_synced: vault_dir={}",
+            vault_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "none".into())
+        );
         let status = self.status(vault_dir)?;
         let global_synced = status.global_diff.in_sync;
         let vault_synced = status
@@ -212,7 +227,9 @@ impl GitignoreService {
             .as_ref()
             .map(|v| v.diff.in_sync)
             .unwrap_or(true);
-        Ok(global_synced && vault_synced)
+        let result = global_synced && vault_synced;
+        debug!("is_synced: result={}", result);
+        Ok(result)
     }
 
     /// Update a gitignore file with patterns.
@@ -298,13 +315,21 @@ impl GitignoreService {
 
     /// Sync global gitignore.
     pub fn sync_global(&self) -> ApplicationResult<GitignoreDiff> {
+        debug!("sync_global: path={}", self.global_gitignore_path().display());
         let global_path = self.global_gitignore_path();
         let patterns = self.global_patterns();
         let current = self.current_patterns(&global_path)?;
         let diff = Self::compute_diff(&patterns, &current);
 
         if !diff.in_sync {
+            debug!(
+                "sync_global: updating, to_add={}, to_remove={}",
+                diff.to_add.len(),
+                diff.to_remove.len()
+            );
             self.update_gitignore_file(&global_path, &patterns, "global config")?;
+        } else {
+            debug!("sync_global: already in sync");
         }
 
         Ok(diff)
@@ -312,17 +337,26 @@ impl GitignoreService {
 
     /// Sync per-vault gitignore (only if vault has local config).
     pub fn sync_vault(&self, vault_dir: &Path) -> ApplicationResult<Option<GitignoreDiff>> {
+        debug!("sync_vault: vault_dir={}", vault_dir.display());
         if let Some(patterns) = self.vault_patterns(vault_dir)? {
             let vault_path = self.vault_gitignore_path(vault_dir);
             let current = self.current_patterns(&vault_path)?;
             let diff = Self::compute_diff(&patterns, &current);
 
             if !diff.in_sync {
+                debug!(
+                    "sync_vault: updating, to_add={}, to_remove={}",
+                    diff.to_add.len(),
+                    diff.to_remove.len()
+                );
                 self.update_gitignore_file(&vault_path, &patterns, "vault-local config")?;
+            } else {
+                debug!("sync_vault: already in sync");
             }
 
             Ok(Some(diff))
         } else {
+            debug!("sync_vault: no local config, skipping");
             Ok(None)
         }
     }
@@ -338,6 +372,10 @@ impl GitignoreService {
         &self,
         vault_dir: Option<&Path>,
     ) -> ApplicationResult<(GitignoreDiff, Option<GitignoreDiff>)> {
+        debug!(
+            "sync_all: vault_dir={}",
+            vault_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "none".into())
+        );
         let global_diff = self.sync_global()?;
         let vault_diff = if let Some(vd) = vault_dir {
             self.sync_vault(vd)?
@@ -378,24 +416,38 @@ impl GitignoreService {
 
     /// Clean managed section from global gitignore.
     pub fn clean_global(&self) -> ApplicationResult<bool> {
+        debug!("clean_global: path={}", self.global_gitignore_path().display());
         let global_path = self.global_gitignore_path();
-        self.clean_gitignore_file(&global_path)
+        let result = self.clean_gitignore_file(&global_path)?;
+        debug!("clean_global: section_removed={}", result);
+        Ok(result)
     }
 
     /// Clean managed section from per-vault gitignore.
     pub fn clean_vault(&self, vault_dir: &Path) -> ApplicationResult<bool> {
+        debug!("clean_vault: vault_dir={}", vault_dir.display());
         let vault_path = self.vault_gitignore_path(vault_dir);
-        self.clean_gitignore_file(&vault_path)
+        let result = self.clean_gitignore_file(&vault_path)?;
+        debug!("clean_vault: section_removed={}", result);
+        Ok(result)
     }
 
     /// Clean managed section from all gitignores.
     pub fn clean_all(&self, vault_dir: Option<&Path>) -> ApplicationResult<(bool, bool)> {
+        debug!(
+            "clean_all: vault_dir={}",
+            vault_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "none".into())
+        );
         let global_cleaned = self.clean_global()?;
         let vault_cleaned = if let Some(vd) = vault_dir {
             self.clean_vault(vd)?
         } else {
             false
         };
+        debug!(
+            "clean_all: global_cleaned={}, vault_cleaned={}",
+            global_cleaned, vault_cleaned
+        );
         Ok((global_cleaned, vault_cleaned))
     }
 

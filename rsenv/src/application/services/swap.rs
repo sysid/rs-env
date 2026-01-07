@@ -20,6 +20,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tracing::debug;
 use walkdir::WalkDir;
 
 use crate::application::services::VaultService;
@@ -146,6 +147,11 @@ impl SwapService {
                     ".gitignore{}",
                     GITIGNORE_DISABLED_SUFFIX
                 ));
+                debug!(
+                    "disable_gitignore: {} -> {}",
+                    gitignore.display(),
+                    disabled.display()
+                );
                 self.fs
                     .rename(gitignore, &disabled)
                     .with_path_context("neutralize .gitignore", gitignore)?;
@@ -156,6 +162,11 @@ impl SwapService {
                 ".gitignore{}",
                 GITIGNORE_DISABLED_SUFFIX
             ));
+            debug!(
+                "disable_gitignore: {} -> {}",
+                path.display(),
+                disabled.display()
+            );
             self.fs
                 .rename(path, &disabled)
                 .with_path_context("neutralize .gitignore", path)?;
@@ -184,6 +195,11 @@ impl SwapService {
             {
                 let disabled = entry.path();
                 let gitignore = disabled.with_file_name(".gitignore");
+                debug!(
+                    "enable_gitignore: {} -> {}",
+                    disabled.display(),
+                    gitignore.display()
+                );
                 self.fs
                     .rename(disabled, &gitignore)
                     .with_path_context("restore .gitignore", disabled)?;
@@ -192,6 +208,11 @@ impl SwapService {
             // Standalone: check if disabled form exists
             let disabled = path.with_file_name(&disabled_name);
             if self.fs.exists(&disabled) {
+                debug!(
+                    "enable_gitignore: {} -> {}",
+                    disabled.display(),
+                    path.display()
+                );
                 self.fs
                     .rename(&disabled, path)
                     .with_path_context("restore .gitignore", &disabled)?;
@@ -256,6 +277,12 @@ impl SwapService {
 
         let hostname = Self::get_hostname()?;
         let swap_dir = vault.path.join("swap");
+        debug!(
+            "swap_in: project_dir={}, swap_dir={}, hostname={}",
+            project_dir.display(),
+            swap_dir.display(),
+            hostname
+        );
 
         let mut swapped = Vec::new();
 
@@ -283,6 +310,39 @@ impl SwapService {
             })?;
 
             let vault_file = swap_dir.join(relative);
+            debug!(
+                "swap_in: checking vault_file={}, exists={}",
+                vault_file.display(),
+                self.fs.exists(&vault_file)
+            );
+
+            // For standalone .gitignore files, check if neutralized form exists
+            // (swap_init and swap_out rename .gitignore -> .gitignore.rsenv-disabled)
+            let vault_file = if !self.fs.exists(&vault_file)
+                && relative
+                    .file_name()
+                    .map(|n| n == ".gitignore")
+                    .unwrap_or(false)
+            {
+                let disabled = vault_file.with_file_name(format!(
+                    ".gitignore{}",
+                    GITIGNORE_DISABLED_SUFFIX
+                ));
+                debug!(
+                    "swap_in: .gitignore not found, checking neutralized form={}, exists={}",
+                    disabled.display(),
+                    self.fs.exists(&disabled)
+                );
+                if self.fs.exists(&disabled) {
+                    // Will be restored by enable_gitignore_files() after move
+                    debug!("swap_in: using neutralized .gitignore form");
+                    disabled
+                } else {
+                    vault_file // Let it fail with normal error
+                }
+            } else {
+                vault_file
+            };
 
             // 1. Check for existing swap (sentinel in VAULT)
             if let Some((_, existing_host)) = self.find_any_sentinel(&swap_dir, relative) {
@@ -350,6 +410,7 @@ impl SwapService {
 
             // 3. Create sentinel as COPY of vault content (before move)
             let sentinel_path = Self::get_sentinel_path(&swap_dir, relative, &hostname);
+            debug!("swap_in: creating sentinel at {}", sentinel_path.display());
             self.fs
                 .ensure_parent(&sentinel_path)
                 .with_path_context("create sentinel parent for", &sentinel_path)?;
@@ -361,6 +422,11 @@ impl SwapService {
             // Use move_path for cross-device support (vault may be on different FS)
             let backup_path = Self::get_backup_path(&swap_dir, relative);
             if self.fs.exists(&project_file) {
+                debug!(
+                    "swap_in: backing up {} to {}",
+                    project_file.display(),
+                    backup_path.display()
+                );
                 self.fs.move_path(&project_file, &backup_path).map_err(|e| {
                     // Cleanup sentinel on failure
                     let _ = self.fs.remove_any(&sentinel_path);
@@ -376,6 +442,11 @@ impl SwapService {
             }
 
             // 5. MOVE vault content to project (vault file removed)
+            debug!(
+                "swap_in: moving {} to {}",
+                vault_file.display(),
+                project_file.display()
+            );
             self.fs.move_path(&vault_file, &project_file).map_err(|e| {
                 // Rollback: restore backup, remove sentinel
                 if self.fs.exists(&backup_path) {
@@ -393,6 +464,10 @@ impl SwapService {
             })?;
 
             // 6. Restore any .gitignore files in project
+            debug!(
+                "swap_in: restoring .gitignore files in {}",
+                project_file.display()
+            );
             self.enable_gitignore_files(&project_file)?;
 
             swapped.push(SwapFile {
@@ -439,6 +514,12 @@ impl SwapService {
 
         let hostname = Self::get_hostname()?;
         let swap_dir = vault.path.join("swap");
+        debug!(
+            "swap_out: project_dir={}, swap_dir={}, files={:?}",
+            project_dir.display(),
+            swap_dir.display(),
+            files
+        );
 
         let mut swapped = Vec::new();
 
@@ -469,6 +550,11 @@ impl SwapService {
             // Find sentinel in VAULT
             match self.find_any_sentinel(&swap_dir, relative) {
                 Some((sentinel_path, sentinel_host)) => {
+                    debug!(
+                        "swap_out: found sentinel for {} (host={})",
+                        project_file.display(),
+                        sentinel_host
+                    );
                     // Normal swap-out case: sentinel exists
                     if sentinel_host != hostname {
                         return Err(ApplicationError::OperationFailed {
@@ -489,6 +575,11 @@ impl SwapService {
                     // Use move_path for cross-device support (vault may be on different FS)
                     let project_existed = self.fs.exists(&project_file);
                     if project_existed {
+                        debug!(
+                            "swap_out: moving {} to vault at {}",
+                            project_file.display(),
+                            vault_file.display()
+                        );
                         self.fs
                             .ensure_parent(&vault_file)
                             .with_path_context("create vault parent for", &vault_file)?;
@@ -509,6 +600,10 @@ impl SwapService {
 
                     // 2. Restore original from backup in VAULT
                     if self.fs.exists(&backup_path) {
+                        debug!(
+                            "swap_out: restoring original from {}",
+                            backup_path.display()
+                        );
                         if let Err(e) = self.fs.move_path(&backup_path, &project_file) {
                             // Rollback: move vault content back to project
                             if project_existed {
@@ -526,6 +621,7 @@ impl SwapService {
                     }
 
                     // 3. Remove sentinel from VAULT (file or directory)
+                    debug!("swap_out: removing sentinel {}", sentinel_path.display());
                     self.fs
                         .remove_any(&sentinel_path)
                         .with_path_context("remove sentinel", &sentinel_path)?;
@@ -587,6 +683,12 @@ impl SwapService {
             .ok_or_else(|| ApplicationError::VaultNotInitialized(project_dir.to_path_buf()))?;
 
         let swap_dir = vault.path.join("swap");
+        debug!(
+            "swap_init: project_dir={}, swap_dir={}, files={:?}",
+            project_dir.display(),
+            swap_dir.display(),
+            files
+        );
         let mut initialized = Vec::new();
 
         for file in files {
@@ -641,6 +743,11 @@ impl SwapService {
 
             // Move project to vault (no sentinel, no backup)
             // Use move_path for cross-device support (vault may be on different FS)
+            debug!(
+                "swap_init: moving {} to vault at {}",
+                project_file.display(),
+                vault_file.display()
+            );
             self.fs.move_path(&project_file, &vault_file).map_err(|e| {
                 ApplicationError::OperationFailed {
                     context: format!(
@@ -675,13 +782,18 @@ impl SwapService {
     /// # Returns
     /// Vec of SwapFile with current states
     pub fn status(&self, project_dir: &Path) -> ApplicationResult<Vec<SwapFile>> {
+        debug!("status: project_dir={}", project_dir.display());
         let vault = match self.vault_service.get(project_dir)? {
             Some(v) => v,
-            None => return Ok(vec![]),
+            None => {
+                debug!("status: no vault found");
+                return Ok(vec![]);
+            }
         };
 
         let swap_dir = vault.path.join("swap");
         if !self.fs.exists(&swap_dir) {
+            debug!("status: swap_dir does not exist");
             return Ok(vec![]);
         }
 
@@ -789,6 +901,7 @@ impl SwapService {
             }
         }
 
+        debug!("status: found {} swap files", files.len());
         Ok(files)
     }
 
@@ -802,6 +915,7 @@ impl SwapService {
     /// # Returns
     /// Vec of project directories that were processed
     pub fn swap_out_all(&self, base_dir: &Path) -> ApplicationResult<Vec<PathBuf>> {
+        debug!("swap_out_all: base_dir={}", base_dir.display());
         let mut processed = Vec::new();
 
         // Walk directory looking for .envrc symlinks (indicating vault)
@@ -820,12 +934,18 @@ impl SwapService {
                     .collect();
 
                 if !swapped_in.is_empty() {
+                    debug!(
+                        "swap_out_all: processing {} with {} swapped files",
+                        project_dir.display(),
+                        swapped_in.len()
+                    );
                     self.swap_out(project_dir, &swapped_in)?;
                     processed.push(project_dir.to_path_buf());
                 }
             }
         }
 
+        debug!("swap_out_all: processed {} projects", processed.len());
         Ok(processed)
     }
 
@@ -850,6 +970,11 @@ impl SwapService {
             .ok_or_else(|| ApplicationError::VaultNotInitialized(project_dir.to_path_buf()))?;
 
         let swap_dir = vault.path.join("swap");
+        debug!(
+            "delete: project_dir={}, files={:?}",
+            project_dir.display(),
+            files
+        );
 
         // PHASE 1: Validate ALL files first (all-or-nothing safety)
         let mut to_delete: Vec<(PathBuf, PathBuf, PathBuf)> = Vec::new(); // (project_file, vault_file, relative)
@@ -901,6 +1026,7 @@ impl SwapService {
         for (project_file, vault_file, relative) in to_delete {
             // Delete vault override file (if exists - idempotent)
             if self.fs.exists(&vault_file) {
+                debug!("delete: removing vault file {}", vault_file.display());
                 self.fs
                     .remove_any(&vault_file)
                     .with_path_context("delete vault file", &vault_file)?;
@@ -909,6 +1035,7 @@ impl SwapService {
             // Delete backup file (if exists - idempotent)
             let backup_path = Self::get_backup_path(&swap_dir, &relative);
             if self.fs.exists(&backup_path) {
+                debug!("delete: removing backup {}", backup_path.display());
                 self.fs
                     .remove_any(&backup_path)
                     .with_path_context("delete backup", &backup_path)?;

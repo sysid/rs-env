@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rayon::prelude::*;
+use tracing::debug;
 use walkdir::WalkDir;
 
 use crate::application::{ApplicationError, ApplicationResult};
@@ -51,6 +52,12 @@ impl SopsService {
         extensions: &[String],
         filenames: &[String],
     ) -> ApplicationResult<Vec<PathBuf>> {
+        debug!(
+            "collect_files: dir={}, extensions={:?}, filenames={:?}",
+            dir.display(),
+            extensions,
+            filenames
+        );
         let mut files = Vec::new();
 
         for entry in WalkDir::new(dir)
@@ -78,6 +85,7 @@ impl SopsService {
             }
         }
 
+        debug!("collect_files: found {} files", files.len());
         Ok(files)
     }
 
@@ -89,6 +97,10 @@ impl SopsService {
     /// # Returns
     /// SopsStatus with categorized files
     pub fn status(&self, base_dir: Option<&Path>) -> ApplicationResult<SopsStatus> {
+        debug!(
+            "status: base_dir={}",
+            base_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "default".into())
+        );
         let dir = base_dir.map(PathBuf::from).unwrap_or_else(|| {
             // Default to vault base dir if no dir specified
             self.settings.vault_base_dir.clone()
@@ -115,6 +127,12 @@ impl SopsService {
             .cloned()
             .collect();
 
+        debug!(
+            "status: pending_encrypt={}, encrypted={}, pending_clean={}",
+            pending_encrypt.len(),
+            encrypted.len(),
+            pending_clean.len()
+        );
         Ok(SopsStatus {
             pending_encrypt,
             encrypted,
@@ -133,6 +151,7 @@ impl SopsService {
     /// # Returns
     /// Path to encrypted output file
     pub fn encrypt_file(&self, input: &Path) -> ApplicationResult<PathBuf> {
+        debug!("encrypt_file: input={}", input.display());
         let output = PathBuf::from(format!("{}.enc", input.display()));
 
         let key = self
@@ -188,6 +207,7 @@ impl SopsService {
             });
         }
 
+        debug!("encrypt_file: output={}", output.display());
         Ok(output)
     }
 
@@ -201,6 +221,7 @@ impl SopsService {
     /// # Returns
     /// Path to decrypted output file
     pub fn decrypt_file(&self, input: &Path) -> ApplicationResult<PathBuf> {
+        debug!("decrypt_file: input={}", input.display());
         // Strip .enc suffix for output
         let input_str = input.to_string_lossy();
         let output = if input_str.ends_with(".enc") {
@@ -251,6 +272,7 @@ impl SopsService {
             });
         }
 
+        debug!("decrypt_file: output={}", output.display());
         Ok(output)
     }
 
@@ -264,6 +286,10 @@ impl SopsService {
     /// # Returns
     /// Vec of encrypted output file paths
     pub fn encrypt_all(&self, base_dir: Option<&Path>) -> ApplicationResult<Vec<PathBuf>> {
+        debug!(
+            "encrypt_all: base_dir={}",
+            base_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "default".into())
+        );
         let dir = base_dir
             .map(PathBuf::from)
             .unwrap_or_else(|| self.settings.vault_base_dir.clone());
@@ -289,6 +315,7 @@ impl SopsService {
             outputs.push(result?);
         }
 
+        debug!("encrypt_all: encrypted {} files", outputs.len());
         Ok(outputs)
     }
 
@@ -302,6 +329,10 @@ impl SopsService {
     /// # Returns
     /// Vec of decrypted output file paths
     pub fn decrypt_all(&self, base_dir: Option<&Path>) -> ApplicationResult<Vec<PathBuf>> {
+        debug!(
+            "decrypt_all: base_dir={}",
+            base_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "default".into())
+        );
         let dir = base_dir
             .map(PathBuf::from)
             .unwrap_or_else(|| self.settings.vault_base_dir.clone());
@@ -320,6 +351,7 @@ impl SopsService {
             outputs.push(result?);
         }
 
+        debug!("decrypt_all: decrypted {} files", outputs.len());
         Ok(outputs)
     }
 
@@ -334,6 +366,10 @@ impl SopsService {
     /// # Returns
     /// Vec of deleted file paths
     pub fn clean(&self, base_dir: Option<&Path>) -> ApplicationResult<Vec<PathBuf>> {
+        debug!(
+            "clean: base_dir={}",
+            base_dir.map(|p| p.display().to_string()).unwrap_or_else(|| "default".into())
+        );
         let status = self.status(base_dir)?;
 
         let mut deleted = Vec::new();
@@ -347,6 +383,7 @@ impl SopsService {
             deleted.push(path.clone());
         }
 
+        debug!("clean: deleted {} plaintext files", deleted.len());
         Ok(deleted)
     }
 }

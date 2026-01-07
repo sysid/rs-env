@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use regex::Regex;
+use tracing::debug;
 
 use crate::application::{ApplicationError, ApplicationResult};
 use crate::domain::EnvFile;
@@ -44,11 +45,13 @@ impl EnvironmentService {
     /// Performs BFS traversal from leaf to roots, then merges variables
     /// so that children override parents.
     pub fn build(&self, leaf: &Path) -> ApplicationResult<EnvOutput> {
+        debug!("build: leaf={}", leaf.display());
         // v1 behavior: warn on symlinks
         self.warn_if_symlink(leaf);
 
         // Collect all files in hierarchy via BFS
         let files = self.collect_hierarchy(leaf)?;
+        debug!("build: found {} files in hierarchy", files.len());
 
         // Merge variables: iterate in reverse (roots first) so children override
         let mut variables = BTreeMap::new();
@@ -150,6 +153,7 @@ impl EnvironmentService {
     /// Scans the directory for `.env` files and parses them to extract
     /// their parent relationships.
     pub fn get_hierarchy(&self, dir: &Path) -> ApplicationResult<EnvHierarchy> {
+        debug!("get_hierarchy: dir={}", dir.display());
         let mut files = Vec::new();
 
         // Scan directory for .env files
@@ -183,6 +187,7 @@ impl EnvironmentService {
             }
         }
 
+        debug!("get_hierarchy: found {} env files", files.len());
         Ok(EnvHierarchy { files })
     }
 
@@ -236,6 +241,11 @@ impl EnvironmentService {
     /// Uses relative path for the parent reference.
     /// Errors if the child has multiple `# rsenv:` directives.
     pub fn link(&self, parent: &Path, child: &Path) -> ApplicationResult<()> {
+        debug!(
+            "link: parent={}, child={}",
+            parent.display(),
+            child.display()
+        );
         // Read the child file
         let content =
             self.fs
@@ -291,6 +301,7 @@ impl EnvironmentService {
     /// v1 behavior: KEEPS the `# rsenv:` line but empties it (removes parent reference).
     /// Errors if the file has multiple `# rsenv:` directives.
     pub fn unlink(&self, file: &Path) -> ApplicationResult<()> {
+        debug!("unlink: file={}", file.display());
         // Read the file
         let content =
             self.fs
@@ -337,6 +348,7 @@ impl EnvironmentService {
 
     /// Check if directory contains DAG structure (files with multiple parents).
     pub fn is_dag(&self, dir: &Path) -> ApplicationResult<bool> {
+        debug!("is_dag: dir={}", dir.display());
         let re = Regex::new(r"# rsenv:\s*(.+)").map_err(|e| ApplicationError::OperationFailed {
             context: "compile regex".to_string(),
             source: Box::new(std::io::Error::new(
@@ -355,6 +367,7 @@ impl EnvironmentService {
                         if let Some(caps) = re.captures(line) {
                             let parents: Vec<&str> = caps[1].split_whitespace().collect();
                             if parents.len() > 1 {
+                                debug!("is_dag: found multi-parent file {}", entry.path().display());
                                 return Ok(true);
                             }
                         }
@@ -362,12 +375,14 @@ impl EnvironmentService {
                 }
             }
         }
+        debug!("is_dag: no DAG structure found");
         Ok(false)
     }
 
     /// Link multiple files in a chain: files[0] <- files[1] <- files[2] <- ...
     /// First file becomes root (unlinked), each subsequent file links to previous.
     pub fn link_chain(&self, files: &[PathBuf]) -> ApplicationResult<()> {
+        debug!("link_chain: {} files", files.len());
         if files.is_empty() {
             return Ok(());
         }
@@ -387,7 +402,9 @@ impl EnvironmentService {
 
     /// Get all files in hierarchy starting from leaf.
     pub fn get_files(&self, leaf: &Path) -> ApplicationResult<Vec<PathBuf>> {
+        debug!("get_files: leaf={}", leaf.display());
         let output = self.build(leaf)?;
+        debug!("get_files: found {} files in hierarchy", output.files.len());
         Ok(output.files.iter().map(|f| f.path.clone()).collect())
     }
 

@@ -27,12 +27,15 @@ use rsenv::infrastructure::traits::{
 };
 
 fn main() -> ExitCode {
-    // Initialize logging from RUST_LOG env var
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
-
     let cli = Cli::parse();
+
+    // Initialize logging - use DEBUG level if verbose flag is set
+    let filter = if cli.verbose {
+        EnvFilter::new("rsenv=debug")
+    } else {
+        EnvFilter::from_default_env()
+    };
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     match run(cli) {
         Ok(()) => ExitCode::from(exitcode::OK as u8),

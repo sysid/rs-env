@@ -6,6 +6,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use tracing::debug;
+
 use crate::application::{ApplicationError, ApplicationResult, IoResultExt};
 use crate::config::Settings;
 use crate::domain::{GuardedFile, Vault};
@@ -90,6 +92,11 @@ impl VaultService {
     /// # Returns
     /// The created or existing Vault
     pub fn init(&self, project_dir: &Path, absolute: bool) -> ApplicationResult<Vault> {
+        debug!(
+            "init: project_dir={}, absolute={}",
+            project_dir.display(),
+            absolute
+        );
         // Canonicalize project_dir for consistent path handling
         let project_dir =
             self.fs
@@ -101,6 +108,7 @@ impl VaultService {
 
         // Check if already initialized
         if let Some(vault) = self.get(&project_dir)? {
+            debug!("init: already initialized at {}", vault.path.display());
             return Ok(vault);
         }
 
@@ -114,6 +122,7 @@ impl VaultService {
 
         // Create vault directory
         let vault_path = self.settings.vault_base_dir.join(&sentinel_id);
+        debug!("init: creating vault at {}", vault_path.display());
         self.fs
             .create_dir_all(&vault_path)
             .map_err(|e| ApplicationError::OperationFailed {
@@ -212,15 +221,20 @@ impl VaultService {
     /// # Returns
     /// Some(Vault) if initialized, None otherwise
     pub fn get(&self, project_dir: &Path) -> ApplicationResult<Option<Vault>> {
+        debug!("get: project_dir={}", project_dir.display());
         // Canonicalize project_dir for consistent path handling
         let project_dir = match self.fs.canonicalize(project_dir) {
             Ok(p) => p,
-            Err(_) => return Ok(None), // Project dir doesn't exist
+            Err(_) => {
+                debug!("get: project dir does not exist");
+                return Ok(None);
+            }
         };
         let envrc_path = project_dir.join(".envrc");
 
         // Check if .envrc exists and is a symlink
         if !self.fs.exists(&envrc_path) || !self.fs.is_symlink(&envrc_path) {
+            debug!("get: no .envrc symlink found");
             return Ok(None);
         }
 
@@ -278,6 +292,7 @@ impl VaultService {
             })?
             .to_string();
 
+        debug!("get: found vault at {}", vault_path.display());
         Ok(Some(Vault {
             path: vault_path.to_path_buf(),
             sentinel_id,
@@ -296,6 +311,11 @@ impl VaultService {
     /// # Returns
     /// The Vault that was reconnected
     pub fn reconnect(&self, dot_envrc_path: &Path, project_dir: &Path) -> ApplicationResult<Vault> {
+        debug!(
+            "reconnect: dot_envrc={}, project_dir={}",
+            dot_envrc_path.display(),
+            project_dir.display()
+        );
         // Verify dot.envrc exists
         if !self.fs.exists(dot_envrc_path) {
             return Err(ApplicationError::OperationFailed {
@@ -516,6 +536,7 @@ export RSENV_VAULT={vault_var}
     /// # Returns
     /// GuardedFile with project and vault paths
     pub fn guard(&self, file: &Path, absolute: bool) -> ApplicationResult<GuardedFile> {
+        debug!("guard: file={}, absolute={}", file.display(), absolute);
         // Check if file is already guarded (symlink to vault)
         if self.fs.is_symlink(file) {
             if let Ok(target) = self.fs.read_link(file) {
@@ -564,6 +585,11 @@ export RSENV_VAULT={vault_var}
             .with_path_context("create vault directory for", &vault_path)?;
 
         // Move file to vault
+        debug!(
+            "guard: moving {} to {}",
+            file.display(),
+            vault_path.display()
+        );
         self.fs
             .rename(&file, &vault_path)
             .map_err(|e| ApplicationError::OperationFailed {
@@ -572,6 +598,7 @@ export RSENV_VAULT={vault_var}
             })?;
 
         // Create symlink in project (relative by default)
+        debug!("guard: creating symlink at {}", file.display());
         let symlink_result = if absolute {
             self.fs.symlink(&vault_path, &file)
         } else {
@@ -601,6 +628,7 @@ export RSENV_VAULT={vault_var}
     /// # Returns
     /// Ok(()) on success
     pub fn unguard(&self, file: &Path) -> ApplicationResult<()> {
+        debug!("unguard: file={}", file.display());
         // Verify it's a symlink
         if !self.fs.is_symlink(file) {
             return Err(ApplicationError::OperationFailed {
@@ -654,6 +682,10 @@ export RSENV_VAULT={vault_var}
             })?;
 
         // Move file from vault back to project
+        debug!(
+            "unguard: restoring {} from vault",
+            file.display()
+        );
         self.fs
             .rename(&vault_path, file)
             .map_err(|e| ApplicationError::OperationFailed {
@@ -683,6 +715,7 @@ export RSENV_VAULT={vault_var}
     /// # Returns
     /// Number of files restored
     pub fn reset(&self, project_dir: &Path) -> ApplicationResult<usize> {
+        debug!("reset: project_dir={}", project_dir.display());
         use walkdir::WalkDir;
 
         // Canonicalize project_dir for consistent path handling
@@ -701,6 +734,7 @@ export RSENV_VAULT={vault_var}
 
         // Collect and restore all guarded files
         let guarded_dir = vault.path.join("guarded");
+        debug!("reset: guarded_dir={}", guarded_dir.display());
         let mut restored_count = 0;
 
         if self.fs.exists(&guarded_dir) {
@@ -772,6 +806,7 @@ export RSENV_VAULT={vault_var}
             crate::application::envrc::delete_section(&self.fs, &envrc_path)?;
         }
 
+        debug!("reset: restored {} files", restored_count);
         Ok(restored_count)
     }
 
