@@ -31,7 +31,9 @@ fs_extra = "1"
 
 # Interactive
 skim = "0.10"
-crossterm = "0.27"
+
+# Terminal output
+colored = "2"
 
 # Arena-based trees
 generational-arena = "0.2"

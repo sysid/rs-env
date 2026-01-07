@@ -18,6 +18,8 @@ use rsenv::cli::args::{
     Cli, Commands, ConfigCommands, EnvCommands, GuardCommands, InitCommands, SopsCommands,
     SwapCommands,
 };
+use rsenv::cli::output;
+use colored::Colorize;
 use rsenv::config::{global_config_dir, global_config_path, vault_config_path, Settings};
 use rsenv::domain::{TreeBuilder, TreeNodeConvert};
 use rsenv::exitcode;
@@ -40,7 +42,7 @@ fn main() -> ExitCode {
     match run(cli) {
         Ok(()) => ExitCode::from(exitcode::OK as u8),
         Err(e) => {
-            eprintln!("error: {e}");
+            output::error(&e);
             ExitCode::from(e.exit_code() as u8)
         }
     }
@@ -123,7 +125,7 @@ fn handle_env(
             update_dot_envrc(&fs, &envrc_path, &exports).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
-            println!("Updated {}", envrc_path.display());
+            output::action("Updated", &envrc_path.display());
             Ok(())
         }
         EnvCommands::Files { file } => {
@@ -155,7 +157,8 @@ fn handle_env(
                 ))
             })?;
 
-            println!("Found {} trees:\n", trees.len());
+            output::header(&format!("Found {} trees:", trees.len()));
+            println!();
             for tree in &trees {
                 println!("{}", tree.to_tree_string());
             }
@@ -171,14 +174,14 @@ fn handle_env(
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
             let chain: Vec<_> = files.iter().map(|p| p.display().to_string()).collect();
-            println!("Linked: {}", chain.join(" <- "));
+            output::action("Linked", &chain.join(" <- "));
             Ok(())
         }
         EnvCommands::Unlink { file } => {
             service.unlink(&file).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
-            println!("Unlinked {}", file.display());
+            output::action("Unlinked", &file.display());
             Ok(())
         }
         EnvCommands::Select { dir } => {
@@ -191,7 +194,7 @@ fn handle_env(
             })?;
 
             if hierarchy.files.is_empty() {
-                println!("No .env files found in {}", search_dir.display());
+                output::info(&format!("No .env files found in {}", search_dir.display()));
                 return Ok(());
             }
 
@@ -233,7 +236,7 @@ fn handle_env(
                 }
                 None => {
                     // User cancelled
-                    eprintln!("Selection cancelled");
+                    output::info(&"Selection cancelled");
                 }
             }
             Ok(())
@@ -248,7 +251,7 @@ fn handle_env(
             })?;
 
             if hierarchy.files.is_empty() {
-                println!("No .env files found in {}", search_dir.display());
+                output::info(&format!("No .env files found in {}", search_dir.display()));
                 return Ok(());
             }
 
@@ -283,10 +286,10 @@ fn handle_env(
                             e,
                         ))
                     })?;
-                    println!("Edited {}", item.display);
+                    output::action("Edited", &item.display);
                 }
                 None => {
-                    eprintln!("Selection cancelled");
+                    output::info(&"Selection cancelled");
                 }
             }
             Ok(())
@@ -311,11 +314,11 @@ fn handle_env(
                 ))
             })?;
 
-            println!("Found {} trees:", trees.len());
+            output::header(&format!("Found {} trees:", trees.len()));
             for tree in &trees {
                 if let Some(root_idx) = tree.root() {
                     if let Some(root_node) = tree.get_node(root_idx) {
-                        println!("\nTree Root: {}", root_node.data.file_path.display());
+                        output::detail(&format!("Tree Root: {}", root_node.data.file_path.display()));
                     }
                 }
             }
@@ -327,7 +330,7 @@ fn handle_env(
             })?;
 
             if files.is_empty() {
-                println!("No files in hierarchy");
+                output::info(&"No files in hierarchy");
                 return Ok(());
             }
 
@@ -349,7 +352,7 @@ fn handle_env(
                     ))
                 })?;
 
-            println!("Edited {} files", files.len());
+            output::action("Edited", &format!("{} files", files.len()));
             Ok(())
         }
         EnvCommands::TreeEdit { dir } => {
@@ -386,11 +389,11 @@ fn handle_env(
             }
 
             if branches.is_empty() {
-                println!("No environment files found");
+                output::info(&"No environment files found");
                 return Ok(());
             }
 
-            println!("Editing {} branches...", branches.len());
+            output::header(&format!("Editing {} branches...", branches.len()));
 
             // Generate vimscript for grid layout
             let vimscript = create_vimscript(&branches);
@@ -422,7 +425,7 @@ fn handle_env(
                     ))
                 })?;
 
-            println!("Vim: {}", status);
+            output::info(&format!("Vim: {}", status));
             Ok(())
         }
         EnvCommands::Leaves { dir } => {
@@ -496,7 +499,7 @@ fn handle_config(
                         ))
                     })?;
 
-                    println!("Created: {}", path.display());
+                    output::action("Created", &path.display());
                 } else {
                     return Err(rsenv::cli::CliError::Usage(
                         "cannot determine config directory".into(),
@@ -532,22 +535,22 @@ fn handle_config(
                     ))
                 })?;
 
-                println!("Created: {}", path.display());
+                output::action("Created", &path.display());
             }
             Ok(())
         }
         ConfigCommands::Path => {
-            println!("Global config: {:?}", global_config_path());
+            output::info(&format!("Global config: {:?}", global_config_path()));
 
             let current_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
             let fs = Arc::new(RealFileSystem);
 
             match VaultService::discover_vault_path(fs.as_ref(), &current_dir) {
                 Ok(Some(vault_dir)) => {
-                    println!("Local config:  {}", vault_config_path(&vault_dir).display());
+                    output::info(&format!("Local config:  {}", vault_config_path(&vault_dir).display()));
                 }
                 _ => {
-                    println!("Local config:  (project not initialized)");
+                    output::info(&"Local config:  (project not initialized)");
                 }
             }
             Ok(())
@@ -628,7 +631,7 @@ fn handle_config(
             // 6. Clean up if no changes (only for newly created files)
             if !existed_before && !config_changed {
                 let _ = std::fs::remove_file(&config_path);
-                println!("No changes made");
+                output::info(&"No changes made");
                 return Ok(());
             }
 
@@ -643,10 +646,10 @@ fn handle_config(
                 gitignore_service.sync_vault(vault_dir.as_ref().unwrap()).map(|_| ())
             };
             if let Err(e) = sync_result {
-                eprintln!("Warning: gitignore sync failed: {}", e);
+                output::warning(&format!("gitignore sync failed: {}", e));
             }
 
-            println!("Edited: {}", config_path.display());
+            output::action("Edited", &config_path.display());
             Ok(())
         }
     }
@@ -700,12 +703,12 @@ fn handle_init_create(
     let gitignore_service = GitignoreService::new(fs, global_settings);
     let sync_result = gitignore_service.sync_all(Some(&vault.path));
     if let Err(e) = sync_result {
-        eprintln!("Warning: Failed to sync .gitignore: {}", e);
+        output::warning(&format!("Failed to sync .gitignore: {}", e));
     }
 
-    println!("Initialized vault for {}", project_dir.display());
-    println!("  Vault:       {}", vault.path.display());
-    println!("  Sentinel ID: {}", vault.sentinel_id);
+    output::action("Initialized vault for", &project_dir.display());
+    output::detail(&format!("Vault:       {}", vault.path.display()));
+    output::detail(&format!("Sentinel ID: {}", vault.sentinel_id));
     Ok(())
 }
 
@@ -725,13 +728,13 @@ fn handle_init_reset(
     let vault_path = vault.as_ref().map(|v| v.path.clone());
 
     // Confirm before reset
-    println!("This will:");
-    println!("  - Restore all guarded files to project");
-    println!("  - Remove .envrc symlink");
+    output::header("This will:");
+    output::detail(&"- Restore all guarded files to project");
+    output::detail(&"- Remove .envrc symlink");
     if let Some(ref path) = vault_path {
-        println!("  - Leave vault directory at {}", path.display());
+        output::detail(&format!("- Leave vault directory at {}", path.display()));
     }
-    print!("Continue? [y/N] ");
+    output::prompt(&"Continue? [y/N]");
     std::io::Write::flush(&mut std::io::stdout()).ok();
 
     let mut input = String::new();
@@ -743,7 +746,7 @@ fn handle_init_reset(
     })?;
 
     if !input.trim().eq_ignore_ascii_case("y") {
-        println!("Aborted.");
+        output::info(&"Aborted.");
         return Ok(());
     }
 
@@ -751,13 +754,13 @@ fn handle_init_reset(
         rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
     })?;
 
-    println!("Reset vault for {}", project_dir.display());
-    println!("  Restored {} guarded file(s)", restored_count);
-    println!("  Removed .envrc symlink");
+    output::action("Reset vault for", &project_dir.display());
+    output::detail(&format!("Restored {} guarded file(s)", restored_count));
+    output::detail(&"Removed .envrc symlink");
     if let Some(path) = vault_path {
         println!();
-        println!("Note: Vault directory remains at {}", path.display());
-        println!("      Delete manually if no longer needed.");
+        output::info(&format!("Note: Vault directory remains at {}", path.display()));
+        output::info(&"      Delete manually if no longer needed.");
     }
     Ok(())
 }
@@ -775,9 +778,9 @@ fn handle_init_reconnect(
         rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
     })?;
 
-    println!("Reconnected {} to vault", project_dir.display());
-    println!("  Vault:       {}", vault.path.display());
-    println!("  Sentinel ID: {}", vault.sentinel_id);
+    output::action("Reconnected", &format!("{} to vault", project_dir.display()));
+    output::detail(&format!("Vault:       {}", vault.path.display()));
+    output::detail(&format!("Sentinel ID: {}", vault.sentinel_id));
     Ok(())
 }
 
@@ -795,8 +798,8 @@ fn handle_guard(
             let guarded = service.guard(&file, absolute).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
-            println!("Guarded: {}", file.display());
-            println!("  Vault: {}", guarded.vault_path.display());
+            output::action("Guarded", &file.display());
+            output::detail(&format!("Vault: {}", guarded.vault_path.display()));
             Ok(())
         }
         GuardCommands::List => {
@@ -810,24 +813,24 @@ fn handle_guard(
                 Some(v) => {
                     let guarded_dir = v.path.join("guarded");
                     if !guarded_dir.exists() {
-                        println!("No guarded files");
+                        output::info(&"No guarded files");
                         return Ok(());
                     }
 
-                    println!("Guarded files in {}:", project_dir.display());
+                    output::header(&format!("Guarded files in {}:", project_dir.display()));
                     for entry in walkdir::WalkDir::new(&guarded_dir)
                         .into_iter()
                         .filter_map(|e| e.ok())
                         .filter(|e| e.file_type().is_file())
                     {
                         if let Ok(rel) = entry.path().strip_prefix(&guarded_dir) {
-                            println!("  {}", rel.display());
+                            output::detail(&rel.display());
                         }
                     }
                     Ok(())
                 }
                 None => {
-                    println!("Vault not initialized for {}", project_dir.display());
+                    output::info(&format!("Vault not initialized for {}", project_dir.display()));
                     Ok(())
                 }
             }
@@ -836,7 +839,7 @@ fn handle_guard(
             service.unguard(&file).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
-            println!("Restored: {}", file.display());
+            output::action("Restored", &file.display());
             Ok(())
         }
     }
@@ -852,7 +855,7 @@ fn handle_info(
     let settings = Arc::new(settings.clone());
     let service = VaultService::new(fs, settings);
 
-    println!("Project: {}", project_dir.display());
+    output::header(&format!("Project: {}", project_dir.display()));
 
     let vault = service.get(&project_dir).map_err(|e| {
         rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
@@ -860,8 +863,8 @@ fn handle_info(
 
     match vault {
         Some(v) => {
-            println!("Vault:   {}", v.path.display());
-            println!("ID:      {}", v.sentinel_id);
+            output::info(&format!("Vault:   {}", v.path.display()));
+            output::info(&format!("ID:      {}", v.sentinel_id));
 
             // Count guarded files
             let guarded_dir = v.path.join("guarded");
@@ -871,15 +874,15 @@ fn handle_info(
                     .filter_map(|e| e.ok())
                     .filter(|e| e.file_type().is_file())
                     .count();
-                println!("Guarded: {} files", count);
+                output::info(&format!("Guarded: {} files", count));
             } else {
-                println!("Guarded: 0 files");
+                output::info(&"Guarded: 0 files");
             }
         }
         None => {
-            println!("Vault:   (not initialized)");
+            output::info(&"Vault:   (not initialized)");
             println!();
-            println!("Run 'rsenv init' to create a vault for this project.");
+            output::info(&"Run 'rsenv init' to create a vault for this project.");
         }
     }
 
@@ -918,51 +921,51 @@ fn handle_sops(
     match command {
         SopsCommands::Encrypt { dir, global } => {
             let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &settings.vault_base_dir)?;
-            println!("Encrypting in: {}", base_dir.display());
+            output::header(&format!("Encrypting in: {}", base_dir.display()));
             let encrypted = service.encrypt_all(Some(&base_dir)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
             if encrypted.is_empty() {
-                println!("No files to encrypt");
+                output::info(&"No files to encrypt");
             } else {
-                println!("Encrypted {} files:", encrypted.len());
+                output::info(&format!("Encrypted {} files:", encrypted.len()));
                 for path in &encrypted {
-                    println!("  {}", path.display());
+                    output::detail(&path.display());
                 }
             }
             Ok(())
         }
         SopsCommands::Decrypt { dir, global } => {
             let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &settings.vault_base_dir)?;
-            println!("Decrypting in: {}", base_dir.display());
+            output::header(&format!("Decrypting in: {}", base_dir.display()));
             let decrypted = service.decrypt_all(Some(&base_dir)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
             if decrypted.is_empty() {
-                println!("No files to decrypt");
+                output::info(&"No files to decrypt");
             } else {
-                println!("Decrypted {} files:", decrypted.len());
+                output::info(&format!("Decrypted {} files:", decrypted.len()));
                 for path in &decrypted {
-                    println!("  {}", path.display());
+                    output::detail(&path.display());
                 }
             }
             Ok(())
         }
         SopsCommands::Clean { dir, global } => {
             let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &settings.vault_base_dir)?;
-            println!("Cleaning in: {}", base_dir.display());
+            output::header(&format!("Cleaning in: {}", base_dir.display()));
             let deleted = service.clean(Some(&base_dir)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
             if deleted.is_empty() {
-                println!("No plaintext files to clean");
+                output::info(&"No plaintext files to clean");
             } else {
-                println!("Deleted {} plaintext files:", deleted.len());
+                output::info(&format!("Deleted {} plaintext files:", deleted.len()));
                 for path in &deleted {
-                    println!("  {}", path.display());
+                    output::detail(&path.display());
                 }
             }
             Ok(())
@@ -973,29 +976,29 @@ fn handle_sops(
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
-            println!("SOPS Status for: {}", base_dir.display());
+            output::header(&format!("SOPS Status for: {}", base_dir.display()));
             println!();
 
             if !status.pending_encrypt.is_empty() {
-                println!("Pending encryption ({}):", status.pending_encrypt.len());
+                output::info(&format!("Pending encryption ({}):", status.pending_encrypt.len()));
                 for path in &status.pending_encrypt {
-                    println!("  {}", path.display());
+                    output::detail(&path.display());
                 }
                 println!();
             }
 
             if !status.encrypted.is_empty() {
-                println!("Already encrypted ({}):", status.encrypted.len());
+                output::info(&format!("Already encrypted ({}):", status.encrypted.len()));
                 for path in &status.encrypted {
-                    println!("  {}", path.display());
+                    output::detail(&path.display());
                 }
                 println!();
             }
 
             if !status.pending_clean.is_empty() {
-                println!("Pending clean ({}):", status.pending_clean.len());
+                output::info(&format!("Pending clean ({}):", status.pending_clean.len()));
                 for path in &status.pending_clean {
-                    println!("  {}", path.display());
+                    output::detail(&path.display());
                 }
             }
 
@@ -1003,7 +1006,7 @@ fn handle_sops(
                 && status.encrypted.is_empty()
                 && status.pending_clean.is_empty()
             {
-                println!("  No matching files found");
+                output::detail(&"No matching files found");
             }
 
             Ok(())
@@ -1035,43 +1038,45 @@ fn handle_sops(
                 .unwrap_or(false);
 
             if !global_needs_sync && !vault_needs_sync {
-                println!("✓ All gitignore files are in sync with config");
+                output::success("All gitignore files are in sync with config");
                 return Ok(());
             }
 
             // Show what would change
             if global_needs_sync {
-                println!("Global gitignore ({}):", status.global_path.display());
+                output::info(&format!("Global gitignore ({}):", status.global_path.display()));
                 for pattern in &status.global_diff.to_add {
-                    println!("  + {}", pattern);
+                    output::diff_add(pattern);
                 }
                 for pattern in &status.global_diff.to_remove {
-                    println!("  - {}", pattern);
+                    output::diff_remove(pattern);
                 }
             }
 
             if let Some(vault_status) = &status.vault {
                 if !vault_status.diff.in_sync {
-                    println!("\nPer-vault gitignore ({}):", vault_status.path.display());
+                    println!();
+                    output::info(&format!("Per-vault gitignore ({}):", vault_status.path.display()));
                     for pattern in &vault_status.diff.to_add {
-                        println!("  + {}", pattern);
+                        output::diff_add(pattern);
                     }
                     for pattern in &vault_status.diff.to_remove {
-                        println!("  - {}", pattern);
+                        output::diff_remove(pattern);
                     }
                 }
             }
 
             // Prompt for confirmation unless --yes
             if !yes {
-                print!("\nUpdate gitignore? [Y/n] ");
+                println!();
+                output::prompt(&"Update gitignore? [Y/n]");
                 use std::io::Write;
                 std::io::stdout().flush().unwrap();
                 let mut input = String::new();
                 std::io::stdin().read_line(&mut input).unwrap();
                 let input = input.trim().to_lowercase();
                 if !input.is_empty() && input != "y" && input != "yes" {
-                    println!("Aborted");
+                    output::info(&"Aborted");
                     return Ok(());
                 }
             }
@@ -1085,14 +1090,14 @@ fn handle_sops(
             if !global_diff.in_sync || global_diff.to_add.is_empty() && global_diff.to_remove.is_empty() {
                 // Was already in sync or just synced
             }
-            println!("✓ Global gitignore updated: {}", status.global_path.display());
+            output::success(&format!("Global gitignore updated: {}", status.global_path.display()));
 
             if let Some(_vault_diff) = vault_diff {
                 if let Some(vault_status) = &status.vault {
-                    println!(
-                        "✓ Per-vault gitignore updated: {}",
+                    output::success(&format!(
+                        "Per-vault gitignore updated: {}",
                         vault_status.path.display()
-                    );
+                    ));
                 }
             }
 
@@ -1115,41 +1120,41 @@ fn handle_sops(
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
-            println!("Gitignore Status:");
+            output::header("Gitignore Status:");
             println!();
 
             // Global status
-            println!("Global ({}):", status.global_path.display());
+            output::info(&format!("Global ({}):", status.global_path.display()));
             if status.global_diff.in_sync {
-                println!("  ✓ In sync with config");
+                output::success_detail("In sync with config");
             } else {
-                println!("  ✗ Out of sync:");
+                output::failure("Out of sync:");
                 for pattern in &status.global_diff.to_add {
-                    println!("    + {} (missing)", pattern);
+                    println!("    {} {} (missing)", "+".green(), pattern);
                 }
                 for pattern in &status.global_diff.to_remove {
-                    println!("    - {} (extra)", pattern);
+                    println!("    {} {} (extra)", "-".red(), pattern);
                 }
             }
 
             // Vault status
             if let Some(vault_status) = &status.vault {
                 println!();
-                println!("Per-vault ({}):", vault_status.path.display());
+                output::info(&format!("Per-vault ({}):", vault_status.path.display()));
                 if vault_status.diff.in_sync {
-                    println!("  ✓ In sync with vault-local config");
+                    output::success_detail("In sync with vault-local config");
                 } else {
-                    println!("  ✗ Out of sync:");
+                    output::failure("Out of sync:");
                     for pattern in &vault_status.diff.to_add {
-                        println!("    + {} (missing)", pattern);
+                        println!("    {} {} (missing)", "+".green(), pattern);
                     }
                     for pattern in &vault_status.diff.to_remove {
-                        println!("    - {} (extra)", pattern);
+                        println!("    {} {} (extra)", "-".red(), pattern);
                     }
                 }
             } else if !global {
                 println!();
-                println!("Per-vault: N/A (no vault-local config)");
+                output::info(&"Per-vault: N/A (no vault-local config)");
             }
 
             Ok(())
@@ -1173,24 +1178,24 @@ fn handle_sops(
                 })?;
 
             if global_cleaned {
-                println!(
-                    "✓ Removed rsenv-managed section from global gitignore: {}",
+                output::success(&format!(
+                    "Removed rsenv-managed section from global gitignore: {}",
                     gitignore_service.global_gitignore_path().display()
-                );
+                ));
             } else {
-                println!("Global gitignore: no managed section to remove");
+                output::info(&"Global gitignore: no managed section to remove");
             }
 
             if !global {
                 if vault_cleaned {
                     if let Some(vd) = vault_dir {
-                        println!(
-                            "✓ Removed rsenv-managed section from per-vault gitignore: {}",
+                        output::success(&format!(
+                            "Removed rsenv-managed section from per-vault gitignore: {}",
                             gitignore_service.vault_gitignore_path(&vd).display()
-                        );
+                        ));
                     }
                 } else {
-                    println!("Per-vault gitignore: no managed section to remove");
+                    output::info(&"Per-vault gitignore: no managed section to remove");
                 }
             }
 
@@ -1221,13 +1226,13 @@ fn handle_swap(
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
-            println!("Swapped in {} files:", swapped.len());
+            output::info(&format!("Swapped in {} files:", swapped.len()));
             for file in &swapped {
-                println!(
-                    "  {} <- {}",
+                output::detail(&format!(
+                    "{} <- {}",
                     file.project_path.display(),
                     file.vault_path.display()
-                );
+                ));
             }
             Ok(())
         }
@@ -1240,9 +1245,9 @@ fn handle_swap(
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
-            println!("Swapped out {} files:", swapped.len());
+            output::info(&format!("Swapped out {} files:", swapped.len()));
             for file in &swapped {
-                println!("  {} (restored original)", file.project_path.display());
+                output::detail(&format!("{} (restored original)", file.project_path.display()));
             }
             Ok(())
         }
@@ -1255,13 +1260,13 @@ fn handle_swap(
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
-            println!("Initialized {} files in vault:", initialized.len());
+            output::info(&format!("Initialized {} files in vault:", initialized.len()));
             for file in &initialized {
-                println!(
-                    "  {} -> {}",
+                output::detail(&format!(
+                    "{} -> {}",
                     file.project_path.display(),
                     file.vault_path.display()
-                );
+                ));
             }
             Ok(())
         }
@@ -1271,17 +1276,17 @@ fn handle_swap(
             })?;
 
             if status.is_empty() {
-                println!("No swappable files found");
+                output::info(&"No swappable files found");
                 return Ok(());
             }
 
-            println!("Swap Status:");
+            output::header("Swap Status:");
             for file in &status {
                 let state_str = match &file.state {
                     rsenv::domain::SwapState::Out => "out".to_string(),
                     rsenv::domain::SwapState::In { hostname } => format!("in ({})", hostname),
                 };
-                println!("  {} [{}]", file.project_path.display(), state_str);
+                output::detail(&format!("{} [{}]", file.project_path.display(), state_str));
             }
             Ok(())
         }
@@ -1293,11 +1298,11 @@ fn handle_swap(
             })?;
 
             if processed.is_empty() {
-                println!("No projects with active swaps found");
+                output::info(&"No projects with active swaps found");
             } else {
-                println!("Swapped out files in {} projects:", processed.len());
+                output::info(&format!("Swapped out files in {} projects:", processed.len()));
                 for dir in &processed {
-                    println!("  {}", dir.display());
+                    output::detail(&dir.display());
                 }
             }
             Ok(())
@@ -1311,9 +1316,9 @@ fn handle_swap(
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
-            println!("Deleted {} files from swap:", deleted.len());
+            output::info(&format!("Deleted {} files from swap:", deleted.len()));
             for file in &deleted {
-                println!("  {}", file.project_path.display());
+                output::detail(&file.project_path.display());
             }
             Ok(())
         }

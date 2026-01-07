@@ -116,10 +116,28 @@ Your existing `.env` files require no modification.
 
 Vault features are optional. Use rsenv purely for environment hierarchy management by sticking to `rsenv env` commands.
 
+### Terminal Coloring
+
+Semantic color output for improved readability:
+
+| Element | Color |
+|---------|-------|
+| Errors | Red (bold) |
+| Warnings | Yellow |
+| Success (✓) | Green |
+| Failures (✗) | Red |
+| Actions | Green |
+| Headers | Cyan (bold) |
+| Diff additions (+) | Green |
+| Diff removals (-) | Red |
+
+Respects `NO_COLOR`, `CLICOLOR`, and `CLICOLOR_FORCE` environment variables per [no-color.org](https://no-color.org) standard.
+
 ## Internal Improvements
 
 - **Architecture**: Layered error handling (DomainError -> ApplicationError -> InfraError -> CliError) with `thiserror`
 - **Testability**: Traits at I/O boundaries (`FileSystem`, `CommandRunner`, `Clipboard`)
+- **CLI Output**: Centralized output module with semantic coloring functions
 - **Documentation**: Comprehensive wiki-style documentation under `docs/`
 - **Development**: Pre-commit hooks for `cargo fmt`, `cargo clippy`, `cargo check`
 
