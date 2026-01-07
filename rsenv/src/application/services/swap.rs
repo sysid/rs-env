@@ -358,11 +358,12 @@ impl SwapService {
                 .with_path_context("create sentinel copy of", &vault_file)?;
 
             // 4. Backup original to VAULT (if exists)
+            // Use move_path for cross-device support (vault may be on different FS)
             let backup_path = Self::get_backup_path(&swap_dir, relative);
             if self.fs.exists(&project_file) {
-                self.fs.rename(&project_file, &backup_path).map_err(|e| {
+                self.fs.move_path(&project_file, &backup_path).map_err(|e| {
                     // Cleanup sentinel on failure
-                    let _ = self.fs.remove_file(&sentinel_path);
+                    let _ = self.fs.remove_any(&sentinel_path);
                     ApplicationError::OperationFailed {
                         context: format!(
                             "backup {} to {}",
@@ -375,12 +376,12 @@ impl SwapService {
             }
 
             // 5. MOVE vault content to project (vault file removed)
-            self.fs.rename(&vault_file, &project_file).map_err(|e| {
+            self.fs.move_path(&vault_file, &project_file).map_err(|e| {
                 // Rollback: restore backup, remove sentinel
                 if self.fs.exists(&backup_path) {
-                    let _ = self.fs.rename(&backup_path, &project_file);
+                    let _ = self.fs.move_path(&backup_path, &project_file);
                 }
-                let _ = self.fs.remove_file(&sentinel_path);
+                let _ = self.fs.remove_any(&sentinel_path);
                 ApplicationError::OperationFailed {
                     context: format!(
                         "move {} to {}",
@@ -485,11 +486,13 @@ impl SwapService {
                     }
 
                     // 1. MOVE modified project content back to vault (captures changes!)
-                    if self.fs.exists(&project_file) {
+                    // Use move_path for cross-device support (vault may be on different FS)
+                    let project_existed = self.fs.exists(&project_file);
+                    if project_existed {
                         self.fs
                             .ensure_parent(&vault_file)
                             .with_path_context("create vault parent for", &vault_file)?;
-                        self.fs.rename(&project_file, &vault_file).map_err(|e| {
+                        self.fs.move_path(&project_file, &vault_file).map_err(|e| {
                             ApplicationError::OperationFailed {
                                 context: format!(
                                     "move {} to {}",
@@ -506,16 +509,20 @@ impl SwapService {
 
                     // 2. Restore original from backup in VAULT
                     if self.fs.exists(&backup_path) {
-                        self.fs.rename(&backup_path, &project_file).map_err(|e| {
-                            ApplicationError::OperationFailed {
+                        if let Err(e) = self.fs.move_path(&backup_path, &project_file) {
+                            // Rollback: move vault content back to project
+                            if project_existed {
+                                let _ = self.fs.move_path(&vault_file, &project_file);
+                            }
+                            return Err(ApplicationError::OperationFailed {
                                 context: format!(
                                     "restore {} from {}",
                                     project_file.display(),
                                     backup_path.display()
                                 ),
                                 source: Box::new(e),
-                            }
-                        })?;
+                            });
+                        }
                     }
 
                     // 3. Remove sentinel from VAULT (file or directory)
@@ -633,7 +640,8 @@ impl SwapService {
                 .with_path_context("create vault parent for", &vault_file)?;
 
             // Move project to vault (no sentinel, no backup)
-            self.fs.rename(&project_file, &vault_file).map_err(|e| {
+            // Use move_path for cross-device support (vault may be on different FS)
+            self.fs.move_path(&project_file, &vault_file).map_err(|e| {
                 ApplicationError::OperationFailed {
                     context: format!(
                         "move {} to {}",

@@ -65,6 +65,12 @@ pub trait FileSystem: Send + Sync {
 
     /// Create parent directories if needed.
     fn ensure_parent(&self, path: &Path) -> io::Result<()>;
+
+    /// Move file or directory, with fallback for cross-device moves.
+    ///
+    /// Tries atomic rename first. If that fails with EXDEV (cross-device link),
+    /// falls back to copy + delete. This matches rplc's `_move_path` behavior.
+    fn move_path(&self, from: &Path, to: &Path) -> io::Result<()>;
 }
 
 /// External command runner abstraction.
@@ -239,6 +245,28 @@ impl FileSystem for RealFileSystem {
             }
         }
         Ok(())
+    }
+
+    fn move_path(&self, from: &Path, to: &Path) -> io::Result<()> {
+        match std::fs::rename(from, to) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // EXDEV = 18 on Unix (cross-device link not permitted)
+                #[cfg(unix)]
+                const EXDEV: i32 = 18;
+                #[cfg(windows)]
+                const EXDEV: i32 = 17; // ERROR_NOT_SAME_DEVICE
+
+                if e.raw_os_error() == Some(EXDEV) {
+                    // Fallback: copy then delete (not atomic, but works cross-device)
+                    self.copy_any(from, to)?;
+                    self.remove_any(from)?;
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            }
+        }
     }
 }
 

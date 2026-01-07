@@ -1443,3 +1443,60 @@ fn given_directory_in_vault_when_delete_then_removes_entire_directory() {
     assert!(!vault_config.exists(), "vault config dir should be deleted");
     assert!(!backup_dir.exists(), "backup dir should be deleted");
 }
+
+// ============================================================
+// move_path() tests (FileSystem trait)
+// ============================================================
+
+#[test]
+fn given_file_when_move_path_then_moves_atomically() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let src = temp.path().join("source.txt");
+    let dst = temp.path().join("dest.txt");
+    std::fs::write(&src, "test content").unwrap();
+
+    let fs = RealFileSystem;
+
+    // Act
+    fs.move_path(&src, &dst).unwrap();
+
+    // Assert
+    assert!(!src.exists(), "source should be removed");
+    assert!(dst.exists(), "destination should exist");
+    assert_eq!(
+        std::fs::read_to_string(&dst).unwrap(),
+        "test content",
+        "content should be preserved"
+    );
+}
+
+#[test]
+fn given_directory_when_move_path_then_moves_entire_tree() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let src = temp.path().join("srcdir");
+    let dst = temp.path().join("dstdir");
+    std::fs::create_dir_all(src.join("nested")).unwrap();
+    std::fs::write(src.join("file.txt"), "root file").unwrap();
+    std::fs::write(src.join("nested/inner.txt"), "nested file").unwrap();
+
+    let fs = RealFileSystem;
+
+    // Act
+    fs.move_path(&src, &dst).unwrap();
+
+    // Assert
+    assert!(!src.exists(), "source dir should be removed");
+    assert!(dst.exists(), "destination dir should exist");
+    assert_eq!(
+        std::fs::read_to_string(dst.join("file.txt")).unwrap(),
+        "root file"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dst.join("nested/inner.txt")).unwrap(),
+        "nested file"
+    );
+}
+
+use rsenv::infrastructure::traits::FileSystem;

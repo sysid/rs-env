@@ -451,7 +451,7 @@ impl VaultService {
     /// Create default environment files in the envs subdirectory.
     fn create_default_env_files(&self, vault_dir: &Path) -> ApplicationResult<()> {
         let envs_dir = vault_dir.join("envs");
-        for env in ["local", "test", "int", "prod"] {
+        for env in ["none", "local", "test", "int", "prod"] {
             let path = envs_dir.join(format!("{}.env", env));
             let content = format!("export RUN_ENV=\"{}\"\n", env);
             self.fs
