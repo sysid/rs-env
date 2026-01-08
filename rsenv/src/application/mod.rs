@@ -2,6 +2,7 @@
 //!
 //! This layer orchestrates domain logic and depends on I/O boundary traits.
 
+pub mod dotfile;
 pub mod envrc;
 pub mod error;
 pub mod error_ext;

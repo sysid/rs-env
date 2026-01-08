@@ -13,28 +13,28 @@
 - environment configurations are not DRY, they share variables, often follow even a hierarchy
   (globlal -> company -> region -> stage)
 
-<img src="doc/illustration.png" alt="rsenv illustration" width="100%">
-
 **Solution:**
-1. File/directory overrides: when work starts swap worksapce data in, after replace with
-   original files, keep your personal changes in separate repo (vault)
-2. Model environments as hierarchical tree and keep it DRY
+1. File/directory overrides: when work starts swap workspace data in, when finished replace with
+   originals, keep your personal data separate (vault)
+2. Model environment variable configs as trees and keep it DRY
 
 **Benefit:**
-- Version conrolled personal workspace per project with custom secure configuration
-- Only footprint in the original repo is **one symlink** to link the project and your workspace
+- Personal project specific workspace (can have its own repo)
+- Minimal footprint in original project: **one symlink** to link the project and workspace
   (.envrc)
 
-This is a complete rewrite of V1 with 100% functional compatibility and a lot of new features.
+<img src="doc/illustration.png" alt="rsenv illustration" width="100%">
+
+This is a complete rewrite of V1 with 100% functional compatibility and new features.
 
 
 ## Features
 
 - **Hierarchical env files** - Link files with `# rsenv: parent.env`, children override parents
 - **Vault storage** - Move sensitive files outside your project, replaced by symlinks
-- **File swapping** - Overwrite files with personal versions for the duration of your work-session
+- **File swapping** - Swap files with personal versions for the duration of the work-session
 - **SOPS encryption** - Encrypt sensitive files in the vault with GPG or Age
-- **Shell integration** - Works seamlessly with direnv
+- **Shell integration** - Works seamlessly with [direnv9(https://direnv.net/)
 
 [See all features in the wiki](https://github.com/sysid/rs-env/wiki)
 

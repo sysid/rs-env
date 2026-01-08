@@ -1100,3 +1100,114 @@ fn given_envrc_exists_as_file_when_reconnect_then_returns_error() {
     let err = result.unwrap_err().to_string();
     assert!(err.contains("cannot overwrite"));
 }
+
+// ============================================================
+// Dot-file neutralization tests for guard/unguard
+// ============================================================
+
+#[test]
+fn given_dotfile_when_guard_then_neutralizes_in_vault() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    // Create a .gitignore file
+    let gitignore = project_dir.join(".gitignore");
+    std::fs::write(&gitignore, "*.local\n*.tmp\n").unwrap();
+
+    let settings = Arc::new(test_settings(vault_base));
+    let fs = Arc::new(RealFileSystem);
+    let service = VaultService::new(fs, settings);
+    let vault = service.init(&project_dir, false).unwrap();
+
+    // Act
+    let guarded = service.guard(&gitignore, false).unwrap();
+
+    // Assert - vault file should be neutralized (dot.gitignore, not .gitignore)
+    let vault_gitignore = vault.path.join("guarded").join("dot.gitignore");
+    assert!(
+        vault_gitignore.exists(),
+        "vault should have dot.gitignore (neutralized)"
+    );
+    assert!(
+        !vault.path.join("guarded").join(".gitignore").exists(),
+        "vault should NOT have bare .gitignore"
+    );
+
+    // Content should be preserved
+    let content = std::fs::read_to_string(&vault_gitignore).unwrap();
+    assert!(content.contains("*.local"), "content should be preserved");
+
+    // Project symlink should still be named .gitignore
+    assert!(guarded.project_path.is_symlink());
+    assert_eq!(
+        guarded.project_path.file_name().unwrap(),
+        ".gitignore",
+        "project symlink should keep original name"
+    );
+}
+
+#[test]
+fn given_guarded_dotfile_when_unguard_then_restores_original_name() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    // Create a .eslintrc file
+    let eslintrc = project_dir.join(".eslintrc");
+    std::fs::write(&eslintrc, r#"{"extends": "standard"}"#).unwrap();
+
+    let settings = Arc::new(test_settings(vault_base));
+    let fs = Arc::new(RealFileSystem);
+    let service = VaultService::new(fs, settings);
+    let _vault = service.init(&project_dir, false).unwrap();
+
+    // Guard the file
+    let guarded = service.guard(&eslintrc, false).unwrap();
+
+    // Act - unguard
+    service.unguard(&guarded.project_path).unwrap();
+
+    // Assert - file restored with original name
+    assert!(!eslintrc.is_symlink());
+    assert!(eslintrc.is_file());
+    assert_eq!(eslintrc.file_name().unwrap(), ".eslintrc");
+    let content = std::fs::read_to_string(&eslintrc).unwrap();
+    assert!(content.contains("standard"), "content should be preserved");
+}
+
+#[test]
+fn given_dotfile_in_subdir_when_guard_then_neutralizes_path() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    let project_dir = temp.path().join("myproject");
+    let subdir = project_dir.join(".hidden").join("config");
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    // Create a file in a hidden directory
+    let config = subdir.join(".secret");
+    std::fs::write(&config, "secret=value\n").unwrap();
+
+    let settings = Arc::new(test_settings(vault_base));
+    let fs = Arc::new(RealFileSystem);
+    let service = VaultService::new(fs, settings);
+    let vault = service.init(&project_dir, false).unwrap();
+
+    // Act
+    let guarded = service.guard(&config, false).unwrap();
+
+    // Assert - vault path should neutralize BOTH dot-directory and dot-file
+    let vault_path = vault.path.join("guarded").join("dot.hidden/config/dot.secret");
+    assert!(
+        vault_path.exists(),
+        "vault should have dot.hidden/config/dot.secret (fully neutralized path)"
+    );
+
+    // Symlink still points to the neutralized vault location
+    assert!(guarded.project_path.is_symlink());
+}

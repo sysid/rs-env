@@ -16,6 +16,13 @@
 //!                                     config.yml.rsenv_original <- backup
 //!                                     (config.yml GONE - moved to project)
 //! ```
+//!
+//! ## Dot-file Handling
+//!
+//! Dot-files (`.gitignore`, `.envrc`, etc.) are neutralized in the vault to
+//! prevent them from having active effects. The naming convention is:
+//! - `.gitignore` → `dot.gitignore` (neutralized)
+//! - `.hidden/` → `dot.hidden/` (neutralized directory)
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,14 +30,12 @@ use std::sync::Arc;
 use tracing::debug;
 use walkdir::WalkDir;
 
+use crate::application::dotfile::{is_dotfile, neutralize_name, neutralize_path, restore_name};
 use crate::application::services::VaultService;
 use crate::application::{ApplicationError, ApplicationResult, IoResultExt};
 use crate::config::Settings;
 use crate::domain::{SwapFile, SwapState};
 use crate::infrastructure::traits::FileSystem;
-
-/// Suffix used to neutralize .gitignore files in vault
-const GITIGNORE_DISABLED_SUFFIX: &str = ".rsenv-disabled";
 
 /// File swap-in/swap-out service.
 pub struct SwapService {
@@ -125,102 +130,135 @@ impl SwapService {
     }
 
     // ============================================================
-    // .gitignore neutralization helpers
+    // Dot-file neutralization helpers
     // ============================================================
 
-    /// Rename .gitignore → .gitignore.rsenv-disabled in path.
+    /// Neutralize dot-files in path: `.foo` → `dot.foo`
     ///
-    /// For directories: recursively finds and renames all .gitignore files.
-    /// For standalone .gitignore files: renames the file directly.
+    /// For directories: recursively finds and renames all dot-files and dot-directories.
+    /// For standalone dot-files: renames the file directly.
     ///
-    /// Prevents .gitignore files in vault from affecting the vault's git behavior.
-    fn disable_gitignore_files(&self, path: &Path) -> ApplicationResult<()> {
+    /// Prevents dot-files in vault from having active effects (e.g., .gitignore
+    /// affecting git's view of vault, .envrc being sourced by direnv).
+    fn neutralize_dotfiles(&self, path: &Path) -> ApplicationResult<()> {
         if self.fs.is_dir(path) {
-            // Directory: recursively find and rename all .gitignore files
-            for entry in WalkDir::new(path)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file() && e.file_name() == ".gitignore")
-            {
-                let gitignore = entry.path();
-                let disabled =
-                    gitignore.with_file_name(format!(".gitignore{}", GITIGNORE_DISABLED_SUFFIX));
-                debug!(
-                    "disable_gitignore: {} -> {}",
-                    gitignore.display(),
-                    disabled.display()
-                );
-                self.fs
-                    .rename(gitignore, &disabled)
-                    .with_path_context("neutralize .gitignore", gitignore)?;
-            }
-        } else if path.file_name().map(|n| n == ".gitignore").unwrap_or(false)
-            && self.fs.exists(path)
-        {
-            // Standalone .gitignore file
-            let disabled = path.with_file_name(format!(".gitignore{}", GITIGNORE_DISABLED_SUFFIX));
-            debug!(
-                "disable_gitignore: {} -> {}",
-                path.display(),
-                disabled.display()
-            );
-            self.fs
-                .rename(path, &disabled)
-                .with_path_context("neutralize .gitignore", path)?;
-        }
-        Ok(())
-    }
+            // For directories, we need to handle this carefully:
+            // 1. First collect all dot-files/dirs to rename (to avoid iterator invalidation)
+            // 2. Process deepest paths first (so we don't invalidate parent paths)
+            let mut to_rename: Vec<PathBuf> = Vec::new();
 
-    /// Rename .gitignore.rsenv-disabled → .gitignore in path.
-    ///
-    /// For directories: recursively finds and restores all disabled .gitignore files.
-    /// For standalone .gitignore paths: checks if the disabled form exists and restores it.
-    ///
-    /// Restores .gitignore files when content is swapped back into the project.
-    fn enable_gitignore_files(&self, path: &Path) -> ApplicationResult<()> {
-        let disabled_name = format!(".gitignore{}", GITIGNORE_DISABLED_SUFFIX);
-
-        if self.fs.is_dir(path) {
-            // Directory: recursively find and restore all disabled .gitignore files
-            for entry in WalkDir::new(path)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.file_type().is_file() && e.file_name().to_string_lossy() == disabled_name
-                })
-            {
-                let disabled = entry.path();
-                let gitignore = disabled.with_file_name(".gitignore");
-                debug!(
-                    "enable_gitignore: {} -> {}",
-                    disabled.display(),
-                    gitignore.display()
-                );
-                self.fs
-                    .rename(disabled, &gitignore)
-                    .with_path_context("restore .gitignore", disabled)?;
+            for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+                if let Some(name) = entry.path().file_name() {
+                    if is_dotfile(name) {
+                        to_rename.push(entry.path().to_path_buf());
+                    }
+                }
             }
-        } else if path.file_name().map(|n| n == ".gitignore").unwrap_or(false) {
-            // Standalone: check if disabled form exists
-            let disabled = path.with_file_name(&disabled_name);
-            if self.fs.exists(&disabled) {
+
+            // Sort by depth (deepest first) to avoid invalidating parent paths
+            to_rename.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
+
+            for dotpath in to_rename {
+                if let Some(name) = dotpath.file_name() {
+                    let name_str = name.to_string_lossy();
+                    let neutralized_name = neutralize_name(&name_str);
+                    if neutralized_name != name_str {
+                        let neutralized = dotpath.with_file_name(&neutralized_name);
+                        debug!(
+                            "neutralize_dotfile: {} -> {}",
+                            dotpath.display(),
+                            neutralized.display()
+                        );
+                        self.fs
+                            .rename(&dotpath, &neutralized)
+                            .with_path_context("neutralize dot-file", &dotpath)?;
+                    }
+                }
+            }
+        } else if let Some(name) = path.file_name() {
+            // Standalone dot-file
+            if is_dotfile(name) && self.fs.exists(path) {
+                let name_str = name.to_string_lossy();
+                let neutralized_name = neutralize_name(&name_str);
+                let neutralized = path.with_file_name(&neutralized_name);
                 debug!(
-                    "enable_gitignore: {} -> {}",
-                    disabled.display(),
-                    path.display()
+                    "neutralize_dotfile: {} -> {}",
+                    path.display(),
+                    neutralized.display()
                 );
                 self.fs
-                    .rename(&disabled, path)
-                    .with_path_context("restore .gitignore", &disabled)?;
+                    .rename(path, &neutralized)
+                    .with_path_context("neutralize dot-file", path)?;
             }
         }
         Ok(())
     }
 
-    /// Find bare .gitignore files in vault path that should be neutralized.
+    /// Restore neutralized dot-files in path: `dot.foo` → `.foo`
     ///
-    /// Returns a list of paths to bare .gitignore files (not neutralized).
-    fn find_bare_gitignore(&self, path: &Path) -> Vec<PathBuf> {
+    /// For directories: recursively finds and restores all neutralized dot-files.
+    /// For standalone dot-file paths: checks if the neutralized form exists and restores it.
+    ///
+    /// Restores dot-files when content is swapped back into the project.
+    fn restore_dotfiles(&self, path: &Path) -> ApplicationResult<()> {
+        if self.fs.is_dir(path) {
+            // Collect all neutralized files to rename
+            let mut to_rename: Vec<PathBuf> = Vec::new();
+
+            for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+                if let Some(name) = entry.path().file_name() {
+                    let name_str = name.to_string_lossy();
+                    if name_str.starts_with("dot.") {
+                        to_rename.push(entry.path().to_path_buf());
+                    }
+                }
+            }
+
+            // Sort by depth (deepest first) to avoid invalidating parent paths
+            to_rename.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
+
+            for neutralized_path in to_rename {
+                if let Some(name) = neutralized_path.file_name() {
+                    let name_str = name.to_string_lossy();
+                    let restored_name = restore_name(&name_str);
+                    if restored_name != name_str {
+                        let restored = neutralized_path.with_file_name(&restored_name);
+                        debug!(
+                            "restore_dotfile: {} -> {}",
+                            neutralized_path.display(),
+                            restored.display()
+                        );
+                        self.fs
+                            .rename(&neutralized_path, &restored)
+                            .with_path_context("restore dot-file", &neutralized_path)?;
+                    }
+                }
+            }
+        } else if let Some(name) = path.file_name() {
+            // Standalone: check if neutralized form exists
+            if is_dotfile(name) {
+                let name_str = name.to_string_lossy();
+                let neutralized_name = neutralize_name(&name_str);
+                let neutralized = path.with_file_name(&neutralized_name);
+                if self.fs.exists(&neutralized) {
+                    debug!(
+                        "restore_dotfile: {} -> {}",
+                        neutralized.display(),
+                        path.display()
+                    );
+                    self.fs
+                        .rename(&neutralized, path)
+                        .with_path_context("restore dot-file", &neutralized)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Find bare (non-neutralized) dot-files in vault path.
+    ///
+    /// Returns a list of paths to dot-files that should be neutralized.
+    fn find_bare_dotfiles(&self, path: &Path) -> Vec<PathBuf> {
         let mut bare = Vec::new();
 
         if !self.fs.exists(path) {
@@ -228,16 +266,18 @@ impl SwapService {
         }
 
         if self.fs.is_dir(path) {
-            // Directory: recursively find all bare .gitignore files
-            for entry in WalkDir::new(path)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file() && e.file_name() == ".gitignore")
-            {
-                bare.push(entry.path().to_path_buf());
+            // Directory: recursively find all bare dot-files
+            for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+                if let Some(name) = entry.path().file_name() {
+                    if is_dotfile(name) {
+                        bare.push(entry.path().to_path_buf());
+                    }
+                }
             }
-        } else if path.file_name().map(|n| n == ".gitignore").unwrap_or(false) {
-            bare.push(path.to_path_buf());
+        } else if let Some(name) = path.file_name() {
+            if is_dotfile(name) {
+                bare.push(path.to_path_buf());
+            }
         }
 
         bare
@@ -305,37 +345,33 @@ impl SwapService {
                 }
             })?;
 
-            let vault_file = swap_dir.join(relative);
+            // Compute vault path - first try neutralized form (expected after init/swap_out)
+            let neutralized_relative = neutralize_path(relative);
+            let vault_file_neutralized = swap_dir.join(&neutralized_relative);
+            let vault_file_original = swap_dir.join(relative);
+
             debug!(
-                "swap_in: checking vault_file={}, exists={}",
-                vault_file.display(),
-                self.fs.exists(&vault_file)
+                "swap_in: checking vault_file_neutralized={}, exists={}",
+                vault_file_neutralized.display(),
+                self.fs.exists(&vault_file_neutralized)
+            );
+            debug!(
+                "swap_in: checking vault_file_original={}, exists={}",
+                vault_file_original.display(),
+                self.fs.exists(&vault_file_original)
             );
 
-            // For standalone .gitignore files, check if neutralized form exists
-            // (swap_init and swap_out rename .gitignore -> .gitignore.rsenv-disabled)
-            let vault_file = if !self.fs.exists(&vault_file)
-                && relative
-                    .file_name()
-                    .map(|n| n == ".gitignore")
-                    .unwrap_or(false)
-            {
-                let disabled =
-                    vault_file.with_file_name(format!(".gitignore{}", GITIGNORE_DISABLED_SUFFIX));
-                debug!(
-                    "swap_in: .gitignore not found, checking neutralized form={}, exists={}",
-                    disabled.display(),
-                    self.fs.exists(&disabled)
-                );
-                if self.fs.exists(&disabled) {
-                    // Will be restored by enable_gitignore_files() after move
-                    debug!("swap_in: using neutralized .gitignore form");
-                    disabled
-                } else {
-                    vault_file // Let it fail with normal error
-                }
+            // Determine which vault file to use:
+            // 1. Prefer neutralized form (dot.xxx) - this is the expected form after init
+            // 2. Fall back to original form if neutralized doesn't exist
+            //    (this allows the bare dotfile check below to catch and reject it)
+            let vault_file = if self.fs.exists(&vault_file_neutralized) {
+                vault_file_neutralized
+            } else if self.fs.exists(&vault_file_original) {
+                vault_file_original
             } else {
-                vault_file
+                // Neither exists - will fail with "no vault override" error below
+                vault_file_neutralized // Use neutralized form in error message
             };
 
             // 1. Check for existing swap (sentinel in VAULT)
@@ -371,29 +407,30 @@ impl SwapService {
                 });
             }
 
-            // 2b. Safety check: reject if bare .gitignore exists in vault
-            let bare_gitignores = self.find_bare_gitignore(&vault_file);
-            if !bare_gitignores.is_empty() {
-                let expected_renames: Vec<String> = bare_gitignores
+            // 2b. Safety check: reject if bare dot-files exist in vault
+            let bare_dotfiles = self.find_bare_dotfiles(&vault_file);
+            if !bare_dotfiles.is_empty() {
+                let expected_renames: Vec<String> = bare_dotfiles
                     .iter()
                     .map(|p| {
+                        let name = p.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+                        let neutralized = neutralize_name(&name);
                         format!(
-                            "  {} → {}{}",
+                            "  {} → {}",
                             p.display(),
-                            p.display(),
-                            GITIGNORE_DISABLED_SUFFIX
+                            p.with_file_name(&neutralized).display()
                         )
                     })
                     .collect();
                 return Err(ApplicationError::OperationFailed {
                     context: format!(
-                        "vault contains bare .gitignore files that should be neutralized.\n\
+                        "vault contains bare dot-files that should be neutralized.\n\
                          Please rename:\n{}",
                         expected_renames.join("\n")
                     ),
                     source: Box::new(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        "bare .gitignore in vault",
+                        "bare dot-file in vault",
                     )),
                 });
             }
@@ -455,12 +492,12 @@ impl SwapService {
                 }
             })?;
 
-            // 6. Restore any .gitignore files in project
+            // 6. Restore any neutralized dot-files in project
             debug!(
-                "swap_in: restoring .gitignore files in {}",
+                "swap_in: restoring dot-files in {}",
                 project_file.display()
             );
-            self.enable_gitignore_files(&project_file)?;
+            self.restore_dotfiles(&project_file)?;
 
             swapped.push(SwapFile {
                 project_path: project_file,
@@ -586,8 +623,8 @@ impl SwapService {
                             }
                         })?;
 
-                        // Neutralize any .gitignore files in vault
-                        self.disable_gitignore_files(&vault_file)?;
+                        // Neutralize any dot-files in vault
+                        self.neutralize_dotfiles(&vault_file)?;
                     }
 
                     // 2. Restore original from backup in VAULT
@@ -746,8 +783,8 @@ impl SwapService {
                 }
             })?;
 
-            // Neutralize any .gitignore files in vault
-            self.disable_gitignore_files(&vault_file)?;
+            // Neutralize any dot-files in vault
+            self.neutralize_dotfiles(&vault_file)?;
 
             initialized.push(SwapFile {
                 project_path: project_file,

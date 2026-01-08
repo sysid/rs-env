@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use tracing::debug;
 
+use crate::application::dotfile::neutralize_path;
 use crate::application::{ApplicationError, ApplicationResult, IoResultExt};
 use crate::config::Settings;
 use crate::domain::{GuardedFile, Vault};
@@ -588,8 +589,10 @@ export RSENV_VAULT={vault_var}
                     )),
                 })?;
 
-        // Create vault path with same structure
-        let vault_path = vault.path.join("guarded").join(relative_path);
+        // Create vault path with same structure, but neutralize dotfiles
+        // (.gitignore -> dot.gitignore) to prevent them from affecting vault
+        let neutralized_relative = neutralize_path(relative_path);
+        let vault_path = vault.path.join("guarded").join(&neutralized_relative);
 
         // Create parent directories in vault
         self.fs

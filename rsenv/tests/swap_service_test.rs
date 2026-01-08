@@ -938,7 +938,7 @@ fn given_marker_already_exists_when_swap_in_then_no_duplicate() {
 }
 
 // ============================================================
-// .gitignore neutralization tests
+// Dot-file neutralization tests
 // ============================================================
 
 #[test]
@@ -974,12 +974,12 @@ fn given_directory_with_gitignore_when_swap_init_then_gitignore_neutralized() {
 
     // Neutralized form should exist
     assert!(
-        vault_config.join(".gitignore.rsenv-disabled").exists(),
-        ".gitignore.rsenv-disabled should exist in vault"
+        vault_config.join("dot.gitignore").exists(),
+        "dot.gitignore should exist in vault"
     );
 
     // Content should be preserved
-    let content = std::fs::read_to_string(vault_config.join(".gitignore.rsenv-disabled")).unwrap();
+    let content = std::fs::read_to_string(vault_config.join("dot.gitignore")).unwrap();
     assert!(content.contains("*.local"), "content should be preserved");
 }
 
@@ -1029,8 +1029,8 @@ fn given_directory_with_nested_gitignore_when_swap_out_then_gitignore_neutralize
         "root .gitignore should be neutralized"
     );
     assert!(
-        vault_config.join(".gitignore.rsenv-disabled").exists(),
-        "root .gitignore.rsenv-disabled should exist"
+        vault_config.join("dot.gitignore").exists(),
+        "root dot.gitignore should exist"
     );
 
     // Nested .gitignore neutralized
@@ -1040,9 +1040,9 @@ fn given_directory_with_nested_gitignore_when_swap_out_then_gitignore_neutralize
     );
     assert!(
         vault_config
-            .join("nested/.gitignore.rsenv-disabled")
+            .join("nested/dot.gitignore")
             .exists(),
-        "nested .gitignore.rsenv-disabled should exist"
+        "nested dot.gitignore should exist"
     );
 }
 
@@ -1062,9 +1062,9 @@ fn given_neutralized_gitignore_in_vault_when_swap_in_then_gitignore_restored() {
     let vault_config_dir = swap_dir.join("config");
     std::fs::create_dir_all(&vault_config_dir).unwrap();
     std::fs::write(vault_config_dir.join("app.yml"), "override: app\n").unwrap();
-    // Note: .gitignore.rsenv-disabled (not .gitignore)
+    // Note: dot.gitignore (not .gitignore)
     std::fs::write(
-        vault_config_dir.join(".gitignore.rsenv-disabled"),
+        vault_config_dir.join("dot.gitignore"),
         "*.local\n",
     )
     .unwrap();
@@ -1084,8 +1084,8 @@ fn given_neutralized_gitignore_in_vault_when_swap_in_then_gitignore_restored() {
         ".gitignore should be restored in project"
     );
     assert!(
-        !project_subdir.join(".gitignore.rsenv-disabled").exists(),
-        ".gitignore.rsenv-disabled should NOT exist in project"
+        !project_subdir.join("dot.gitignore").exists(),
+        "dot.gitignore should NOT exist in project"
     );
 
     // Content preserved
@@ -1121,15 +1121,15 @@ fn given_standalone_gitignore_when_swap_init_then_neutralized() {
         "bare .gitignore should NOT exist in vault"
     );
     assert!(
-        swap_dir.join(".gitignore.rsenv-disabled").exists(),
-        ".gitignore.rsenv-disabled should exist in vault"
+        swap_dir.join("dot.gitignore").exists(),
+        "dot.gitignore should exist in vault"
     );
 }
 
 #[test]
 fn given_standalone_neutralized_gitignore_when_swap_in_then_gitignore_restored() {
     // This is the bug scenario: after swap_init, standalone .gitignore becomes
-    // .gitignore.rsenv-disabled in vault. swap_in should find it and restore it.
+    // dot.gitignore in vault. swap_in should find it and restore it.
     let temp = TempDir::new().unwrap();
     let (project_dir, vault_path, settings) = setup_project(&temp);
 
@@ -1142,7 +1142,7 @@ fn given_standalone_neutralized_gitignore_when_swap_in_then_gitignore_restored()
     let swap_dir = vault_path.join("swap/subdir");
     std::fs::create_dir_all(&swap_dir).unwrap();
     std::fs::write(
-        swap_dir.join(".gitignore.rsenv-disabled"),
+        swap_dir.join("dot.gitignore"),
         "override content\n",
     )
     .unwrap();
@@ -1195,7 +1195,7 @@ fn given_bare_gitignore_in_vault_when_swap_in_then_rejects_with_error() {
     assert!(result.is_err(), "swap_in should reject bare .gitignore");
     let err = result.unwrap_err().to_string();
     assert!(
-        err.contains(".gitignore") && err.contains(".rsenv-disabled"),
+        err.contains(".gitignore") && err.contains("dot.gitignore"),
         "error should mention expected rename: {}",
         err
     );
@@ -1261,7 +1261,7 @@ fn given_gitignore_full_cycle_when_swap_in_out_then_content_preserved() {
 
     let swap_dir = vault_path.join("swap/myconfig");
     assert!(
-        swap_dir.join(".gitignore.rsenv-disabled").exists(),
+        swap_dir.join("dot.gitignore").exists(),
         "after init: .gitignore should be neutralized"
     );
 
@@ -1289,13 +1289,13 @@ fn given_gitignore_full_cycle_when_swap_in_out_then_content_preserved() {
         .unwrap();
 
     assert!(
-        swap_dir.join(".gitignore.rsenv-disabled").exists(),
+        swap_dir.join("dot.gitignore").exists(),
         "after swap_out: .gitignore should be neutralized again"
     );
 
     // Verify modifications were captured
     let vault_content =
-        std::fs::read_to_string(swap_dir.join(".gitignore.rsenv-disabled")).unwrap();
+        std::fs::read_to_string(swap_dir.join("dot.gitignore")).unwrap();
     assert!(
         vault_content.contains("*.tmp"),
         "modifications should be captured in vault"
@@ -1329,7 +1329,7 @@ fn given_standalone_gitignore_full_cycle_when_init_swap_in_swap_out_then_works()
         "after init: bare .gitignore should NOT exist in vault"
     );
     assert!(
-        swap_dir.join(".gitignore.rsenv-disabled").exists(),
+        swap_dir.join("dot.gitignore").exists(),
         "after init: .gitignore should be neutralized in vault"
     );
     assert!(
@@ -1361,7 +1361,7 @@ fn given_standalone_gitignore_full_cycle_when_init_swap_in_swap_out_then_works()
         .unwrap();
 
     assert!(
-        swap_dir.join(".gitignore.rsenv-disabled").exists(),
+        swap_dir.join("dot.gitignore").exists(),
         "after swap_out: .gitignore should be neutralized in vault"
     );
     assert!(
@@ -1371,7 +1371,7 @@ fn given_standalone_gitignore_full_cycle_when_init_swap_in_swap_out_then_works()
 
     // Verify modifications were captured
     let vault_content =
-        std::fs::read_to_string(swap_dir.join(".gitignore.rsenv-disabled")).unwrap();
+        std::fs::read_to_string(swap_dir.join("dot.gitignore")).unwrap();
     assert!(
         vault_content.contains("*.tmp"),
         "modifications should be captured in vault"
