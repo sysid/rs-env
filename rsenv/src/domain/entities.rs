@@ -102,16 +102,42 @@ impl EnvFile {
 }
 
 /// Parse a single environment variable line.
-/// Returns (key, value) with quotes stripped from value.
+/// Returns (key, value) with trailing comments and quotes stripped from value.
 fn parse_env_line(line: &str) -> Option<(&str, String)> {
     let eq_pos = line.find('=')?;
     let key = line[..eq_pos].trim();
     let value = line[eq_pos + 1..].trim();
 
+    // Strip trailing comment (outside quotes) before stripping quotes
+    let value = strip_trailing_comment(value);
+
     // Strip surrounding quotes
     let value = strip_quotes(value);
 
     Some((key, value))
+}
+
+/// Strip trailing comment from a value, respecting quotes.
+/// `'value'  # comment` → `'value'`
+/// `value  # comment` → `value`
+/// `'val#ue'` → `'val#ue'` (# inside quotes is not a comment)
+fn strip_trailing_comment(s: &str) -> &str {
+    let s = s.trim();
+    let bytes = s.as_bytes();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'\'' if !in_double_quote => in_single_quote = !in_single_quote,
+            b'"' if !in_single_quote => in_double_quote = !in_double_quote,
+            b'#' if !in_single_quote && !in_double_quote => {
+                return s[..i].trim_end();
+            }
+            _ => {}
+        }
+    }
+    s
 }
 
 /// Strip surrounding quotes (single or double) from a value.

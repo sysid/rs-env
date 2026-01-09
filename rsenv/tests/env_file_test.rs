@@ -193,3 +193,60 @@ export ANOTHER=also_include
     assert!(env_file.variables.get("NOT_EXPORTED").is_none());
     assert!(env_file.variables.get("ALSO_IGNORED").is_none());
 }
+
+#[test]
+fn given_value_with_trailing_comment_when_parsing_then_comment_stripped() {
+    // Arrange - quoted value with trailing comment
+    let content = "export REDIS_PASSWORD='u7i#G!Z^^zCg75VxfnBxv8u7Mkjg'  # e2e\n";
+
+    // Act
+    let env_file = EnvFile::parse(content, PathBuf::from("/project/local.env")).unwrap();
+
+    // Assert - comment should be stripped, quotes should be stripped
+    assert_eq!(
+        env_file.variables.get("REDIS_PASSWORD"),
+        Some(&"u7i#G!Z^^zCg75VxfnBxv8u7Mkjg".to_string())
+    );
+}
+
+#[test]
+fn given_value_with_hash_inside_quotes_when_parsing_then_hash_preserved() {
+    // Arrange - hash inside quotes is NOT a comment
+    let content = "export PASSWORD='pass#word'\n";
+
+    // Act
+    let env_file = EnvFile::parse(content, PathBuf::from("/project/local.env")).unwrap();
+
+    // Assert - hash inside quotes must be preserved
+    assert_eq!(
+        env_file.variables.get("PASSWORD"),
+        Some(&"pass#word".to_string())
+    );
+}
+
+#[test]
+fn given_double_quoted_value_with_trailing_comment_when_parsing_then_comment_stripped() {
+    // Arrange - double-quoted value with trailing comment
+    let content = r#"export API_KEY="sk-secret-123"  # production key"#;
+
+    // Act
+    let env_file = EnvFile::parse(content, PathBuf::from("/project/local.env")).unwrap();
+
+    // Assert
+    assert_eq!(
+        env_file.variables.get("API_KEY"),
+        Some(&"sk-secret-123".to_string())
+    );
+}
+
+#[test]
+fn given_unquoted_value_with_trailing_comment_when_parsing_then_comment_stripped() {
+    // Arrange - unquoted value with trailing comment
+    let content = "export PORT=8080  # default port\n";
+
+    // Act
+    let env_file = EnvFile::parse(content, PathBuf::from("/project/local.env")).unwrap();
+
+    // Assert
+    assert_eq!(env_file.variables.get("PORT"), Some(&"8080".to_string()));
+}
