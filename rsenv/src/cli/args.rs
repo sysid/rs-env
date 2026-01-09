@@ -213,7 +213,11 @@ pub enum SwapCommands {
     },
 
     /// Show swap status
-    Status,
+    Status {
+        /// Show absolute paths (relative paths are default)
+        #[arg(long)]
+        absolute: bool,
+    },
 
     /// Restore all projects under dir
     AllOut {

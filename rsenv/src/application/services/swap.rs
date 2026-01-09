@@ -922,6 +922,9 @@ impl SwapService {
             }
         }
 
+        // Filter to only leaf entries (entries with no children in the list)
+        let files = filter_to_leaves(files);
+
         debug!("status: found {} swap files", files.len());
         Ok(files)
     }
@@ -1089,5 +1092,146 @@ impl SwapService {
                 context: "get hostname".to_string(),
                 source: Box::new(e),
             })
+    }
+}
+
+/// Filters swap files to only include leaf entries.
+/// An entry is a leaf if no other entry in the list has it as an ancestor.
+fn filter_to_leaves(mut files: Vec<SwapFile>) -> Vec<SwapFile> {
+    // Sort by path depth (deeper paths first) for efficient comparison
+    files.sort_by(|a, b| {
+        b.project_path
+            .components()
+            .count()
+            .cmp(&a.project_path.components().count())
+    });
+
+    let mut leaves = Vec::new();
+
+    for file in files {
+        // Check if any already-added leaf has this path as an ancestor
+        let is_ancestor = leaves.iter().any(|leaf: &SwapFile| {
+            leaf.project_path.starts_with(&file.project_path)
+                && leaf.project_path != file.project_path
+        });
+
+        if !is_ancestor {
+            leaves.push(file);
+        }
+    }
+
+    // Re-sort by path for consistent output
+    leaves.sort_by(|a, b| a.project_path.cmp(&b.project_path));
+    leaves
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_swap_file(project_path: &str) -> SwapFile {
+        SwapFile {
+            project_path: PathBuf::from(project_path),
+            vault_path: PathBuf::from(format!("/vault/swap{}", project_path)),
+            state: SwapState::Out,
+        }
+    }
+
+    #[test]
+    fn given_flat_list_when_filter_to_leaves_then_all_kept() {
+        let files = vec![
+            make_swap_file("/project/a.txt"),
+            make_swap_file("/project/b.txt"),
+            make_swap_file("/project/c.txt"),
+        ];
+
+        let result = filter_to_leaves(files);
+
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn given_parent_and_child_when_filter_to_leaves_then_only_child_kept() {
+        let files = vec![
+            make_swap_file("/project/app"),
+            make_swap_file("/project/app/config.yml"),
+        ];
+
+        let result = filter_to_leaves(files);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].project_path,
+            PathBuf::from("/project/app/config.yml")
+        );
+    }
+
+    #[test]
+    fn given_deep_hierarchy_when_filter_to_leaves_then_only_deepest_kept() {
+        let files = vec![
+            make_swap_file("/project/app"),
+            make_swap_file("/project/app/src"),
+            make_swap_file("/project/app/src/main"),
+            make_swap_file("/project/app/src/main/config.yml"),
+        ];
+
+        let result = filter_to_leaves(files);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].project_path,
+            PathBuf::from("/project/app/src/main/config.yml")
+        );
+    }
+
+    #[test]
+    fn given_mixed_hierarchy_when_filter_to_leaves_then_only_leaves_kept() {
+        // Simulates the real-world case from the bug report
+        let files = vec![
+            make_swap_file("/project/.claude"),
+            make_swap_file("/project/app"),
+            make_swap_file("/project/app/src"),
+            make_swap_file("/project/app/src/main/resources/application-local.yml"),
+            make_swap_file("/project/dockercompose"),
+            make_swap_file("/project/dockercompose/docker-compose.yml"),
+            make_swap_file("/project/CLAUDE.md"),
+        ];
+
+        let result = filter_to_leaves(files);
+
+        assert_eq!(result.len(), 4);
+        let paths: Vec<_> = result.iter().map(|f| &f.project_path).collect();
+        assert!(paths.contains(&&PathBuf::from("/project/.claude")));
+        assert!(paths.contains(&&PathBuf::from(
+            "/project/app/src/main/resources/application-local.yml"
+        )));
+        assert!(paths.contains(&&PathBuf::from(
+            "/project/dockercompose/docker-compose.yml"
+        )));
+        assert!(paths.contains(&&PathBuf::from("/project/CLAUDE.md")));
+    }
+
+    #[test]
+    fn given_sibling_dirs_with_children_when_filter_to_leaves_then_children_kept() {
+        let files = vec![
+            make_swap_file("/project/app"),
+            make_swap_file("/project/app/a.txt"),
+            make_swap_file("/project/lib"),
+            make_swap_file("/project/lib/b.txt"),
+        ];
+
+        let result = filter_to_leaves(files);
+
+        assert_eq!(result.len(), 2);
+        let paths: Vec<_> = result.iter().map(|f| &f.project_path).collect();
+        assert!(paths.contains(&&PathBuf::from("/project/app/a.txt")));
+        assert!(paths.contains(&&PathBuf::from("/project/lib/b.txt")));
+    }
+
+    #[test]
+    fn given_empty_list_when_filter_to_leaves_then_empty() {
+        let files: Vec<SwapFile> = vec![];
+        let result = filter_to_leaves(files);
+        assert!(result.is_empty());
     }
 }

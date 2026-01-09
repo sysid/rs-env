@@ -1306,7 +1306,7 @@ fn handle_swap(
             }
             Ok(())
         }
-        SwapCommands::Status => {
+        SwapCommands::Status { absolute } => {
             let status = service.status(&project_dir).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
@@ -1318,13 +1318,22 @@ fn handle_swap(
 
             output::header("Swap Status:");
             for file in &status {
+                let display_path = if absolute {
+                    file.project_path.display().to_string()
+                } else {
+                    file.project_path
+                        .strip_prefix(&project_dir)
+                        .unwrap_or(&file.project_path)
+                        .display()
+                        .to_string()
+                };
                 let state_str = match &file.state {
                     rsenv::domain::SwapState::Out => "out".normal(),
                     rsenv::domain::SwapState::In { hostname } => {
                         format!("in ({})", hostname).green()
                     }
                 };
-                println!("  {} [{}]", file.project_path.display(), state_str);
+                println!("  {} [{}]", display_path, state_str);
             }
             Ok(())
         }
