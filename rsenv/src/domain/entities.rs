@@ -202,6 +202,19 @@ pub enum SwapState {
     In { hostname: String },
 }
 
+/// Status of swaps across a single vault.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VaultSwapStatus {
+    /// Vault sentinel ID (directory name)
+    pub vault_id: String,
+    /// Vault path
+    pub vault_path: PathBuf,
+    /// Associated project path (from dot.envrc metadata)
+    pub project_path: Option<PathBuf>,
+    /// Files that are currently swapped in
+    pub active_swaps: Vec<SwapFile>,
+}
+
 /// SOPS encryption status for a directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SopsStatus {

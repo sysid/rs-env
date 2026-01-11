@@ -228,6 +228,15 @@ pub enum SwapCommands {
         base_dir: Option<PathBuf>,
     },
 
+    /// Show swap status across all vaults
+    AllStatus {
+        /// Base directory containing vaults (default: vault_base_dir from settings)
+        base_dir: Option<PathBuf>,
+        /// Silent mode: return exit code only (0=clean, 1=has active swaps)
+        #[arg(short, long)]
+        silent: bool,
+    },
+
     /// Remove files from swap management
     Delete {
         /// Files to delete

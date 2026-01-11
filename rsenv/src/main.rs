@@ -1238,7 +1238,7 @@ fn handle_swap(
     let fs = Arc::new(RealFileSystem);
     let settings = Arc::new(settings.clone());
     let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
-    let service = SwapService::new(fs, vault_service, settings);
+    let service = SwapService::new(fs, vault_service, settings.clone());
 
     match command {
         SwapCommands::In { files } => {
@@ -1347,6 +1347,46 @@ fn handle_swap(
                 ));
                 for dir in &processed {
                     output::detail(&dir.display());
+                }
+            }
+            Ok(())
+        }
+        SwapCommands::AllStatus { base_dir, silent } => {
+            let search_dir = base_dir.unwrap_or_else(|| settings.vault_base_dir.clone());
+
+            let statuses = service.status_all_vaults(&search_dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            let has_active = !statuses.is_empty();
+
+            if silent {
+                if has_active {
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+
+            if statuses.is_empty() {
+                output::info(&"No active swaps across all vaults");
+            } else {
+                output::header("Active Swaps:");
+                for status in &statuses {
+                    println!();
+                    output::info(&format!("{}:", status.vault_id));
+                    for file in &status.active_swaps {
+                        let display_path = status
+                            .project_path
+                            .as_ref()
+                            .and_then(|p| file.project_path.strip_prefix(p).ok())
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_else(|| file.project_path.clone());
+                        let hostname = match &file.state {
+                            rsenv::domain::SwapState::In { hostname } => hostname,
+                            _ => "unknown",
+                        };
+                        output::detail(&format!("{} [in ({})]", display_path.display(), hostname));
+                    }
                 }
             }
             Ok(())

@@ -34,7 +34,8 @@ use crate::application::dotfile::{is_dotfile, neutralize_name, neutralize_path, 
 use crate::application::services::VaultService;
 use crate::application::{ApplicationError, ApplicationResult, IoResultExt};
 use crate::config::Settings;
-use crate::domain::{SwapFile, SwapState};
+use crate::application::parse_rsenv_metadata;
+use crate::domain::{expand_env_vars, SwapFile, SwapState, VaultSwapStatus};
 use crate::infrastructure::traits::FileSystem;
 
 /// File swap-in/swap-out service.
@@ -971,6 +972,101 @@ impl SwapService {
 
         debug!("swap_out_all: processed {} projects", processed.len());
         Ok(processed)
+    }
+
+    /// Get swap status for all vaults in a base directory.
+    ///
+    /// Scans for vault directories (those containing `dot.envrc`) and
+    /// reports any files currently swapped in.
+    ///
+    /// # Arguments
+    /// * `vault_base_dir` - Directory containing vaults
+    ///
+    /// # Returns
+    /// Vec of VaultSwapStatus for vaults with active swaps (empty vec if all clean)
+    pub fn status_all_vaults(&self, vault_base_dir: &Path) -> ApplicationResult<Vec<VaultSwapStatus>> {
+        debug!("status_all_vaults: vault_base_dir={}", vault_base_dir.display());
+        let mut results = Vec::new();
+
+        if !self.fs.exists(vault_base_dir) {
+            debug!("status_all_vaults: vault_base_dir does not exist");
+            return Ok(results);
+        }
+
+        // Walk vault_base_dir looking for directories containing dot.envrc
+        for entry in WalkDir::new(vault_base_dir)
+            .min_depth(1)
+            .max_depth(1) // Only immediate children (vaults are direct subdirs)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_dir())
+        {
+            let vault_path = entry.path().to_path_buf();
+            let dot_envrc_path = vault_path.join("dot.envrc");
+
+            // Skip if no dot.envrc (not a valid vault)
+            if !self.fs.exists(&dot_envrc_path) {
+                debug!("status_all_vaults: skipping {} (no dot.envrc)", vault_path.display());
+                continue;
+            }
+
+            // Read and parse dot.envrc metadata
+            let content = match self.fs.read_to_string(&dot_envrc_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    debug!("status_all_vaults: failed to read {}: {}", dot_envrc_path.display(), e);
+                    continue;
+                }
+            };
+
+            let metadata = match parse_rsenv_metadata(&content) {
+                Some(m) => m,
+                None => {
+                    debug!("status_all_vaults: no valid metadata in {}", dot_envrc_path.display());
+                    continue;
+                }
+            };
+
+            let project_path = PathBuf::from(expand_env_vars(&metadata.source_dir));
+            let vault_id = vault_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            debug!(
+                "status_all_vaults: checking vault {} -> project {}",
+                vault_id,
+                project_path.display()
+            );
+
+            // Get swap status for this project
+            let status = match self.status(&project_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    debug!("status_all_vaults: failed to get status for {}: {}", project_path.display(), e);
+                    continue;
+                }
+            };
+
+            // Filter to only active swaps (SwapState::In)
+            let active_swaps: Vec<SwapFile> = status
+                .into_iter()
+                .filter(|s| matches!(s.state, SwapState::In { .. }))
+                .collect();
+
+            // Only include vaults with active swaps
+            if !active_swaps.is_empty() {
+                results.push(VaultSwapStatus {
+                    vault_id,
+                    vault_path,
+                    project_path: Some(project_path),
+                    active_swaps,
+                });
+            }
+        }
+
+        debug!("status_all_vaults: found {} vaults with active swaps", results.len());
+        Ok(results)
     }
 
     /// Delete swap files from vault (remove override and backup).

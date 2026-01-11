@@ -14,7 +14,7 @@ use tempfile::TempDir;
 
 use rsenv::application::services::{SwapService, VaultService};
 use rsenv::config::Settings;
-use rsenv::domain::SwapState;
+use rsenv::domain::{SwapState, VaultSwapStatus};
 use rsenv::infrastructure::traits::RealFileSystem;
 
 /// Helper to create test settings with custom vault_base_dir
@@ -1721,5 +1721,167 @@ fn given_dotted_hostname_when_swap_in_then_creates_correct_sentinel() {
         !old_format_sentinel.exists(),
         "old format sentinel should NOT exist at {:?}",
         old_format_sentinel
+    );
+}
+
+// ============================================================
+// status_all_vaults() tests
+// ============================================================
+
+#[test]
+fn given_no_vaults_when_status_all_vaults_then_returns_empty() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    std::fs::create_dir_all(&vault_base).unwrap();
+
+    let settings = Arc::new(test_settings(vault_base.clone()));
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let statuses = service.status_all_vaults(&vault_base).unwrap();
+
+    // Assert
+    assert!(statuses.is_empty(), "should return empty when no vaults exist");
+}
+
+#[test]
+fn given_vault_with_no_active_swaps_when_status_all_vaults_then_returns_empty() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+    let vault_base = settings.vault_base_dir.clone();
+
+    // Create vault file (but don't swap in - state is Out)
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override\n").unwrap();
+
+    // Project has original file
+    std::fs::write(project_dir.join("config.yml"), "original\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let statuses = service.status_all_vaults(&vault_base).unwrap();
+
+    // Assert - no active swaps (state is Out), so empty result
+    assert!(
+        statuses.is_empty(),
+        "should return empty when no files are swapped in"
+    );
+}
+
+#[test]
+fn given_vault_with_active_swap_when_status_all_vaults_then_returns_that_vault() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+    let vault_base = settings.vault_base_dir.clone();
+
+    let project_file = project_dir.join("config.yml");
+    std::fs::write(&project_file, "original\n").unwrap();
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Swap in to create active swap
+    service.swap_in(&project_dir, &[project_file]).unwrap();
+
+    // Act
+    let statuses = service.status_all_vaults(&vault_base).unwrap();
+
+    // Assert
+    assert_eq!(statuses.len(), 1, "should return one vault with active swap");
+    assert_eq!(statuses[0].active_swaps.len(), 1);
+    assert!(matches!(statuses[0].active_swaps[0].state, SwapState::In { .. }));
+}
+
+#[test]
+fn given_multiple_vaults_when_status_all_vaults_then_returns_only_those_with_swaps() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    std::fs::create_dir_all(&vault_base).unwrap();
+
+    let settings = Arc::new(test_settings(vault_base.clone()));
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = VaultService::new(fs.clone(), settings.clone());
+
+    // Create project 1 with active swap
+    let project1 = temp.path().join("project1");
+    std::fs::create_dir_all(&project1).unwrap();
+    let vault1 = vault_service.init(&project1, false).unwrap();
+    std::fs::write(project1.join("config.yml"), "original1\n").unwrap();
+    let swap_dir1 = vault1.path.join("swap");
+    std::fs::create_dir_all(&swap_dir1).unwrap();
+    std::fs::write(swap_dir1.join("config.yml"), "override1\n").unwrap();
+
+    // Create project 2 with NO active swap (file in vault but not swapped in)
+    let project2 = temp.path().join("project2");
+    std::fs::create_dir_all(&project2).unwrap();
+    let vault2 = vault_service.init(&project2, false).unwrap();
+    std::fs::write(project2.join("other.yml"), "original2\n").unwrap();
+    let swap_dir2 = vault2.path.join("swap");
+    std::fs::create_dir_all(&swap_dir2).unwrap();
+    std::fs::write(swap_dir2.join("other.yml"), "override2\n").unwrap();
+
+    let vault_service = Arc::new(vault_service);
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Swap in only project1's file
+    service
+        .swap_in(&project1, &[project1.join("config.yml")])
+        .unwrap();
+
+    // Act
+    let statuses = service.status_all_vaults(&vault_base).unwrap();
+
+    // Assert - only project1 should be reported (it has active swap)
+    assert_eq!(
+        statuses.len(),
+        1,
+        "should return only vaults with active swaps"
+    );
+    assert!(
+        statuses[0].vault_path.to_string_lossy().contains("project1"),
+        "should be project1's vault"
+    );
+}
+
+#[test]
+fn given_vault_without_valid_dot_envrc_when_status_all_vaults_then_skips_gracefully() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    std::fs::create_dir_all(&vault_base).unwrap();
+
+    // Create a directory that looks like a vault but has invalid dot.envrc
+    let fake_vault = vault_base.join("fake-vault-abc123");
+    std::fs::create_dir_all(&fake_vault).unwrap();
+    std::fs::write(fake_vault.join("dot.envrc"), "# not valid rsenv metadata\n").unwrap();
+
+    let settings = Arc::new(test_settings(vault_base.clone()));
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act - should not panic or error
+    let result = service.status_all_vaults(&vault_base);
+
+    // Assert - should succeed and return empty (invalid vault skipped)
+    assert!(result.is_ok(), "should not error on invalid vault");
+    assert!(
+        result.unwrap().is_empty(),
+        "should skip invalid vaults gracefully"
     );
 }
