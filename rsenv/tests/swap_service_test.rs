@@ -107,7 +107,7 @@ fn given_file_with_vault_override_when_swap_in_then_replaces_project_file() {
     );
 
     // Sentinel should be in VAULT with content (copy of vault before move)
-    let sentinel_in_vault = swap_dir.join(format!("config.yml.{}.rsenv_active", hostname));
+    let sentinel_in_vault = swap_dir.join(format!("config.yml@@{}@@rsenv_active", hostname));
     assert!(sentinel_in_vault.exists(), "sentinel should be in vault");
     let sentinel_content = std::fs::read_to_string(&sentinel_in_vault).unwrap();
     assert!(
@@ -121,7 +121,7 @@ fn given_file_with_vault_override_when_swap_in_then_replaces_project_file() {
         !wrong_backup.exists(),
         "backup should NOT be in project dir"
     );
-    let wrong_sentinel = project_dir.join(format!("config.yml.{}.rsenv_active", hostname));
+    let wrong_sentinel = project_dir.join(format!("config.yml@@{}@@rsenv_active", hostname));
     assert!(
         !wrong_sentinel.exists(),
         "sentinel should NOT be in project dir"
@@ -171,7 +171,7 @@ fn given_swapped_by_different_host_when_swap_in_then_returns_error() {
     // Create sentinel file from different host IN VAULT (correct location)
     let swap_dir = vault_path.join("swap");
     std::fs::create_dir_all(&swap_dir).unwrap();
-    let sentinel = swap_dir.join("config.yml.other-host.rsenv_active");
+    let sentinel = swap_dir.join("config.yml@@other-host@@rsenv_active");
     std::fs::write(&sentinel, "override content").unwrap();
 
     // Also need vault file for swap_in to find
@@ -245,7 +245,7 @@ fn given_swapped_file_when_swap_out_then_restores_original() {
     assert!(!backup.exists(), "backup should be removed after swap-out");
 
     // Sentinel should be removed from vault
-    let sentinel = swap_dir.join(format!("config.yml.{}.rsenv_active", hostname));
+    let sentinel = swap_dir.join(format!("config.yml@@{}@@rsenv_active", hostname));
     assert!(
         !sentinel.exists(),
         "sentinel should be removed after swap-out"
@@ -363,7 +363,7 @@ fn given_project_file_without_vault_when_swap_init_then_moves_to_vault() {
     assert!(content.contains("new: content"));
 
     // No sentinel or backup created for init
-    let sentinel = vault_path.join(format!("swap/new_config.yml.{}.rsenv_active", hostname));
+    let sentinel = vault_path.join(format!("swap/new_config.yml@@{}@@rsenv_active", hostname));
     let backup = vault_path.join("swap/new_config.yml.rsenv_original");
     assert!(!sentinel.exists(), "no sentinel for init");
     assert!(!backup.exists(), "no backup for init");
@@ -442,7 +442,7 @@ fn given_sentinel_in_vault_when_status_then_shows_swapped_in() {
         .unwrap();
 
     // Verify sentinel is in vault (not project)
-    let sentinel_in_vault = swap_dir.join(format!("config.yml.{}.rsenv_active", hostname));
+    let sentinel_in_vault = swap_dir.join(format!("config.yml@@{}@@rsenv_active", hostname));
     assert!(
         sentinel_in_vault.exists(),
         "sentinel should be in vault for status test"
@@ -555,7 +555,7 @@ fn given_nested_path_when_swap_in_then_sentinel_preserves_structure() {
     assert_eq!(swapped.len(), 1);
 
     // Sentinel should be at: vault/swap/src/main/resources/application.yml.<host>.rsenv_active
-    let sentinel = swap_dir.join(format!("application.yml.{}.rsenv_active", hostname));
+    let sentinel = swap_dir.join(format!("application.yml@@{}@@rsenv_active", hostname));
     assert!(
         sentinel.exists(),
         "sentinel should preserve nested structure in vault"
@@ -644,7 +644,7 @@ fn given_directory_in_vault_when_swap_in_then_swaps_entire_directory() {
     );
 
     // Sentinel directory should be in VAULT with content (copy of vault before move)
-    let sentinel_dir = swap_dir.join(format!("config.{}.rsenv_active", hostname));
+    let sentinel_dir = swap_dir.join(format!("config@@{}@@rsenv_active", hostname));
     assert!(
         sentinel_dir.exists(),
         "sentinel directory should be in vault"
@@ -692,7 +692,7 @@ fn given_directory_swapped_in_when_swap_out_then_restores_original() {
         .unwrap();
 
     // Verify swapped in state - check sentinel exists
-    let sentinel_dir = swap_dir.join(format!("config.{}.rsenv_active", hostname));
+    let sentinel_dir = swap_dir.join(format!("config@@{}@@rsenv_active", hostname));
     assert!(sentinel_dir.exists(), "sentinel should exist after swap in");
 
     // Act: swap out
@@ -1464,7 +1464,7 @@ fn given_swapped_in_by_other_host_when_delete_then_fails_with_that_hostname() {
     // Create sentinel from different host manually
     let swap_dir = vault_path.join("swap");
     std::fs::create_dir_all(&swap_dir).unwrap();
-    let sentinel = swap_dir.join("config.yml.other-workstation.rsenv_active");
+    let sentinel = swap_dir.join("config.yml@@other-workstation@@rsenv_active");
     std::fs::write(&sentinel, "sentinel content").unwrap();
 
     let fs = Arc::new(RealFileSystem);
@@ -1634,3 +1634,92 @@ fn given_directory_when_move_path_then_moves_entire_tree() {
 }
 
 use rsenv::infrastructure::traits::FileSystem;
+
+// ============================================================
+// Hostname with dots tests (FQDN support)
+// ============================================================
+
+#[test]
+fn given_sentinel_with_dotted_hostname_when_status_then_parses_correctly() {
+    // Arrange - simulates hostname like "MacBookAir.fritz.box"
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let dotted_hostname = "MacBookAir.fritz.box";
+
+    // Create sentinel with NEW @@ format: {base_name}@@{hostname}@@rsenv_active
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+
+    // Create sentinel as directory (simulating swapped-in directory)
+    let sentinel = swap_dir.join(format!("thoughts@@{}@@rsenv_active", dotted_hostname));
+    std::fs::create_dir_all(&sentinel).unwrap();
+    std::fs::write(sentinel.join("test.txt"), "sentinel content").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let status = service.status(&project_dir).unwrap();
+
+    // Assert - should find exactly one swapped item with correct base_name
+    assert_eq!(status.len(), 1, "should find exactly one swap entry");
+
+    let entry = &status[0];
+    assert_eq!(
+        entry.project_path,
+        project_dir.join("thoughts"),
+        "base_name should be 'thoughts', not 'thoughts.MacBookAir.fritz'"
+    );
+
+    // Verify the state contains the full hostname
+    match &entry.state {
+        SwapState::In { hostname } => {
+            assert_eq!(
+                hostname, dotted_hostname,
+                "hostname should be full FQDN '{}'",
+                dotted_hostname
+            );
+        }
+        other => panic!("expected SwapState::In, got {:?}", other),
+    }
+}
+
+#[test]
+fn given_dotted_hostname_when_swap_in_then_creates_correct_sentinel() {
+    // This test verifies that swap_in creates sentinels with @@ delimiters
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create vault file to swap in
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override: value\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let project_file = project_dir.join("config.yml");
+    service.swap_in(&project_dir, &[project_file]).unwrap();
+
+    // Assert - sentinel should use @@ format
+    let hostname = get_hostname();
+    let expected_sentinel = swap_dir.join(format!("config.yml@@{}@@rsenv_active", hostname));
+
+    assert!(
+        expected_sentinel.exists(),
+        "sentinel should exist at {:?}",
+        expected_sentinel
+    );
+
+    // Old format should NOT exist
+    let old_format_sentinel = swap_dir.join(format!("config.yml.{}.rsenv_active", hostname));
+    assert!(
+        !old_format_sentinel.exists(),
+        "old format sentinel should NOT exist at {:?}",
+        old_format_sentinel
+    );
+}

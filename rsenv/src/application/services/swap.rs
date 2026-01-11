@@ -64,7 +64,7 @@ impl SwapService {
     // ============================================================
 
     /// Get sentinel path in vault for a file.
-    /// Format: `vault/swap/<rel_path>.<hostname>.rsenv_active`
+    /// Format: `vault/swap/<rel_path>@@<hostname>@@rsenv_active`
     fn get_sentinel_path(swap_dir: &Path, relative: &Path, hostname: &str) -> PathBuf {
         let parent = swap_dir
             .join(relative)
@@ -75,7 +75,7 @@ impl SwapService {
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
-        parent.join(format!("{}.{}.rsenv_active", file_name, hostname))
+        parent.join(format!("{}@@{}@@rsenv_active", file_name, hostname))
     }
 
     /// Get backup path in vault for a file.
@@ -103,7 +103,7 @@ impl SwapService {
             return None;
         }
 
-        // Look for pattern: <filename>.<hostname>.rsenv_active
+        // Look for pattern: <filename>@@<hostname>@@rsenv_active
         // Entry can be either a file or directory (for directory swapping)
         for entry in WalkDir::new(&sentinel_dir)
             .max_depth(1)
@@ -114,14 +114,13 @@ impl SwapService {
         {
             let name = entry.file_name().to_string_lossy().to_string();
 
-            // Pattern: {base_name}.{hostname}.rsenv_active
-            if name.ends_with(".rsenv_active") && name.starts_with(&format!("{}.", base_name)) {
-                // Extract hostname: remove base_name + "." prefix and ".rsenv_active" suffix
-                let prefix_len = base_name.len() + 1; // "config.yml."
-                let suffix_len = ".rsenv_active".len();
-
-                if name.len() > prefix_len + suffix_len {
-                    let hostname = name[prefix_len..name.len() - suffix_len].to_string();
+            // Pattern: {base_name}@@{hostname}@@rsenv_active
+            let prefix = format!("{}@@", base_name);
+            if name.ends_with("@@rsenv_active") && name.starts_with(&prefix) {
+                // Extract hostname: split on @@ and take middle part
+                let parts: Vec<&str> = name.split("@@").collect();
+                if parts.len() == 3 && parts[2] == "rsenv_active" {
+                    let hostname = parts[1].to_string();
                     return Some((entry.path().to_path_buf(), hostname));
                 }
             }
@@ -831,7 +830,7 @@ impl SwapService {
                     .file_name()
                     .map(|n| {
                         let s = n.to_string_lossy();
-                        s.ends_with(".rsenv_active") || s.ends_with(".rsenv_original")
+                        s.ends_with("@@rsenv_active") || s.ends_with(".rsenv_original")
                     })
                     .unwrap_or(false)
             })
@@ -862,15 +861,13 @@ impl SwapService {
             }
 
             // Handle sentinel files/directories: extract the base name
-            if name.ends_with(".rsenv_active") {
-                // Sentinel format: <filename>.<hostname>.rsenv_active
-                // Extract <filename> by removing .<hostname>.rsenv_active suffix
-                let suffix_start = name
-                    .rfind('.')
-                    .and_then(|last_dot| name[..last_dot].rfind('.'));
+            if name.ends_with("@@rsenv_active") {
+                // Sentinel format: <filename>@@<hostname>@@rsenv_active
+                // Extract <filename> by splitting on @@
+                let parts: Vec<&str> = name.split("@@").collect();
 
-                if let Some(base_end) = suffix_start {
-                    let base_name = &name[..base_end];
+                if parts.len() == 3 && parts[2] == "rsenv_active" {
+                    let base_name = parts[0];
                     let parent = vault_path.parent().unwrap_or(&swap_dir);
                     let base_vault_path = parent.join(base_name);
 
