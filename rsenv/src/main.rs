@@ -50,6 +50,8 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
     // Determine project directory
+    // Clone for swap commands which need to distinguish "not provided" from "provided"
+    let cli_project_dir = cli.project_dir.clone();
     let project_dir = cli.project_dir.or_else(|| std::env::current_dir().ok());
 
     // Two-phase config loading:
@@ -73,7 +75,11 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
         Some(Commands::Guard { command }) => handle_guard(command, project_dir, &settings),
         Some(Commands::Info) => handle_info(project_dir, &settings),
         Some(Commands::Sops { command }) => handle_sops(command, vault_path, &settings),
-        Some(Commands::Swap { command }) => handle_swap(command, project_dir, &settings),
+        Some(Commands::Swap { command }) => {
+            // Pass cli_project_dir directly so vault-wide commands can distinguish
+            // between "not provided" (use settings.vault_base_dir) vs "provided" (override)
+            handle_swap(command, cli_project_dir, &settings)
+        }
         Some(Commands::Completion { shell }) => {
             generate_completions(shell);
             Ok(())
@@ -1230,10 +1236,14 @@ fn handle_sops(
 
 fn handle_swap(
     command: SwapCommands,
-    project_dir: Option<std::path::PathBuf>,
+    project_dir_opt: Option<std::path::PathBuf>,
     settings: &Settings,
 ) -> rsenv::cli::CliResult<()> {
-    let project_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
+    // For project commands: resolve to cwd if not provided
+    // For vault-wide commands: -C overrides vault_base_dir
+    let project_dir = project_dir_opt
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap());
 
     let fs = Arc::new(RealFileSystem);
     let settings = Arc::new(settings.clone());
@@ -1331,30 +1341,53 @@ fn handle_swap(
             }
             Ok(())
         }
-        SwapCommands::AllOut { base_dir } => {
-            let search_dir = base_dir.unwrap_or(project_dir);
-
-            let processed = service.swap_out_all(&search_dir).map_err(|e| {
+        SwapCommands::VaultOut => {
+            // Swap out all files in current project's vault
+            let swapped = service.swap_out_vault(&project_dir).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
-            if processed.is_empty() {
-                output::info(&"No projects with active swaps found");
+            if swapped.is_empty() {
+                output::info(&"No files swapped in");
             } else {
-                output::info(&format!(
-                    "Swapped out files in {} projects:",
-                    processed.len()
-                ));
-                for dir in &processed {
-                    output::detail(&dir.display());
+                output::info(&format!("Swapped out {} files:", swapped.len()));
+                for file in &swapped {
+                    output::detail(&file.project_path.display());
                 }
             }
             Ok(())
         }
-        SwapCommands::AllStatus { base_dir, silent } => {
-            let search_dir = base_dir.unwrap_or_else(|| settings.vault_base_dir.clone());
+        SwapCommands::AllOut => {
+            // Swap out all vaults: -C overrides vault_base_dir
+            let vault_base = project_dir_opt
+                .clone()
+                .unwrap_or_else(|| settings.vault_base_dir.clone());
 
-            let statuses = service.status_all_vaults(&search_dir).map_err(|e| {
+            let results = service.swap_out_all_vaults(&vault_base).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if results.is_empty() {
+                output::info(&"No active swaps across all vaults");
+            } else {
+                output::info(&format!("Swapped out files in {} vaults:", results.len()));
+                for status in &results {
+                    output::detail(&format!(
+                        "{}: {} files",
+                        status.vault_id,
+                        status.active_swaps.len()
+                    ));
+                }
+            }
+            Ok(())
+        }
+        SwapCommands::AllStatus { silent } => {
+            // Show status of all vaults: -C overrides vault_base_dir
+            let vault_base = project_dir_opt
+                .clone()
+                .unwrap_or_else(|| settings.vault_base_dir.clone());
+
+            let statuses = service.status_all_vaults(&vault_base).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 

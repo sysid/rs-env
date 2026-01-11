@@ -222,16 +222,14 @@ pub enum SwapCommands {
         absolute: bool,
     },
 
-    /// Restore all projects under dir
-    AllOut {
-        /// Base directory
-        base_dir: Option<PathBuf>,
-    },
+    /// Swap out all files in current project's vault
+    VaultOut,
 
-    /// Show swap status across all vaults
+    /// Swap out all vaults (uses -C as vault_base_dir, default: settings.vault_base_dir)
+    AllOut,
+
+    /// Show swap status across all vaults (uses -C as vault_base_dir, default: settings.vault_base_dir)
     AllStatus {
-        /// Base directory containing vaults (default: vault_base_dir from settings)
-        base_dir: Option<PathBuf>,
         /// Silent mode: return exit code only (0=clean, 1=has active swaps)
         #[arg(short, long)]
         silent: bool,

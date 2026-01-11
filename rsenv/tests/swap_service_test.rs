@@ -14,7 +14,7 @@ use tempfile::TempDir;
 
 use rsenv::application::services::{SwapService, VaultService};
 use rsenv::config::Settings;
-use rsenv::domain::{SwapState, VaultSwapStatus};
+use rsenv::domain::SwapState;
 use rsenv::infrastructure::traits::RealFileSystem;
 
 /// Helper to create test settings with custom vault_base_dir
@@ -1884,4 +1884,208 @@ fn given_vault_without_valid_dot_envrc_when_status_all_vaults_then_skips_gracefu
         result.unwrap().is_empty(),
         "should skip invalid vaults gracefully"
     );
+}
+
+// ============================================================
+// swap_out_vault() tests
+// ============================================================
+
+#[test]
+fn given_no_swapped_files_when_swap_out_vault_then_returns_empty() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create vault swap file but don't swap in (state is Out)
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override\n").unwrap();
+    std::fs::write(project_dir.join("config.yml"), "original\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let result = service.swap_out_vault(&project_dir).unwrap();
+
+    // Assert
+    assert!(result.is_empty(), "should return empty when no files swapped in");
+}
+
+#[test]
+fn given_swapped_files_when_swap_out_vault_then_swaps_all_out() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create two files in vault swap dir
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override1\n").unwrap();
+    std::fs::write(swap_dir.join("settings.yml"), "override2\n").unwrap();
+
+    // Create originals in project
+    std::fs::write(project_dir.join("config.yml"), "original1\n").unwrap();
+    std::fs::write(project_dir.join("settings.yml"), "original2\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Swap both in
+    service
+        .swap_in(
+            &project_dir,
+            &[
+                project_dir.join("config.yml"),
+                project_dir.join("settings.yml"),
+            ],
+        )
+        .unwrap();
+
+    // Act - swap out ALL via vault-out
+    let result = service.swap_out_vault(&project_dir).unwrap();
+
+    // Assert
+    assert_eq!(result.len(), 2, "should swap out both files");
+
+    // Verify files are back to original
+    let config_content = std::fs::read_to_string(project_dir.join("config.yml")).unwrap();
+    let settings_content = std::fs::read_to_string(project_dir.join("settings.yml")).unwrap();
+    assert_eq!(config_content, "original1\n");
+    assert_eq!(settings_content, "original2\n");
+}
+
+#[test]
+fn given_no_vault_when_swap_out_vault_then_returns_empty() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("no-vault-project");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    let settings = Arc::new(test_settings(temp.path().join("vaults")));
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let result = service.swap_out_vault(&project_dir).unwrap();
+
+    // Assert
+    assert!(result.is_empty(), "should return empty for project without vault");
+}
+
+// ============================================================
+// swap_out_all_vaults() tests
+// ============================================================
+
+#[test]
+fn given_no_vaults_when_swap_out_all_vaults_then_returns_empty() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    std::fs::create_dir_all(&vault_base).unwrap();
+
+    let settings = Arc::new(test_settings(vault_base.clone()));
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let results = service.swap_out_all_vaults(&vault_base).unwrap();
+
+    // Assert
+    assert!(results.is_empty(), "should return empty when no vaults");
+}
+
+#[test]
+fn given_vault_with_swapped_files_when_swap_out_all_vaults_then_swaps_out() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+    let vault_base = settings.vault_base_dir.clone();
+
+    // Create and swap in a file
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override\n").unwrap();
+    std::fs::write(project_dir.join("config.yml"), "original\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("config.yml")])
+        .unwrap();
+
+    // Verify it's swapped in
+    let status_before = service.status_all_vaults(&vault_base).unwrap();
+    assert_eq!(status_before.len(), 1, "should have one vault with swap");
+
+    // Act
+    let results = service.swap_out_all_vaults(&vault_base).unwrap();
+
+    // Assert
+    assert_eq!(results.len(), 1, "should process one vault");
+    assert_eq!(results[0].active_swaps.len(), 1, "should have swapped out one file");
+
+    // Verify it's now clean
+    let status_after = service.status_all_vaults(&vault_base).unwrap();
+    assert!(status_after.is_empty(), "should be clean after swap_out_all_vaults");
+}
+
+#[test]
+fn given_multiple_vaults_when_swap_out_all_vaults_then_swaps_out_all() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    std::fs::create_dir_all(&vault_base).unwrap();
+
+    let settings = Arc::new(test_settings(vault_base.clone()));
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = VaultService::new(fs.clone(), settings.clone());
+
+    // Create two projects with swapped files
+    let project1 = temp.path().join("project1");
+    std::fs::create_dir_all(&project1).unwrap();
+    let vault1 = vault_service.init(&project1, false).unwrap();
+    std::fs::write(project1.join("file1.yml"), "orig1\n").unwrap();
+    let swap_dir1 = vault1.path.join("swap");
+    std::fs::create_dir_all(&swap_dir1).unwrap();
+    std::fs::write(swap_dir1.join("file1.yml"), "override1\n").unwrap();
+
+    let project2 = temp.path().join("project2");
+    std::fs::create_dir_all(&project2).unwrap();
+    let vault2 = vault_service.init(&project2, false).unwrap();
+    std::fs::write(project2.join("file2.yml"), "orig2\n").unwrap();
+    let swap_dir2 = vault2.path.join("swap");
+    std::fs::create_dir_all(&swap_dir2).unwrap();
+    std::fs::write(swap_dir2.join("file2.yml"), "override2\n").unwrap();
+
+    let vault_service = Arc::new(vault_service);
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Swap in both
+    service
+        .swap_in(&project1, &[project1.join("file1.yml")])
+        .unwrap();
+    service
+        .swap_in(&project2, &[project2.join("file2.yml")])
+        .unwrap();
+
+    // Verify both swapped
+    let status_before = service.status_all_vaults(&vault_base).unwrap();
+    assert_eq!(status_before.len(), 2, "should have two vaults with swaps");
+
+    // Act
+    let results = service.swap_out_all_vaults(&vault_base).unwrap();
+
+    // Assert
+    assert_eq!(results.len(), 2, "should process both vaults");
+
+    // Verify all clean
+    let status_after = service.status_all_vaults(&vault_base).unwrap();
+    assert!(status_after.is_empty(), "should be all clean after");
 }

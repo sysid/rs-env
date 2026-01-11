@@ -1069,6 +1069,80 @@ impl SwapService {
         Ok(results)
     }
 
+    /// Swap out all swapped-in files in a project's vault.
+    ///
+    /// Convenience method to restore all active swaps to their original state.
+    ///
+    /// # Arguments
+    /// * `project_dir` - Project directory
+    ///
+    /// # Returns
+    /// Vec of SwapFile that were swapped out (empty if nothing was swapped in)
+    pub fn swap_out_vault(&self, project_dir: &Path) -> ApplicationResult<Vec<SwapFile>> {
+        debug!("swap_out_vault: project_dir={}", project_dir.display());
+
+        let status = self.status(project_dir)?;
+        let swapped_in: Vec<PathBuf> = status
+            .iter()
+            .filter(|s| matches!(s.state, SwapState::In { .. }))
+            .map(|s| s.project_path.clone())
+            .collect();
+
+        if swapped_in.is_empty() {
+            debug!("swap_out_vault: no files swapped in");
+            return Ok(vec![]);
+        }
+
+        debug!("swap_out_vault: swapping out {} files", swapped_in.len());
+        self.swap_out(project_dir, &swapped_in)
+    }
+
+    /// Swap out all vaults in vault_base_dir.
+    ///
+    /// Scans for vault directories (those containing `dot.envrc`) and
+    /// swaps out any active swaps. Uses max_depth(1) - no recursion.
+    ///
+    /// # Arguments
+    /// * `vault_base_dir` - Directory containing vaults
+    ///
+    /// # Returns
+    /// Vec of VaultSwapStatus for vaults that were processed (had active swaps)
+    pub fn swap_out_all_vaults(&self, vault_base_dir: &Path) -> ApplicationResult<Vec<VaultSwapStatus>> {
+        debug!("swap_out_all_vaults: vault_base_dir={}", vault_base_dir.display());
+
+        // First get status to find vaults with active swaps
+        let statuses = self.status_all_vaults(vault_base_dir)?;
+
+        if statuses.is_empty() {
+            debug!("swap_out_all_vaults: no active swaps found");
+            return Ok(vec![]);
+        }
+
+        let mut results = Vec::new();
+
+        for status in statuses {
+            if let Some(ref project_path) = status.project_path {
+                let swapped_in: Vec<PathBuf> = status
+                    .active_swaps
+                    .iter()
+                    .map(|s| s.project_path.clone())
+                    .collect();
+
+                debug!(
+                    "swap_out_all_vaults: swapping out {} files in {}",
+                    swapped_in.len(),
+                    status.vault_id
+                );
+
+                self.swap_out(project_path, &swapped_in)?;
+                results.push(status);
+            }
+        }
+
+        debug!("swap_out_all_vaults: processed {} vaults", results.len());
+        Ok(results)
+    }
+
     /// Delete swap files from vault (remove override and backup).
     ///
     /// Removes files from swap management entirely. This deletes:
