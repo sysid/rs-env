@@ -43,7 +43,7 @@ This is a complete rewrite of V1 with 100% functional compatibility and new feat
 ```bash
 cargo install rsenv
 
-rsenv init                  # Create vault for project
+rsenv init vault            # Create vault for project
 rsenv guard add .env        # Move .env to vault, create symlink
 rsenv env tree              # View environment hierarchy
 rsenv env select            # Interactive environment selection
@@ -55,7 +55,7 @@ rsenv env select            # Interactive environment selection
 
 | Command | Purpose |
 |---------|---------|
-| `init`  | Create vault for project |
+| `init`  | Initialize vault for project |
 | `env`   | Manage environment hierarchy |
 | `guard` | Protect sensitive files |
 | `swap`  | Toggle dev/prod configs |

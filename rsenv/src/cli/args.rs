@@ -24,15 +24,10 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Create vault for project
+    /// Initialize vault for project
     Init {
-        /// Project directory
-        project: Option<PathBuf>,
-        /// Use absolute symlink paths
-        #[arg(long)]
-        absolute: bool,
         #[command(subcommand)]
-        command: Option<InitCommands>,
+        command: InitCommands,
     },
 
     /// Manage hierarchical env vars
@@ -79,6 +74,14 @@ pub enum Commands {
 /// Init subcommands
 #[derive(Subcommand, Debug)]
 pub enum InitCommands {
+    /// Create vault for project
+    Vault {
+        /// Project directory
+        project: Option<PathBuf>,
+        /// Use absolute symlink paths
+        #[arg(long)]
+        absolute: bool,
+    },
     /// Undo init: restore files, remove .envrc symlink (vault kept)
     Reset {
         /// Project directory

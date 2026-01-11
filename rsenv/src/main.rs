@@ -67,11 +67,7 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
     })?;
 
     match cli.command {
-        Some(Commands::Init {
-            project,
-            absolute,
-            command,
-        }) => handle_init(project.or(project_dir), absolute, command, &settings),
+        Some(Commands::Init { command }) => handle_init(command, project_dir, &settings),
         Some(Commands::Config { command }) => handle_config(command, &settings, project_dir),
         Some(Commands::Env { command }) => handle_env(command, project_dir),
         Some(Commands::Guard { command }) => handle_guard(command, project_dir, &settings),
@@ -665,28 +661,26 @@ fn handle_config(
 }
 
 fn handle_init(
+    command: InitCommands,
     project_dir: Option<std::path::PathBuf>,
-    absolute: bool,
-    command: Option<InitCommands>,
     settings: &Settings,
 ) -> rsenv::cli::CliResult<()> {
     match command {
-        Some(InitCommands::Reset { project }) => {
-            // Use project from subcommand if provided, otherwise use parent's project_dir
+        InitCommands::Vault { project, absolute } => {
+            let project_dir = project
+                .or(project_dir)
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+            handle_init_create(project_dir, absolute, settings)
+        }
+        InitCommands::Reset { project } => {
             let project_dir = project
                 .or(project_dir)
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
             handle_init_reset(project_dir, settings)
         }
-        Some(InitCommands::Reconnect { envrc_path }) => {
-            // project_dir comes from -C/--project-dir (or cwd)
+        InitCommands::Reconnect { envrc_path } => {
             let project_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
             handle_init_reconnect(envrc_path, project_dir, settings)
-        }
-        None => {
-            // Default: create vault
-            let project_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
-            handle_init_create(project_dir, absolute, settings)
         }
     }
 }
@@ -900,7 +894,7 @@ fn handle_info(
         None => {
             output::info(&"Vault:   (not initialized)");
             println!();
-            output::info(&"Run 'rsenv init' to create a vault for this project.");
+            output::info(&"Run 'rsenv init vault' to create a vault for this project.");
         }
     }
 
