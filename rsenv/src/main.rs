@@ -937,45 +937,82 @@ fn handle_sops(
     let service = SopsService::new(fs, cmd, settings_arc);
 
     match command {
-        SopsCommands::Encrypt { dir, global } => {
-            let base_dir =
-                resolve_sops_dir(dir, global, vault_path.as_deref(), &settings.vault_base_dir)?;
-            output::header(&format!("Encrypting in: {}", base_dir.display()));
-            let encrypted = service.encrypt_all(Some(&base_dir)).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })?;
-
-            if encrypted.is_empty() {
-                output::info(&"No files to encrypt");
+        SopsCommands::Encrypt {
+            file,
+            dir,
+            global,
+            vault_base,
+        } => {
+            if let Some(file_path) = file {
+                // File-level: encrypt single file
+                output::header(&format!("Encrypting: {}", file_path.display()));
+                let result = service.encrypt_file(&file_path).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+                output::success(&format!("Created: {}", result.display()));
             } else {
-                output::info(&format!("Encrypted {} files:", encrypted.len()));
-                for path in &encrypted {
-                    output::detail(&path.display());
+                // Directory/vault/global level
+                let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
+                let base_dir =
+                    resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
+                output::header(&format!("Encrypting in: {}", base_dir.display()));
+                let encrypted = service.encrypt_all(Some(&base_dir)).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+
+                if encrypted.is_empty() {
+                    output::info(&"No files to encrypt");
+                } else {
+                    output::info(&format!("Encrypted {} files:", encrypted.len()));
+                    for path in &encrypted {
+                        output::detail(&path.display());
+                    }
                 }
             }
             Ok(())
         }
-        SopsCommands::Decrypt { dir, global } => {
-            let base_dir =
-                resolve_sops_dir(dir, global, vault_path.as_deref(), &settings.vault_base_dir)?;
-            output::header(&format!("Decrypting in: {}", base_dir.display()));
-            let decrypted = service.decrypt_all(Some(&base_dir)).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })?;
-
-            if decrypted.is_empty() {
-                output::info(&"No files to decrypt");
+        SopsCommands::Decrypt {
+            file,
+            dir,
+            global,
+            vault_base,
+        } => {
+            if let Some(file_path) = file {
+                // File-level: decrypt single file
+                output::header(&format!("Decrypting: {}", file_path.display()));
+                let result = service.decrypt_file(&file_path).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+                output::success(&format!("Created: {}", result.display()));
             } else {
-                output::info(&format!("Decrypted {} files:", decrypted.len()));
-                for path in &decrypted {
-                    output::detail(&path.display());
+                // Directory/vault/global level
+                let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
+                let base_dir =
+                    resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
+                output::header(&format!("Decrypting in: {}", base_dir.display()));
+                let decrypted = service.decrypt_all(Some(&base_dir)).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+
+                if decrypted.is_empty() {
+                    output::info(&"No files to decrypt");
+                } else {
+                    output::info(&format!("Decrypted {} files:", decrypted.len()));
+                    for path in &decrypted {
+                        output::detail(&path.display());
+                    }
                 }
             }
             Ok(())
         }
-        SopsCommands::Clean { dir, global } => {
+        SopsCommands::Clean {
+            dir,
+            global,
+            vault_base,
+        } => {
+            let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
             let base_dir =
-                resolve_sops_dir(dir, global, vault_path.as_deref(), &settings.vault_base_dir)?;
+                resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
             output::header(&format!("Cleaning in: {}", base_dir.display()));
             let deleted = service.clean(Some(&base_dir)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
@@ -991,9 +1028,14 @@ fn handle_sops(
             }
             Ok(())
         }
-        SopsCommands::Status { dir, global } => {
+        SopsCommands::Status {
+            dir,
+            global,
+            vault_base,
+        } => {
+            let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
             let base_dir =
-                resolve_sops_dir(dir, global, vault_path.as_deref(), &settings.vault_base_dir)?;
+                resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
             let status = service.status(Some(&base_dir)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
@@ -1043,30 +1085,17 @@ fn handle_sops(
             let fs = Arc::new(RealFileSystem);
             let gitignore_service = GitignoreService::new(fs, global_settings);
 
-            let vault_dir = if global { None } else { vault_path.clone() };
-
-            // Get status first to show what would change
-            let status = gitignore_service
-                .status(vault_dir.as_deref())
-                .map_err(|e| {
+            if global {
+                // Global only: sync global gitignore
+                let status = gitignore_service.status(None).map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
                 })?;
 
-            // Check if any changes needed
-            let global_needs_sync = !status.global_diff.in_sync;
-            let vault_needs_sync = status
-                .vault
-                .as_ref()
-                .map(|v| !v.diff.in_sync)
-                .unwrap_or(false);
+                if status.global_diff.in_sync {
+                    output::success("Global gitignore is in sync with config");
+                    return Ok(());
+                }
 
-            if !global_needs_sync && !vault_needs_sync {
-                output::success("All gitignore files are in sync with config");
-                return Ok(());
-            }
-
-            // Show what would change
-            if global_needs_sync {
                 output::info(&format!(
                     "Global gitignore ({}):",
                     status.global_path.display()
@@ -1077,63 +1106,85 @@ fn handle_sops(
                 for pattern in &status.global_diff.to_remove {
                     output::diff_remove(pattern);
                 }
-            }
 
-            if let Some(vault_status) = &status.vault {
-                if !vault_status.diff.in_sync {
+                if !yes {
                     println!();
-                    output::info(&format!(
-                        "Per-vault gitignore ({}):",
-                        vault_status.path.display()
-                    ));
-                    for pattern in &vault_status.diff.to_add {
-                        output::diff_add(pattern);
-                    }
-                    for pattern in &vault_status.diff.to_remove {
-                        output::diff_remove(pattern);
+                    output::prompt(&"Update global gitignore? [Y/n]");
+                    use std::io::Write;
+                    std::io::stdout().flush().unwrap();
+                    let mut input = String::new();
+                    std::io::stdin().read_line(&mut input).unwrap();
+                    let input = input.trim().to_lowercase();
+                    if !input.is_empty() && input != "y" && input != "yes" {
+                        output::info(&"Aborted");
+                        return Ok(());
                     }
                 }
-            }
 
-            // Prompt for confirmation unless --yes
-            if !yes {
-                println!();
-                output::prompt(&"Update gitignore? [Y/n]");
-                use std::io::Write;
-                std::io::stdout().flush().unwrap();
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input).unwrap();
-                let input = input.trim().to_lowercase();
-                if !input.is_empty() && input != "y" && input != "yes" {
-                    output::info(&"Aborted");
-                    return Ok(());
-                }
-            }
-
-            // Sync
-            let (global_diff, vault_diff) = gitignore_service
-                .sync_all(vault_dir.as_deref())
-                .map_err(|e| {
+                gitignore_service.sync_global().map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
                 })?;
+                output::success(&format!(
+                    "Global gitignore updated: {}",
+                    status.global_path.display()
+                ));
+            } else {
+                // Vault only: sync per-vault gitignore
+                let vault_dir = vault_path.clone().ok_or_else(|| {
+                    rsenv::cli::CliError::Usage(
+                        "No vault found. Run 'rsenv init' first, or use --global.".into(),
+                    )
+                })?;
 
-            if !global_diff.in_sync
-                || global_diff.to_add.is_empty() && global_diff.to_remove.is_empty()
-            {
-                // Was already in sync or just synced
-            }
-            output::success(&format!(
-                "Global gitignore updated: {}",
-                status.global_path.display()
-            ));
+                let status = gitignore_service
+                    .status(Some(&vault_dir))
+                    .map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                            e,
+                        ))
+                    })?;
 
-            if let Some(_vault_diff) = vault_diff {
-                if let Some(vault_status) = &status.vault {
-                    output::success(&format!(
-                        "Per-vault gitignore updated: {}",
-                        vault_status.path.display()
-                    ));
+                let vault_status = status.vault.as_ref().ok_or_else(|| {
+                    rsenv::cli::CliError::Usage("No vault-local gitignore config found.".into())
+                })?;
+
+                if vault_status.diff.in_sync {
+                    output::success("Per-vault gitignore is in sync with config");
+                    return Ok(());
                 }
+
+                output::info(&format!(
+                    "Per-vault gitignore ({}):",
+                    vault_status.path.display()
+                ));
+                for pattern in &vault_status.diff.to_add {
+                    output::diff_add(pattern);
+                }
+                for pattern in &vault_status.diff.to_remove {
+                    output::diff_remove(pattern);
+                }
+
+                if !yes {
+                    println!();
+                    output::prompt(&"Update per-vault gitignore? [Y/n]");
+                    use std::io::Write;
+                    std::io::stdout().flush().unwrap();
+                    let mut input = String::new();
+                    std::io::stdin().read_line(&mut input).unwrap();
+                    let input = input.trim().to_lowercase();
+                    if !input.is_empty() && input != "y" && input != "yes" {
+                        output::info(&"Aborted");
+                        return Ok(());
+                    }
+                }
+
+                gitignore_service.sync_vault(&vault_dir).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+                output::success(&format!(
+                    "Per-vault gitignore updated: {}",
+                    vault_status.path.display()
+                ));
             }
 
             Ok(())
@@ -1145,49 +1196,61 @@ fn handle_sops(
             let fs = Arc::new(RealFileSystem);
             let gitignore_service = GitignoreService::new(fs, global_settings);
 
-            let vault_dir = if global { None } else { vault_path.clone() };
-
-            let status = gitignore_service
-                .status(vault_dir.as_deref())
-                .map_err(|e| {
+            if global {
+                // Global only: show global gitignore status
+                let status = gitignore_service.status(None).map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
                 })?;
 
-            output::header("Gitignore Status:");
-            println!();
-
-            // Global status
-            output::info(&format!("Global ({}):", status.global_path.display()));
-            if status.global_diff.in_sync {
-                output::success_detail("In sync with config");
-            } else {
-                output::failure("Out of sync:");
-                for pattern in &status.global_diff.to_add {
-                    println!("    {} {} (missing)", "+".green(), pattern);
-                }
-                for pattern in &status.global_diff.to_remove {
-                    println!("    {} {} (extra)", "-".red(), pattern);
-                }
-            }
-
-            // Vault status
-            if let Some(vault_status) = &status.vault {
+                output::header("Global Gitignore Status:");
                 println!();
-                output::info(&format!("Per-vault ({}):", vault_status.path.display()));
-                if vault_status.diff.in_sync {
-                    output::success_detail("In sync with vault-local config");
+                output::info(&format!("Path: {}", status.global_path.display()));
+                if status.global_diff.in_sync {
+                    output::success_detail("In sync with config");
                 } else {
                     output::failure("Out of sync:");
-                    for pattern in &vault_status.diff.to_add {
+                    for pattern in &status.global_diff.to_add {
                         println!("    {} {} (missing)", "+".green(), pattern);
                     }
-                    for pattern in &vault_status.diff.to_remove {
+                    for pattern in &status.global_diff.to_remove {
                         println!("    {} {} (extra)", "-".red(), pattern);
                     }
                 }
-            } else if !global {
+            } else {
+                // Vault only: show per-vault gitignore status
+                let vault_dir = vault_path.clone().ok_or_else(|| {
+                    rsenv::cli::CliError::Usage(
+                        "No vault found. Run 'rsenv init' first, or use --global.".into(),
+                    )
+                })?;
+
+                let status = gitignore_service
+                    .status(Some(&vault_dir))
+                    .map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                            e,
+                        ))
+                    })?;
+
+                output::header("Per-vault Gitignore Status:");
                 println!();
-                output::info(&"Per-vault: N/A (no vault-local config)");
+
+                if let Some(vault_status) = &status.vault {
+                    output::info(&format!("Path: {}", vault_status.path.display()));
+                    if vault_status.diff.in_sync {
+                        output::success_detail("In sync with vault-local config");
+                    } else {
+                        output::failure("Out of sync:");
+                        for pattern in &vault_status.diff.to_add {
+                            println!("    {} {} (missing)", "+".green(), pattern);
+                        }
+                        for pattern in &vault_status.diff.to_remove {
+                            println!("    {} {} (extra)", "-".red(), pattern);
+                        }
+                    }
+                } else {
+                    output::info(&"No vault-local gitignore config found");
+                }
             }
 
             Ok(())
@@ -1199,31 +1262,37 @@ fn handle_sops(
             let fs = Arc::new(RealFileSystem);
             let gitignore_service = GitignoreService::new(fs, global_settings);
 
-            let vault_dir = if global { None } else { vault_path.clone() };
-
-            let (global_cleaned, vault_cleaned) = gitignore_service
-                .clean_all(vault_dir.as_deref())
-                .map_err(|e| {
+            if global {
+                // Global only: clean global gitignore
+                let cleaned = gitignore_service.clean_global().map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
                 })?;
 
-            if global_cleaned {
-                output::success(&format!(
-                    "Removed rsenv-managed section from global gitignore: {}",
-                    gitignore_service.global_gitignore_path().display()
-                ));
+                if cleaned {
+                    output::success(&format!(
+                        "Removed rsenv-managed section from global gitignore: {}",
+                        gitignore_service.global_gitignore_path().display()
+                    ));
+                } else {
+                    output::info(&"Global gitignore: no managed section to remove");
+                }
             } else {
-                output::info(&"Global gitignore: no managed section to remove");
-            }
+                // Vault only: clean per-vault gitignore
+                let vault_dir = vault_path.clone().ok_or_else(|| {
+                    rsenv::cli::CliError::Usage(
+                        "No vault found. Run 'rsenv init' first, or use --global.".into(),
+                    )
+                })?;
 
-            if !global {
-                if vault_cleaned {
-                    if let Some(vd) = vault_dir {
-                        output::success(&format!(
-                            "Removed rsenv-managed section from per-vault gitignore: {}",
-                            gitignore_service.vault_gitignore_path(&vd).display()
-                        ));
-                    }
+                let cleaned = gitignore_service.clean_vault(&vault_dir).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+
+                if cleaned {
+                    output::success(&format!(
+                        "Removed rsenv-managed section from per-vault gitignore: {}",
+                        gitignore_service.vault_gitignore_path(&vault_dir).display()
+                    ));
                 } else {
                     output::info(&"Per-vault gitignore: no managed section to remove");
                 }
@@ -1270,23 +1339,62 @@ fn handle_swap(
             }
             Ok(())
         }
-        SwapCommands::Out { files } => {
-            if files.is_empty() {
-                return Err(rsenv::cli::CliError::Usage("no files specified".into()));
-            }
+        SwapCommands::Out {
+            files,
+            global,
+            vault_base,
+        } => {
+            if global {
+                // Global: swap out all vaults
+                let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
 
-            let swapped = service.swap_out(&project_dir, &files).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })?;
+                let results = service.swap_out_all_vaults(&vault_base_dir).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
 
-            output::info(&format!("Swapped out {} files:", swapped.len()));
-            for file in &swapped {
-                output::detail(&format!(
-                    "{} (restored original)",
-                    file.project_path.display()
-                ));
+                if results.is_empty() {
+                    output::info(&"No active swaps across all vaults");
+                } else {
+                    output::info(&format!("Swapped out files in {} vaults:", results.len()));
+                    for status in &results {
+                        output::detail(&format!(
+                            "{}: {} files",
+                            status.vault_id,
+                            status.active_swaps.len()
+                        ));
+                    }
+                }
+                Ok(())
+            } else if files.is_empty() {
+                // Vault-level (default): swap out all files in current project's vault
+                let swapped = service.swap_out_vault(&project_dir).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+
+                if swapped.is_empty() {
+                    output::info(&"No files swapped in");
+                } else {
+                    output::info(&format!("Swapped out {} files:", swapped.len()));
+                    for file in &swapped {
+                        output::detail(&file.project_path.display());
+                    }
+                }
+                Ok(())
+            } else {
+                // File-level: swap out specific files
+                let swapped = service.swap_out(&project_dir, &files).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+
+                output::info(&format!("Swapped out {} files:", swapped.len()));
+                for file in &swapped {
+                    output::detail(&format!(
+                        "{} (restored original)",
+                        file.project_path.display()
+                    ));
+                }
+                Ok(())
             }
-            Ok(())
         }
         SwapCommands::Init { files } => {
             if files.is_empty() {
@@ -1310,119 +1418,88 @@ fn handle_swap(
             }
             Ok(())
         }
-        SwapCommands::Status { absolute } => {
-            let status = service.status(&project_dir).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })?;
+        SwapCommands::Status {
+            absolute,
+            global,
+            silent,
+            vault_base,
+        } => {
+            if global {
+                // Global: show status across all vaults
+                let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
 
-            if status.is_empty() {
-                output::info(&"No swappable files found");
-                return Ok(());
-            }
+                let statuses = service.status_all_vaults(&vault_base_dir).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
 
-            output::header("Swap Status:");
-            for file in &status {
-                let display_path = if absolute {
-                    file.project_path.display().to_string()
+                let has_active = !statuses.is_empty();
+
+                if silent {
+                    if has_active {
+                        std::process::exit(1);
+                    }
+                    return Ok(());
+                }
+
+                if statuses.is_empty() {
+                    output::info(&"No active swaps across all vaults");
                 } else {
-                    file.project_path
-                        .strip_prefix(&project_dir)
-                        .unwrap_or(&file.project_path)
-                        .display()
-                        .to_string()
-                };
-                let state_str = match &file.state {
-                    rsenv::domain::SwapState::Out => "out".normal(),
-                    rsenv::domain::SwapState::In { hostname } => {
-                        format!("in ({})", hostname).green()
-                    }
-                };
-                println!("  {} [{}]", display_path, state_str);
-            }
-            Ok(())
-        }
-        SwapCommands::VaultOut => {
-            // Swap out all files in current project's vault
-            let swapped = service.swap_out_vault(&project_dir).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })?;
-
-            if swapped.is_empty() {
-                output::info(&"No files swapped in");
-            } else {
-                output::info(&format!("Swapped out {} files:", swapped.len()));
-                for file in &swapped {
-                    output::detail(&file.project_path.display());
-                }
-            }
-            Ok(())
-        }
-        SwapCommands::AllOut => {
-            // Swap out all vaults: -C overrides vault_base_dir
-            let vault_base = project_dir_opt
-                .clone()
-                .unwrap_or_else(|| settings.vault_base_dir.clone());
-
-            let results = service.swap_out_all_vaults(&vault_base).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })?;
-
-            if results.is_empty() {
-                output::info(&"No active swaps across all vaults");
-            } else {
-                output::info(&format!("Swapped out files in {} vaults:", results.len()));
-                for status in &results {
-                    output::detail(&format!(
-                        "{}: {} files",
-                        status.vault_id,
-                        status.active_swaps.len()
-                    ));
-                }
-            }
-            Ok(())
-        }
-        SwapCommands::AllStatus { silent } => {
-            // Show status of all vaults: -C overrides vault_base_dir
-            let vault_base = project_dir_opt
-                .clone()
-                .unwrap_or_else(|| settings.vault_base_dir.clone());
-
-            let statuses = service.status_all_vaults(&vault_base).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })?;
-
-            let has_active = !statuses.is_empty();
-
-            if silent {
-                if has_active {
-                    std::process::exit(1);
-                }
-                return Ok(());
-            }
-
-            if statuses.is_empty() {
-                output::info(&"No active swaps across all vaults");
-            } else {
-                output::header("Active Swaps:");
-                for status in &statuses {
-                    println!();
-                    output::info(&format!("{}:", status.vault_id));
-                    for file in &status.active_swaps {
-                        let display_path = status
-                            .project_path
-                            .as_ref()
-                            .and_then(|p| file.project_path.strip_prefix(p).ok())
-                            .map(|p| p.to_path_buf())
-                            .unwrap_or_else(|| file.project_path.clone());
-                        let hostname = match &file.state {
-                            rsenv::domain::SwapState::In { hostname } => hostname,
-                            _ => "unknown",
-                        };
-                        output::detail(&format!("{} [in ({})]", display_path.display(), hostname));
+                    output::header("Active Swaps:");
+                    for status in &statuses {
+                        println!();
+                        output::info(&format!("{}:", status.vault_id));
+                        for file in &status.active_swaps {
+                            let display_path = status
+                                .project_path
+                                .as_ref()
+                                .and_then(|p| file.project_path.strip_prefix(p).ok())
+                                .map(|p| p.to_path_buf())
+                                .unwrap_or_else(|| file.project_path.clone());
+                            let hostname = match &file.state {
+                                rsenv::domain::SwapState::In { hostname } => hostname,
+                                _ => "unknown",
+                            };
+                            output::detail(&format!(
+                                "{} [in ({})]",
+                                display_path.display(),
+                                hostname
+                            ));
+                        }
                     }
                 }
+                Ok(())
+            } else {
+                // Project-level: show status for current project
+                let status = service.status(&project_dir).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+
+                if status.is_empty() {
+                    output::info(&"No swappable files found");
+                    return Ok(());
+                }
+
+                output::header("Swap Status:");
+                for file in &status {
+                    let display_path = if absolute {
+                        file.project_path.display().to_string()
+                    } else {
+                        file.project_path
+                            .strip_prefix(&project_dir)
+                            .unwrap_or(&file.project_path)
+                            .display()
+                            .to_string()
+                    };
+                    let state_str = match &file.state {
+                        rsenv::domain::SwapState::Out => "out".normal(),
+                        rsenv::domain::SwapState::In { hostname } => {
+                            format!("in ({})", hostname).green()
+                        }
+                    };
+                    println!("  {} [{}]", display_path, state_str);
+                }
+                Ok(())
             }
-            Ok(())
         }
         SwapCommands::Delete { files } => {
             if files.is_empty() {

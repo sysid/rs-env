@@ -203,10 +203,17 @@ pub enum SwapCommands {
         files: Vec<PathBuf>,
     },
 
-    /// Restore originals
+    /// Restore originals (no args = current vault, like sops)
     Out {
-        /// Files to swap out
+        /// Files to swap out (if empty, swaps out all files in current vault)
+        #[arg(conflicts_with = "global")]
         files: Vec<PathBuf>,
+        /// Swap out all vaults
+        #[arg(short, long, conflicts_with = "files")]
+        global: bool,
+        /// Override vault_base_dir (requires --global)
+        #[arg(long, requires = "global")]
+        vault_base: Option<PathBuf>,
     },
 
     /// Move files to vault (first time)
@@ -220,19 +227,15 @@ pub enum SwapCommands {
         /// Show absolute paths (relative paths are default)
         #[arg(long)]
         absolute: bool,
-    },
-
-    /// Swap out all files in current project's vault
-    VaultOut,
-
-    /// Swap out all vaults (uses -C as vault_base_dir, default: settings.vault_base_dir)
-    AllOut,
-
-    /// Show swap status across all vaults (uses -C as vault_base_dir, default: settings.vault_base_dir)
-    AllStatus {
-        /// Silent mode: return exit code only (0=clean, 1=has active swaps)
+        /// Show status across all vaults
         #[arg(short, long)]
+        global: bool,
+        /// Silent mode: return exit code only (0=clean, 1=has active swaps)
+        #[arg(short, long, requires = "global")]
         silent: bool,
+        /// Override vault_base_dir (requires --global)
+        #[arg(long, requires = "global")]
+        vault_base: Option<PathBuf>,
     },
 
     /// Remove files from swap management
@@ -244,24 +247,36 @@ pub enum SwapCommands {
 
 #[derive(Subcommand, Debug)]
 pub enum SopsCommands {
-    /// Encrypt matching files
+    /// Encrypt matching files (or single file if specified)
     Encrypt {
+        /// Single file to encrypt
+        #[arg(conflicts_with_all = ["dir", "global"])]
+        file: Option<PathBuf>,
         /// Directory (default: project vault)
-        #[arg(short, long, conflicts_with = "global")]
+        #[arg(short, long, conflicts_with_all = ["file", "global"])]
         dir: Option<PathBuf>,
         /// Encrypt all vaults (entire vault_base_dir)
-        #[arg(short, long, conflicts_with = "dir")]
+        #[arg(short, long, conflicts_with_all = ["file", "dir"])]
         global: bool,
+        /// Override vault_base_dir (requires --global)
+        #[arg(long, requires = "global")]
+        vault_base: Option<PathBuf>,
     },
 
-    /// Decrypt .enc files
+    /// Decrypt .enc files (or single file if specified)
     Decrypt {
+        /// Single file to decrypt
+        #[arg(conflicts_with_all = ["dir", "global"])]
+        file: Option<PathBuf>,
         /// Directory (default: project vault)
-        #[arg(short, long, conflicts_with = "global")]
+        #[arg(short, long, conflicts_with_all = ["file", "global"])]
         dir: Option<PathBuf>,
         /// Decrypt all vaults (entire vault_base_dir)
-        #[arg(short, long, conflicts_with = "dir")]
+        #[arg(short, long, conflicts_with_all = ["file", "dir"])]
         global: bool,
+        /// Override vault_base_dir (requires --global)
+        #[arg(long, requires = "global")]
+        vault_base: Option<PathBuf>,
     },
 
     /// Delete unencrypted originals
@@ -272,6 +287,9 @@ pub enum SopsCommands {
         /// Clean all vaults (entire vault_base_dir)
         #[arg(short, long, conflicts_with = "dir")]
         global: bool,
+        /// Override vault_base_dir (requires --global)
+        #[arg(long, requires = "global")]
+        vault_base: Option<PathBuf>,
     },
 
     /// Show encryption status
@@ -282,31 +300,34 @@ pub enum SopsCommands {
         /// Show status for all vaults (entire vault_base_dir)
         #[arg(short, long, conflicts_with = "dir")]
         global: bool,
+        /// Override vault_base_dir (requires --global)
+        #[arg(long, requires = "global")]
+        vault_base: Option<PathBuf>,
     },
 
-    /// Sync .gitignore with config patterns
+    /// Sync .gitignore with config patterns (current vault only, use --global for global)
     #[command(name = "gitignore-sync")]
     GitignoreSync {
         /// Skip confirmation prompt
         #[arg(short, long)]
         yes: bool,
-        /// Only sync global gitignore (skip per-vault)
+        /// Sync global gitignore only (not per-vault)
         #[arg(long)]
         global: bool,
     },
 
-    /// Show gitignore sync status
+    /// Show gitignore sync status (current vault only, use --global for global)
     #[command(name = "gitignore-status")]
     GitignoreStatus {
-        /// Only show global gitignore status
+        /// Show global gitignore status only
         #[arg(long)]
         global: bool,
     },
 
-    /// Remove rsenv-managed section from .gitignore
+    /// Remove rsenv-managed section from .gitignore (current vault only, use --global for global)
     #[command(name = "gitignore-clean")]
     GitignoreClean {
-        /// Only clean global gitignore
+        /// Clean global gitignore only
         #[arg(long)]
         global: bool,
     },
