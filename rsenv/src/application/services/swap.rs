@@ -33,9 +33,10 @@ use walkdir::WalkDir;
 use crate::application::dotfile::{is_dotfile, neutralize_name, neutralize_path, restore_name};
 use crate::application::services::VaultService;
 use crate::application::{ApplicationError, ApplicationResult, IoResultExt};
+use crate::cli::output;
 use crate::config::Settings;
 use crate::application::parse_rsenv_metadata;
-use crate::domain::{expand_env_vars, SwapFile, SwapState, VaultSwapStatus};
+use crate::domain::{expand_env_vars, SwapFile, SwapState, Vault, VaultSwapStatus};
 use crate::infrastructure::traits::FileSystem;
 
 /// File swap-in/swap-out service.
@@ -57,6 +58,38 @@ impl SwapService {
             fs,
             vault_service,
             settings,
+        }
+    }
+
+    // ============================================================
+    // Metadata validation
+    // ============================================================
+
+    /// Validate that vault metadata matches current project directory.
+    /// Prints a colored warning if mismatch detected.
+    fn validate_metadata(&self, vault: &Vault, project_dir: &Path) {
+        let dot_envrc_path = vault.path.join("dot.envrc");
+        let content = match self.fs.read_to_string(&dot_envrc_path) {
+            Ok(c) => c,
+            Err(_) => return, // Can't read, skip validation
+        };
+
+        let metadata = match parse_rsenv_metadata(&content) {
+            Some(m) => m,
+            None => return, // No metadata, skip validation
+        };
+
+        let stored_path = PathBuf::from(expand_env_vars(&metadata.source_dir));
+        if stored_path != project_dir {
+            output::warning(&format!(
+                "Vault metadata out of sync: sourceDir is '{}' but you're in '{}'.\n  \
+                 Run: rsenv reconnect {}\n  \
+                 Or manually update: {}/dot.envrc",
+                stored_path.display(),
+                project_dir.display(),
+                dot_envrc_path.display(),
+                vault.path.display()
+            ));
         }
     }
 
@@ -311,6 +344,9 @@ impl SwapService {
             .get(project_dir)?
             .ok_or_else(|| ApplicationError::VaultNotInitialized(project_dir.to_path_buf()))?;
 
+        // Validate metadata - warn if out of sync
+        self.validate_metadata(&vault, project_dir);
+
         let hostname = Self::get_hostname()?;
         let swap_dir = vault.path.join("swap");
         debug!(
@@ -540,6 +576,9 @@ impl SwapService {
             .vault_service
             .get(project_dir)?
             .ok_or_else(|| ApplicationError::VaultNotInitialized(project_dir.to_path_buf()))?;
+
+        // Validate metadata - warn if out of sync
+        self.validate_metadata(&vault, project_dir);
 
         let hostname = Self::get_hostname()?;
         let swap_dir = vault.path.join("swap");
@@ -815,9 +854,27 @@ impl SwapService {
             }
         };
 
-        let swap_dir = vault.path.join("swap");
+        // Validate metadata - warn if out of sync
+        self.validate_metadata(&vault, project_dir);
+
+        self.status_impl(&vault.path, project_dir)
+    }
+
+    /// Core status implementation - works directly with vault and project paths.
+    fn status_impl(
+        &self,
+        vault_path: &Path,
+        project_dir: &Path,
+    ) -> ApplicationResult<Vec<SwapFile>> {
+        debug!(
+            "status_impl: vault_path={}, project_dir={}",
+            vault_path.display(),
+            project_dir.display()
+        );
+
+        let swap_dir = vault_path.join("swap");
         if !self.fs.exists(&swap_dir) {
-            debug!("status: swap_dir does not exist");
+            debug!("status_impl: swap_dir does not exist");
             return Ok(vec![]);
         }
 
@@ -842,16 +899,15 @@ impl SwapService {
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|e| e.depth() > 0)
-        // skip root
         {
-            let vault_path = entry.path().to_path_buf();
+            let entry_path = entry.path().to_path_buf();
 
-            // Skip entries inside sentinel/backup directories (they're atomic units)
-            if is_inside_special_dir(&vault_path) {
+            // Skip entries inside sentinel/backup directories
+            if is_inside_special_dir(&entry_path) {
                 continue;
             }
 
-            let name = vault_path
+            let name = entry_path
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
@@ -861,15 +917,13 @@ impl SwapService {
                 continue;
             }
 
-            // Handle sentinel files/directories: extract the base name
+            // Handle sentinel files/directories (indicates swapped-in state)
             if name.ends_with("@@rsenv_active") {
-                // Sentinel format: <filename>@@<hostname>@@rsenv_active
-                // Extract <filename> by splitting on @@
                 let parts: Vec<&str> = name.split("@@").collect();
 
                 if parts.len() == 3 && parts[2] == "rsenv_active" {
                     let base_name = parts[0];
-                    let parent = vault_path.parent().unwrap_or(&swap_dir);
+                    let parent = entry_path.parent().unwrap_or(&swap_dir);
                     let base_vault_path = parent.join(base_name);
 
                     let relative = base_vault_path.strip_prefix(&swap_dir).map_err(|_| {
@@ -882,7 +936,6 @@ impl SwapService {
                         }
                     })?;
 
-                    // Only add if we haven't seen this path yet
                     if !seen_paths.contains(relative) {
                         seen_paths.insert(relative.to_path_buf());
                         let project_path = project_dir.join(relative);
@@ -899,9 +952,9 @@ impl SwapService {
             }
 
             // Regular vault file/directory (swapped out)
-            let relative = vault_path.strip_prefix(&swap_dir).map_err(|_| {
+            let relative = entry_path.strip_prefix(&swap_dir).map_err(|_| {
                 ApplicationError::OperationFailed {
-                    context: format!("strip prefix from {}", vault_path.display()),
+                    context: format!("strip prefix from {}", entry_path.display()),
                     source: Box::new(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
                         "path error",
@@ -909,7 +962,6 @@ impl SwapService {
                 }
             })?;
 
-            // Only add if we haven't seen this path yet
             if !seen_paths.contains(relative) {
                 seen_paths.insert(relative.to_path_buf());
                 let project_path = project_dir.join(relative);
@@ -917,16 +969,14 @@ impl SwapService {
 
                 files.push(SwapFile {
                     project_path,
-                    vault_path,
+                    vault_path: entry_path,
                     state,
                 });
             }
         }
 
-        // Filter to only leaf entries (entries with no children in the list)
         let files = filter_to_leaves(files);
-
-        debug!("status: found {} swap files", files.len());
+        debug!("status_impl: found {} swap files", files.len());
         Ok(files)
     }
 
@@ -1033,17 +1083,30 @@ impl SwapService {
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
 
+            // Validate metadata: warn if project path doesn't exist
+            let project_path_valid = self.fs.exists(&project_path);
+            if !project_path_valid {
+                output::warning(&format!(
+                    "Vault {} has stale metadata: sourceDir '{}' does not exist.\n  \
+                     Fix: Update state.sourceDir in {}/dot.envrc",
+                    vault_id,
+                    project_path.display(),
+                    vault_path.display()
+                ));
+            }
+
             debug!(
-                "status_all_vaults: checking vault {} -> project {}",
+                "status_all_vaults: checking vault {} -> project {} (valid={})",
                 vault_id,
-                project_path.display()
+                project_path.display(),
+                project_path_valid
             );
 
-            // Get swap status for this project
-            let status = match self.status(&project_path) {
+            // Get swap status directly from vault (works even if project path is stale)
+            let status = match self.status_impl(&vault_path, &project_path) {
                 Ok(s) => s,
                 Err(e) => {
-                    debug!("status_all_vaults: failed to get status for {}: {}", project_path.display(), e);
+                    debug!("status_all_vaults: failed to get status for vault {}: {}", vault_id, e);
                     continue;
                 }
             };
@@ -1059,7 +1122,12 @@ impl SwapService {
                 results.push(VaultSwapStatus {
                     vault_id,
                     vault_path,
-                    project_path: Some(project_path),
+                    // Only set project_path if it's valid (exists on disk)
+                    project_path: if project_path_valid {
+                        Some(project_path)
+                    } else {
+                        None
+                    },
                     active_swaps,
                 });
             }
@@ -1121,21 +1189,32 @@ impl SwapService {
         let mut results = Vec::new();
 
         for status in statuses {
-            if let Some(ref project_path) = status.project_path {
-                let swapped_in: Vec<PathBuf> = status
-                    .active_swaps
-                    .iter()
-                    .map(|s| s.project_path.clone())
-                    .collect();
+            match &status.project_path {
+                Some(project_path) => {
+                    let swapped_in: Vec<PathBuf> = status
+                        .active_swaps
+                        .iter()
+                        .map(|s| s.project_path.clone())
+                        .collect();
 
-                debug!(
-                    "swap_out_all_vaults: swapping out {} files in {}",
-                    swapped_in.len(),
-                    status.vault_id
-                );
+                    debug!(
+                        "swap_out_all_vaults: swapping out {} files in {}",
+                        swapped_in.len(),
+                        status.vault_id
+                    );
 
-                self.swap_out(project_path, &swapped_in)?;
-                results.push(status);
+                    self.swap_out(project_path, &swapped_in)?;
+                    results.push(status);
+                }
+                None => {
+                    // Project path is invalid/stale - can't swap out without valid project
+                    output::warning(&format!(
+                        "Skipping vault {}: project path is invalid (stale metadata).\n  \
+                         Fix the sourceDir in {}/dot.envrc to swap out.",
+                        status.vault_id,
+                        status.vault_path.display()
+                    ));
+                }
             }
         }
 
@@ -1162,6 +1241,9 @@ impl SwapService {
             .vault_service
             .get(project_dir)?
             .ok_or_else(|| ApplicationError::VaultNotInitialized(project_dir.to_path_buf()))?;
+
+        // Validate metadata - warn if out of sync
+        self.validate_metadata(&vault, project_dir);
 
         let swap_dir = vault.path.join("swap");
         debug!(

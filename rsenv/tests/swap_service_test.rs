@@ -2089,3 +2089,164 @@ fn given_multiple_vaults_when_swap_out_all_vaults_then_swaps_out_all() {
     let status_after = service.status_all_vaults(&vault_base).unwrap();
     assert!(status_after.is_empty(), "should be all clean after");
 }
+
+// ============================================================
+// Stale sourceDir tests (vault metadata points to non-existent project)
+// ============================================================
+
+/// Helper to create a valid dot.envrc with custom sourceDir
+fn create_dot_envrc_content(source_dir: &str, sentinel_id: &str, vault_path: &str) -> String {
+    format!(
+        r#"#------------------------------- rsenv start --------------------------------
+# config.relative = true
+# config.version = 2
+# state.sentinel = '{sentinel_id}'
+# state.timestamp = '2024-01-01T00:00:00.000000+00:00'
+# state.sourceDir = '{source_dir}'
+export RSENV_VAULT={vault_path}
+#-------------------------------- rsenv vars --------------------------------
+#-------------------------------- rsenv end ---------------------------------"#,
+        sentinel_id = sentinel_id,
+        source_dir = source_dir,
+        vault_path = vault_path,
+    )
+}
+
+#[test]
+fn given_vault_with_stale_source_dir_when_status_all_vaults_then_still_detects_swaps() {
+    // Arrange
+    // This tests the bug: status_all_vaults should detect swapped-in files
+    // even when state.sourceDir in dot.envrc points to non-existent path
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    std::fs::create_dir_all(&vault_base).unwrap();
+
+    // Create a vault directory with swap files
+    let vault_path = vault_base.join("test-vault-abc123");
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+
+    // Create dot.envrc with sourceDir pointing to NON-EXISTENT path
+    let non_existent_project = temp.path().join("this-project-does-not-exist");
+    let dot_envrc_content = create_dot_envrc_content(
+        &non_existent_project.to_string_lossy(),
+        "test-vault-abc123",
+        &vault_path.to_string_lossy(),
+    );
+    std::fs::write(vault_path.join("dot.envrc"), &dot_envrc_content).unwrap();
+
+    // Create a swap file that is "swapped in" (has sentinel marker)
+    let hostname = get_hostname();
+    std::fs::write(swap_dir.join("config.yml.rsenv_original"), "original content\n").unwrap();
+    std::fs::write(
+        swap_dir.join(format!("config.yml@@{}@@rsenv_active", hostname)),
+        "override content\n",
+    )
+    .unwrap();
+
+    let settings = Arc::new(test_settings(vault_base.clone()));
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let statuses = service.status_all_vaults(&vault_base).unwrap();
+
+    // Assert - should detect the swap even though sourceDir doesn't exist
+    assert_eq!(
+        statuses.len(),
+        1,
+        "should detect vault with active swap despite stale sourceDir"
+    );
+    assert_eq!(
+        statuses[0].active_swaps.len(),
+        1,
+        "should detect one active swap"
+    );
+    assert!(
+        matches!(statuses[0].active_swaps[0].state, SwapState::In { .. }),
+        "swap should be in 'In' state"
+    );
+}
+
+#[test]
+fn given_vault_with_stale_source_dir_when_swap_out_all_vaults_then_warns_and_skips() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_base = temp.path().join("vaults");
+    std::fs::create_dir_all(&vault_base).unwrap();
+
+    let vault_path = vault_base.join("test-vault-abc123");
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+
+    // Create dot.envrc with stale sourceDir
+    let non_existent_project = temp.path().join("this-project-does-not-exist");
+    let dot_envrc_content = create_dot_envrc_content(
+        &non_existent_project.to_string_lossy(),
+        "test-vault-abc123",
+        &vault_path.to_string_lossy(),
+    );
+    std::fs::write(vault_path.join("dot.envrc"), &dot_envrc_content).unwrap();
+
+    // Create "swapped in" file
+    let hostname = get_hostname();
+    std::fs::write(swap_dir.join("config.yml.rsenv_original"), "original\n").unwrap();
+    std::fs::write(
+        swap_dir.join(format!("config.yml@@{}@@rsenv_active", hostname)),
+        "override\n",
+    )
+    .unwrap();
+
+    let settings = Arc::new(test_settings(vault_base.clone()));
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act - swap_out_all_vaults should gracefully handle stale sourceDir
+    let results = service.swap_out_all_vaults(&vault_base).unwrap();
+
+    // Assert - should return empty (skipped because can't swap without valid project)
+    // but should NOT error
+    assert!(
+        results.is_empty(),
+        "should skip vaults with stale sourceDir (can't swap without valid project path)"
+    );
+}
+
+// ============================================================
+// Metadata validation tests
+// ============================================================
+
+#[test]
+fn given_mismatched_source_dir_when_status_then_still_works() {
+    // This tests that status() works even when vault metadata has wrong sourceDir
+    // The warning is printed but operation succeeds
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create a swap file
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override\n").unwrap();
+    std::fs::write(project_dir.join("config.yml"), "original\n").unwrap();
+
+    // Manually corrupt the sourceDir in dot.envrc to simulate stale metadata
+    let dot_envrc_path = vault_path.join("dot.envrc");
+    let content = std::fs::read_to_string(&dot_envrc_path).unwrap();
+    let corrupted = content.replace(
+        &project_dir.to_string_lossy().to_string(),
+        "/some/nonexistent/path",
+    );
+    std::fs::write(&dot_envrc_path, corrupted).unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act - status should still work despite mismatched metadata
+    let status = service.status(&project_dir).unwrap();
+
+    // Assert - should find the swap file
+    assert_eq!(status.len(), 1, "should still find swap file despite metadata mismatch");
+}
