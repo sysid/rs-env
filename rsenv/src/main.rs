@@ -870,12 +870,12 @@ fn handle_info(
     let project_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
 
     let fs = Arc::new(RealFileSystem);
-    let settings = Arc::new(settings.clone());
-    let service = VaultService::new(fs, settings);
+    let settings_arc = Arc::new(settings.clone());
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings_arc.clone()));
 
     output::header(&format!("Project: {}", project_dir.display()));
 
-    let vault = service.get(&project_dir).map_err(|e| {
+    let vault = vault_service.get(&project_dir).map_err(|e| {
         rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
     })?;
 
@@ -886,15 +886,89 @@ fn handle_info(
 
             // Count guarded files
             let guarded_dir = v.path.join("guarded");
-            if guarded_dir.exists() {
-                let count = walkdir::WalkDir::new(&guarded_dir)
+            let guarded_count = if guarded_dir.exists() {
+                walkdir::WalkDir::new(&guarded_dir)
                     .into_iter()
                     .filter_map(|e| e.ok())
                     .filter(|e| e.file_type().is_file())
-                    .count();
-                output::info(&format!("Guarded: {} files", count));
+                    .count()
             } else {
-                output::info(&"Guarded: 0 files");
+                0
+            };
+            output::info(&format!("Guarded: {} files", guarded_count));
+
+            // Swap status summary
+            let swap_service = SwapService::new(fs.clone(), vault_service.clone(), settings_arc);
+            if let Ok(swap_files) = swap_service.status(&project_dir) {
+                if !swap_files.is_empty() {
+                    let in_count = swap_files
+                        .iter()
+                        .filter(|f| matches!(f.state, rsenv::domain::SwapState::In { .. }))
+                        .count();
+                    let out_count = swap_files.len() - in_count;
+                    output::info(&format!(
+                        "Swap:    {} files ({} in, {} out)",
+                        swap_files.len(),
+                        in_count,
+                        out_count
+                    ));
+                } else {
+                    output::info("Swap:    0 files");
+                }
+            }
+
+            // Gitignore status
+            if let Ok(global_settings) = Settings::load_global_only() {
+                let gitignore_service = GitignoreService::new(fs.clone(), global_settings);
+                if let Ok(status) = gitignore_service.status(Some(&v.path)) {
+                    println!();
+                    output::info("Gitignore:");
+                    let global_status = if status.global_diff.in_sync {
+                        "in sync".to_string()
+                    } else {
+                        format!(
+                            "{} to add, {} to remove",
+                            status.global_diff.to_add.len(),
+                            status.global_diff.to_remove.len()
+                        )
+                    };
+                    output::detail(&format!("Global: {}", global_status));
+
+                    if let Some(vault_status) = &status.vault {
+                        let vault_sync = if vault_status.diff.in_sync {
+                            "in sync".to_string()
+                        } else {
+                            format!(
+                                "{} to add, {} to remove",
+                                vault_status.diff.to_add.len(),
+                                vault_status.diff.to_remove.len()
+                            )
+                        };
+                        output::detail(&format!("Vault:  {}", vault_sync));
+                    }
+                }
+            }
+
+            // Configuration summary
+            println!();
+            output::info("Config:");
+            output::detail(&format!("vault_base_dir: {}", settings.vault_base_dir.display()));
+            output::detail(&format!("editor: {}", settings.editor));
+            if let Some(ref gpg_key) = settings.sops.gpg_key {
+                let truncated = if gpg_key.len() > 16 {
+                    format!("{}...", &gpg_key[..16])
+                } else {
+                    gpg_key.clone()
+                };
+                output::detail(&format!("sops.gpg_key: {}", truncated));
+            }
+            if let Some(ref age_key) = settings.sops.age_key {
+                let truncated = if age_key.len() > 20 {
+                    format!("{}...", &age_key[..20])
+                } else {
+                    age_key.clone()
+                };
+                output::detail(&format!("sops.age_key: {}", truncated));
             }
         }
         None => {
