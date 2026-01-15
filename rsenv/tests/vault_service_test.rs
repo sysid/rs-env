@@ -1202,7 +1202,10 @@ fn given_dotfile_in_subdir_when_guard_then_neutralizes_path() {
     let guarded = service.guard(&config, false).unwrap();
 
     // Assert - vault path should neutralize BOTH dot-directory and dot-file
-    let vault_path = vault.path.join("guarded").join("dot.hidden/config/dot.secret");
+    let vault_path = vault
+        .path
+        .join("guarded")
+        .join("dot.hidden/config/dot.secret");
     assert!(
         vault_path.exists(),
         "vault should have dot.hidden/config/dot.secret (fully neutralized path)"

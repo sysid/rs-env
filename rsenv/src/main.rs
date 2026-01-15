@@ -16,8 +16,8 @@ use rsenv::application::services::{
     EnvironmentService, GitignoreService, SopsService, SwapService, VaultService,
 };
 use rsenv::cli::args::{
-    Cli, Commands, ConfigCommands, EnvCommands, GuardCommands, InitCommands, SopsCommands,
-    SwapCommands,
+    Cli, Commands, ConfigCommands, EnvCommands, GuardCommands, HookCommands, InitCommands,
+    SopsCommands, SwapCommands,
 };
 use rsenv::cli::output;
 use rsenv::config::{global_config_dir, global_config_path, vault_config_path, Settings};
@@ -73,6 +73,7 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
         Some(Commands::Config { command }) => handle_config(command, &settings, project_dir),
         Some(Commands::Env { command }) => handle_env(command, project_dir),
         Some(Commands::Guard { command }) => handle_guard(command, project_dir, &settings),
+        Some(Commands::Hook { command }) => handle_hook(command, vault_path, &settings),
         Some(Commands::Info) => handle_info(project_dir, &settings),
         Some(Commands::Sops { command }) => handle_sops(command, vault_path, &settings),
         Some(Commands::Swap { command }) => {
@@ -952,7 +953,10 @@ fn handle_info(
             // Configuration summary
             println!();
             output::info("Config:");
-            output::detail(&format!("vault_base_dir: {}", settings.vault_base_dir.display()));
+            output::detail(&format!(
+                "vault_base_dir: {}",
+                settings.vault_base_dir.display()
+            ));
             output::detail(&format!("editor: {}", settings.editor));
             if let Some(ref gpg_key) = settings.sops.gpg_key {
                 let truncated = if gpg_key.len() > 16 {
@@ -1085,8 +1089,7 @@ fn handle_sops(
             vault_base,
         } => {
             let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
-            let base_dir =
-                resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
+            let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
             output::header(&format!("Cleaning in: {}", base_dir.display()));
             let deleted = service.clean(Some(&base_dir)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
@@ -1106,19 +1109,28 @@ fn handle_sops(
             dir,
             global,
             vault_base,
+            check,
         } => {
             let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
-            let base_dir =
-                resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
+            let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
             let status = service.status(Some(&base_dir)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
+
+            // --check mode: silent, just return exit code
+            if check {
+                if status.needs_encryption() {
+                    std::process::exit(1);
+                } else {
+                    return Ok(());
+                }
+            }
 
             output::header(&format!("SOPS Status for: {}", base_dir.display()));
             println!();
 
             if !status.pending_encrypt.is_empty() {
-                output::info(&format!(
+                output::warning(&format!(
                     "Pending encryption ({}):",
                     status.pending_encrypt.len()
                 ));
@@ -1128,24 +1140,42 @@ fn handle_sops(
                 println!();
             }
 
-            if !status.encrypted.is_empty() {
-                output::info(&format!("Already encrypted ({}):", status.encrypted.len()));
-                for path in &status.encrypted {
+            if !status.stale.is_empty() {
+                output::warning(&format!(
+                    "Stale (needs re-encryption) ({}):",
+                    status.stale.len()
+                ));
+                for stale_file in &status.stale {
+                    output::detail(&format!(
+                        "{} (hash: {} → {})",
+                        stale_file.plaintext.display(),
+                        &stale_file.old_hash,
+                        &stale_file.new_hash
+                    ));
+                }
+                println!();
+            }
+
+            if !status.current.is_empty() {
+                output::success(&format!("Current (up-to-date) ({}):", status.current.len()));
+                for path in &status.current {
                     output::detail(&path.display());
                 }
                 println!();
             }
 
-            if !status.pending_clean.is_empty() {
-                output::info(&format!("Pending clean ({}):", status.pending_clean.len()));
-                for path in &status.pending_clean {
+            if !status.orphaned.is_empty() {
+                output::info(&format!("Orphaned .enc files ({}):", status.orphaned.len()));
+                for path in &status.orphaned {
                     output::detail(&path.display());
                 }
+                println!();
             }
 
             if status.pending_encrypt.is_empty()
-                && status.encrypted.is_empty()
-                && status.pending_clean.is_empty()
+                && status.stale.is_empty()
+                && status.current.is_empty()
+                && status.orphaned.is_empty()
             {
                 output::detail(&"No matching files found");
             }
@@ -1210,13 +1240,9 @@ fn handle_sops(
                     )
                 })?;
 
-                let status = gitignore_service
-                    .status(Some(&vault_dir))
-                    .map_err(|e| {
-                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
-                            e,
-                        ))
-                    })?;
+                let status = gitignore_service.status(Some(&vault_dir)).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
 
                 let vault_status = status.vault.as_ref().ok_or_else(|| {
                     rsenv::cli::CliError::Usage("No vault-local gitignore config found.".into())
@@ -1298,13 +1324,9 @@ fn handle_sops(
                     )
                 })?;
 
-                let status = gitignore_service
-                    .status(Some(&vault_dir))
-                    .map_err(|e| {
-                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
-                            e,
-                        ))
-                    })?;
+                let status = gitignore_service.status(Some(&vault_dir)).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
 
                 output::header("Per-vault Gitignore Status:");
                 println!();
@@ -1374,7 +1396,230 @@ fn handle_sops(
 
             Ok(())
         }
+        SopsCommands::Migrate {
+            dir,
+            global,
+            vault_base,
+            yes,
+        } => {
+            let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
+            let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
+
+            output::header(&format!(
+                "Migrating old .enc files to hash-based format in: {}",
+                base_dir.display()
+            ));
+
+            // Check for old format files first
+            let status = service.status(Some(&base_dir)).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            let old_format_count = status
+                .orphaned
+                .iter()
+                .filter(|p| rsenv::application::hash::is_old_enc_format(p))
+                .count();
+
+            if old_format_count == 0 {
+                output::success("No old format .enc files found. Nothing to migrate.");
+                return Ok(());
+            }
+
+            output::info(&format!(
+                "Found {} old format .enc files to migrate",
+                old_format_count
+            ));
+
+            if !yes {
+                output::warning("This will decrypt files temporarily and rename them.");
+                output::warning("Make sure you have the decryption key available.");
+                println!();
+                output::info("Run with --yes to proceed, or press Ctrl+C to abort.");
+                return Ok(());
+            }
+
+            let migrated = service.migrate(Some(&base_dir)).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if migrated.is_empty() {
+                output::info("No files migrated");
+            } else {
+                output::success(&format!("Migrated {} files:", migrated.len()));
+                for (old_path, new_path) in &migrated {
+                    output::detail(&format!(
+                        "{} → {}",
+                        old_path.file_name().unwrap_or_default().to_string_lossy(),
+                        new_path.file_name().unwrap_or_default().to_string_lossy()
+                    ));
+                }
+            }
+
+            Ok(())
+        }
     }
+}
+
+/// Pre-commit hook template for vault git repos.
+const PRE_COMMIT_HOOK: &str = r#"#!/bin/bash
+# rsenv pre-commit hook - prevents committing with stale/unencrypted files
+# Installed by: rsenv hook install
+
+VAULT_DIR="$(git rev-parse --show-toplevel)"
+
+if ! command -v rsenv &> /dev/null; then
+    echo "Warning: rsenv not found in PATH, skipping encryption check"
+    exit 0
+fi
+
+if ! rsenv sops status --check --dir "$VAULT_DIR" 2>/dev/null; then
+    echo ""
+    echo "ERROR: Unencrypted or stale files in vault."
+    echo "       Run 'rsenv sops encrypt' to update encryption."
+    echo "       Use 'rsenv sops status' to see details."
+    echo ""
+    exit 1
+fi
+"#;
+
+fn handle_hook(
+    command: HookCommands,
+    vault_path: Option<std::path::PathBuf>,
+    _settings: &Settings,
+) -> rsenv::cli::CliResult<()> {
+    let vault_dir = vault_path.ok_or_else(|| {
+        rsenv::cli::CliError::Usage("No vault found. Run 'rsenv init' first.".into())
+    })?;
+
+    // Check if vault is a git repo
+    let git_dir = vault_dir.join(".git");
+    let hooks_dir = git_dir.join("hooks");
+    let hook_path = hooks_dir.join("pre-commit");
+
+    match command {
+        HookCommands::Install { force } => {
+            if !git_dir.exists() {
+                return Err(rsenv::cli::CliError::Usage(format!(
+                    "Vault is not a git repository: {}",
+                    vault_dir.display()
+                )));
+            }
+
+            if hook_path.exists() && !force {
+                return Err(rsenv::cli::CliError::Usage(format!(
+                    "Pre-commit hook already exists: {}\nUse --force to overwrite.",
+                    hook_path.display()
+                )));
+            }
+
+            // Create hooks directory if needed
+            std::fs::create_dir_all(&hooks_dir).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                    rsenv::application::ApplicationError::OperationFailed {
+                        context: format!("create hooks dir: {}", hooks_dir.display()),
+                        source: Box::new(e),
+                    },
+                ))
+            })?;
+
+            // Write hook file
+            std::fs::write(&hook_path, PRE_COMMIT_HOOK).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                    rsenv::application::ApplicationError::OperationFailed {
+                        context: format!("write hook: {}", hook_path.display()),
+                        source: Box::new(e),
+                    },
+                ))
+            })?;
+
+            // Make executable (Unix)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&hook_path)
+                    .map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                            rsenv::application::ApplicationError::OperationFailed {
+                                context: "get hook permissions".into(),
+                                source: Box::new(e),
+                            },
+                        ))
+                    })?
+                    .permissions();
+                perms.set_mode(0o755);
+                std::fs::set_permissions(&hook_path, perms).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                        rsenv::application::ApplicationError::OperationFailed {
+                            context: "set hook permissions".into(),
+                            source: Box::new(e),
+                        },
+                    ))
+                })?;
+            }
+
+            output::success(&format!(
+                "Installed pre-commit hook: {}",
+                hook_path.display()
+            ));
+            output::info("Hook will block commits when unencrypted files exist in vault.");
+        }
+        HookCommands::Remove => {
+            if !hook_path.exists() {
+                output::info("No pre-commit hook found");
+                return Ok(());
+            }
+
+            // Check if it's our hook
+            let content = std::fs::read_to_string(&hook_path).unwrap_or_default();
+            if !content.contains("rsenv pre-commit hook") {
+                return Err(rsenv::cli::CliError::Usage(format!(
+                    "Pre-commit hook exists but was not installed by rsenv: {}",
+                    hook_path.display()
+                )));
+            }
+
+            std::fs::remove_file(&hook_path).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                    rsenv::application::ApplicationError::OperationFailed {
+                        context: format!("remove hook: {}", hook_path.display()),
+                        source: Box::new(e),
+                    },
+                ))
+            })?;
+
+            output::success(&format!("Removed pre-commit hook: {}", hook_path.display()));
+        }
+        HookCommands::Status => {
+            if !git_dir.exists() {
+                output::warning(&format!(
+                    "Vault is not a git repository: {}",
+                    vault_dir.display()
+                ));
+                return Ok(());
+            }
+
+            if !hook_path.exists() {
+                output::info("No pre-commit hook installed");
+                output::detail("Run 'rsenv hook install' to install encryption check hook");
+            } else {
+                let content = std::fs::read_to_string(&hook_path).unwrap_or_default();
+                if content.contains("rsenv pre-commit hook") {
+                    output::success(&format!(
+                        "rsenv pre-commit hook installed: {}",
+                        hook_path.display()
+                    ));
+                } else {
+                    output::warning(&format!(
+                        "Pre-commit hook exists but not managed by rsenv: {}",
+                        hook_path.display()
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn handle_swap(

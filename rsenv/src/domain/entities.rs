@@ -216,12 +216,42 @@ pub struct VaultSwapStatus {
 }
 
 /// SOPS encryption status for a directory.
+///
+/// Uses content-addressed filenames: `{name}.{hash8}.enc`
+/// This enables reliable staleness detection by comparing hashes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SopsStatus {
-    /// Files that would be encrypted (matching enc patterns, not yet encrypted)
+    /// Files that need encryption (matching patterns, no .enc exists)
     pub pending_encrypt: Vec<PathBuf>,
-    /// Files that are already encrypted (*.enc)
-    pub encrypted: Vec<PathBuf>,
-    /// Files that would be deleted by clean (plaintext matching enc patterns)
-    pub pending_clean: Vec<PathBuf>,
+    /// Files with stale encryption (plaintext changed since last encrypt)
+    pub stale: Vec<StaleFile>,
+    /// Files with current encryption (hash matches)
+    pub current: Vec<PathBuf>,
+    /// Orphaned .enc files (no matching plaintext exists)
+    pub orphaned: Vec<PathBuf>,
+}
+
+impl SopsStatus {
+    /// Check if any files need encryption (pending or stale).
+    pub fn needs_encryption(&self) -> bool {
+        !self.pending_encrypt.is_empty() || !self.stale.is_empty()
+    }
+
+    /// Total number of files that need attention.
+    pub fn pending_count(&self) -> usize {
+        self.pending_encrypt.len() + self.stale.len()
+    }
+}
+
+/// File with stale encryption (plaintext changed since last encrypt).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaleFile {
+    /// Path to the plaintext file
+    pub plaintext: PathBuf,
+    /// Path to the outdated encrypted file
+    pub old_encrypted: PathBuf,
+    /// Hash embedded in the old encrypted filename
+    pub old_hash: String,
+    /// Current hash of the plaintext content
+    pub new_hash: String,
 }

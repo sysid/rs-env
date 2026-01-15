@@ -1039,9 +1039,7 @@ fn given_directory_with_nested_gitignore_when_swap_out_then_gitignore_neutralize
         "nested .gitignore should be neutralized"
     );
     assert!(
-        vault_config
-            .join("nested/dot.gitignore")
-            .exists(),
+        vault_config.join("nested/dot.gitignore").exists(),
         "nested dot.gitignore should exist"
     );
 }
@@ -1063,11 +1061,7 @@ fn given_neutralized_gitignore_in_vault_when_swap_in_then_gitignore_restored() {
     std::fs::create_dir_all(&vault_config_dir).unwrap();
     std::fs::write(vault_config_dir.join("app.yml"), "override: app\n").unwrap();
     // Note: dot.gitignore (not .gitignore)
-    std::fs::write(
-        vault_config_dir.join("dot.gitignore"),
-        "*.local\n",
-    )
-    .unwrap();
+    std::fs::write(vault_config_dir.join("dot.gitignore"), "*.local\n").unwrap();
 
     let fs = Arc::new(RealFileSystem);
     let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
@@ -1141,11 +1135,7 @@ fn given_standalone_neutralized_gitignore_when_swap_in_then_gitignore_restored()
     // Create NEUTRALIZED .gitignore in vault (simulating after swap_init)
     let swap_dir = vault_path.join("swap/subdir");
     std::fs::create_dir_all(&swap_dir).unwrap();
-    std::fs::write(
-        swap_dir.join("dot.gitignore"),
-        "override content\n",
-    )
-    .unwrap();
+    std::fs::write(swap_dir.join("dot.gitignore"), "override content\n").unwrap();
 
     let fs = Arc::new(RealFileSystem);
     let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
@@ -1294,8 +1284,7 @@ fn given_gitignore_full_cycle_when_swap_in_out_then_content_preserved() {
     );
 
     // Verify modifications were captured
-    let vault_content =
-        std::fs::read_to_string(swap_dir.join("dot.gitignore")).unwrap();
+    let vault_content = std::fs::read_to_string(swap_dir.join("dot.gitignore")).unwrap();
     assert!(
         vault_content.contains("*.tmp"),
         "modifications should be captured in vault"
@@ -1370,8 +1359,7 @@ fn given_standalone_gitignore_full_cycle_when_init_swap_in_swap_out_then_works()
     );
 
     // Verify modifications were captured
-    let vault_content =
-        std::fs::read_to_string(swap_dir.join("dot.gitignore")).unwrap();
+    let vault_content = std::fs::read_to_string(swap_dir.join("dot.gitignore")).unwrap();
     assert!(
         vault_content.contains("*.tmp"),
         "modifications should be captured in vault"
@@ -1744,7 +1732,10 @@ fn given_no_vaults_when_status_all_vaults_then_returns_empty() {
     let statuses = service.status_all_vaults(&vault_base).unwrap();
 
     // Assert
-    assert!(statuses.is_empty(), "should return empty when no vaults exist");
+    assert!(
+        statuses.is_empty(),
+        "should return empty when no vaults exist"
+    );
 }
 
 #[test]
@@ -1801,9 +1792,16 @@ fn given_vault_with_active_swap_when_status_all_vaults_then_returns_that_vault()
     let statuses = service.status_all_vaults(&vault_base).unwrap();
 
     // Assert
-    assert_eq!(statuses.len(), 1, "should return one vault with active swap");
+    assert_eq!(
+        statuses.len(),
+        1,
+        "should return one vault with active swap"
+    );
     assert_eq!(statuses[0].active_swaps.len(), 1);
-    assert!(matches!(statuses[0].active_swaps[0].state, SwapState::In { .. }));
+    assert!(matches!(
+        statuses[0].active_swaps[0].state,
+        SwapState::In { .. }
+    ));
 }
 
 #[test]
@@ -1853,7 +1851,10 @@ fn given_multiple_vaults_when_status_all_vaults_then_returns_only_those_with_swa
         "should return only vaults with active swaps"
     );
     assert!(
-        statuses[0].vault_path.to_string_lossy().contains("project1"),
+        statuses[0]
+            .vault_path
+            .to_string_lossy()
+            .contains("project1"),
         "should be project1's vault"
     );
 }
@@ -1910,7 +1911,10 @@ fn given_no_swapped_files_when_swap_out_vault_then_returns_empty() {
     let result = service.swap_out_vault(&project_dir).unwrap();
 
     // Assert
-    assert!(result.is_empty(), "should return empty when no files swapped in");
+    assert!(
+        result.is_empty(),
+        "should return empty when no files swapped in"
+    );
 }
 
 #[test]
@@ -1973,7 +1977,10 @@ fn given_no_vault_when_swap_out_vault_then_returns_empty() {
     let result = service.swap_out_vault(&project_dir).unwrap();
 
     // Assert
-    assert!(result.is_empty(), "should return empty for project without vault");
+    assert!(
+        result.is_empty(),
+        "should return empty for project without vault"
+    );
 }
 
 // ============================================================
@@ -2029,11 +2036,18 @@ fn given_vault_with_swapped_files_when_swap_out_all_vaults_then_swaps_out() {
 
     // Assert
     assert_eq!(results.len(), 1, "should process one vault");
-    assert_eq!(results[0].active_swaps.len(), 1, "should have swapped out one file");
+    assert_eq!(
+        results[0].active_swaps.len(),
+        1,
+        "should have swapped out one file"
+    );
 
     // Verify it's now clean
     let status_after = service.status_all_vaults(&vault_base).unwrap();
-    assert!(status_after.is_empty(), "should be clean after swap_out_all_vaults");
+    assert!(
+        status_after.is_empty(),
+        "should be clean after swap_out_all_vaults"
+    );
 }
 
 #[test]
@@ -2137,7 +2151,11 @@ fn given_vault_with_stale_source_dir_when_status_all_vaults_then_still_detects_s
 
     // Create a swap file that is "swapped in" (has sentinel marker)
     let hostname = get_hostname();
-    std::fs::write(swap_dir.join("config.yml.rsenv_original"), "original content\n").unwrap();
+    std::fs::write(
+        swap_dir.join("config.yml.rsenv_original"),
+        "original content\n",
+    )
+    .unwrap();
     std::fs::write(
         swap_dir.join(format!("config.yml@@{}@@rsenv_active", hostname)),
         "override content\n",
@@ -2248,5 +2266,9 @@ fn given_mismatched_source_dir_when_status_then_still_works() {
     let status = service.status(&project_dir).unwrap();
 
     // Assert - should find the swap file
-    assert_eq!(status.len(), 1, "should still find swap file despite metadata mismatch");
+    assert_eq!(
+        status.len(),
+        1,
+        "should still find swap file despite metadata mismatch"
+    );
 }

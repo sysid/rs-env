@@ -31,11 +31,11 @@ use tracing::debug;
 use walkdir::WalkDir;
 
 use crate::application::dotfile::{is_dotfile, neutralize_name, neutralize_path, restore_name};
+use crate::application::parse_rsenv_metadata;
 use crate::application::services::VaultService;
 use crate::application::{ApplicationError, ApplicationResult, IoResultExt};
 use crate::cli::output;
 use crate::config::Settings;
-use crate::application::parse_rsenv_metadata;
 use crate::domain::{expand_env_vars, SwapFile, SwapState, Vault, VaultSwapStatus};
 use crate::infrastructure::traits::FileSystem;
 
@@ -449,7 +449,10 @@ impl SwapService {
                 let expected_renames: Vec<String> = bare_dotfiles
                     .iter()
                     .map(|p| {
-                        let name = p.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+                        let name = p
+                            .file_name()
+                            .map(|n| n.to_string_lossy())
+                            .unwrap_or_default();
                         let neutralized = neutralize_name(&name);
                         format!(
                             "  {} → {}",
@@ -529,10 +532,7 @@ impl SwapService {
             })?;
 
             // 6. Restore any neutralized dot-files in project
-            debug!(
-                "swap_in: restoring dot-files in {}",
-                project_file.display()
-            );
+            debug!("swap_in: restoring dot-files in {}", project_file.display());
             self.restore_dotfiles(&project_file)?;
 
             swapped.push(SwapFile {
@@ -1034,8 +1034,14 @@ impl SwapService {
     ///
     /// # Returns
     /// Vec of VaultSwapStatus for vaults with active swaps (empty vec if all clean)
-    pub fn status_all_vaults(&self, vault_base_dir: &Path) -> ApplicationResult<Vec<VaultSwapStatus>> {
-        debug!("status_all_vaults: vault_base_dir={}", vault_base_dir.display());
+    pub fn status_all_vaults(
+        &self,
+        vault_base_dir: &Path,
+    ) -> ApplicationResult<Vec<VaultSwapStatus>> {
+        debug!(
+            "status_all_vaults: vault_base_dir={}",
+            vault_base_dir.display()
+        );
         let mut results = Vec::new();
 
         if !self.fs.exists(vault_base_dir) {
@@ -1056,7 +1062,10 @@ impl SwapService {
 
             // Skip if no dot.envrc (not a valid vault)
             if !self.fs.exists(&dot_envrc_path) {
-                debug!("status_all_vaults: skipping {} (no dot.envrc)", vault_path.display());
+                debug!(
+                    "status_all_vaults: skipping {} (no dot.envrc)",
+                    vault_path.display()
+                );
                 continue;
             }
 
@@ -1064,7 +1073,11 @@ impl SwapService {
             let content = match self.fs.read_to_string(&dot_envrc_path) {
                 Ok(c) => c,
                 Err(e) => {
-                    debug!("status_all_vaults: failed to read {}: {}", dot_envrc_path.display(), e);
+                    debug!(
+                        "status_all_vaults: failed to read {}: {}",
+                        dot_envrc_path.display(),
+                        e
+                    );
                     continue;
                 }
             };
@@ -1072,7 +1085,10 @@ impl SwapService {
             let metadata = match parse_rsenv_metadata(&content) {
                 Some(m) => m,
                 None => {
-                    debug!("status_all_vaults: no valid metadata in {}", dot_envrc_path.display());
+                    debug!(
+                        "status_all_vaults: no valid metadata in {}",
+                        dot_envrc_path.display()
+                    );
                     continue;
                 }
             };
@@ -1106,7 +1122,10 @@ impl SwapService {
             let status = match self.status_impl(&vault_path, &project_path) {
                 Ok(s) => s,
                 Err(e) => {
-                    debug!("status_all_vaults: failed to get status for vault {}: {}", vault_id, e);
+                    debug!(
+                        "status_all_vaults: failed to get status for vault {}: {}",
+                        vault_id, e
+                    );
                     continue;
                 }
             };
@@ -1133,7 +1152,10 @@ impl SwapService {
             }
         }
 
-        debug!("status_all_vaults: found {} vaults with active swaps", results.len());
+        debug!(
+            "status_all_vaults: found {} vaults with active swaps",
+            results.len()
+        );
         Ok(results)
     }
 
@@ -1175,8 +1197,14 @@ impl SwapService {
     ///
     /// # Returns
     /// Vec of VaultSwapStatus for vaults that were processed (had active swaps)
-    pub fn swap_out_all_vaults(&self, vault_base_dir: &Path) -> ApplicationResult<Vec<VaultSwapStatus>> {
-        debug!("swap_out_all_vaults: vault_base_dir={}", vault_base_dir.display());
+    pub fn swap_out_all_vaults(
+        &self,
+        vault_base_dir: &Path,
+    ) -> ApplicationResult<Vec<VaultSwapStatus>> {
+        debug!(
+            "swap_out_all_vaults: vault_base_dir={}",
+            vault_base_dir.display()
+        );
 
         // First get status to find vaults with active swaps
         let statuses = self.status_all_vaults(vault_base_dir)?;
@@ -1457,9 +1485,7 @@ mod tests {
         assert!(paths.contains(&&PathBuf::from(
             "/project/app/src/main/resources/application-local.yml"
         )));
-        assert!(paths.contains(&&PathBuf::from(
-            "/project/dockercompose/docker-compose.yml"
-        )));
+        assert!(paths.contains(&&PathBuf::from("/project/dockercompose/docker-compose.yml")));
         assert!(paths.contains(&&PathBuf::from("/project/CLAUDE.md")));
     }
 

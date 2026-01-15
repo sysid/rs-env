@@ -60,6 +60,12 @@ pub enum Commands {
         command: ConfigCommands,
     },
 
+    /// Manage git hooks for vault
+    Hook {
+        #[command(subcommand)]
+        command: HookCommands,
+    },
+
     /// Show status
     Info,
 
@@ -303,6 +309,25 @@ pub enum SopsCommands {
         /// Override vault_base_dir (requires --global)
         #[arg(long, requires = "global")]
         vault_base: Option<PathBuf>,
+        /// Exit with code 1 if any files need encryption (for scripting/hooks)
+        #[arg(long)]
+        check: bool,
+    },
+
+    /// Migrate old .enc files to new hash-based format
+    Migrate {
+        /// Directory (default: project vault)
+        #[arg(short, long, conflicts_with = "global")]
+        dir: Option<PathBuf>,
+        /// Migrate all vaults
+        #[arg(short, long, conflicts_with = "dir")]
+        global: bool,
+        /// Override vault_base_dir (requires --global)
+        #[arg(long, requires = "global")]
+        vault_base: Option<PathBuf>,
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        yes: bool,
     },
 
     /// Sync .gitignore with config patterns (current vault only, use --global for global)
@@ -354,4 +379,20 @@ pub enum ConfigCommands {
         #[arg(short, long)]
         global: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HookCommands {
+    /// Install pre-commit hook in vault's git repo
+    Install {
+        /// Force overwrite if hook exists
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Remove pre-commit hook from vault's git repo
+    Remove,
+
+    /// Show hook status
+    Status,
 }

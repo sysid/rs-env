@@ -6,6 +6,7 @@ pub mod dotfile;
 pub mod envrc;
 pub mod error;
 pub mod error_ext;
+pub mod hash;
 pub mod services;
 
 pub use envrc::{
