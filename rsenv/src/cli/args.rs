@@ -314,22 +314,6 @@ pub enum SopsCommands {
         check: bool,
     },
 
-    /// Migrate old .enc files to new hash-based format
-    Migrate {
-        /// Directory (default: project vault)
-        #[arg(short, long, conflicts_with = "global")]
-        dir: Option<PathBuf>,
-        /// Migrate all vaults
-        #[arg(short, long, conflicts_with = "dir")]
-        global: bool,
-        /// Override vault_base_dir (requires --global)
-        #[arg(long, requires = "global")]
-        vault_base: Option<PathBuf>,
-        /// Skip confirmation prompt
-        #[arg(short, long)]
-        yes: bool,
-    },
-
     /// Sync .gitignore with config patterns (current vault only, use --global for global)
     #[command(name = "gitignore-sync")]
     GitignoreSync {

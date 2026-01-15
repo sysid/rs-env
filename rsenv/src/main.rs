@@ -1396,68 +1396,6 @@ fn handle_sops(
 
             Ok(())
         }
-        SopsCommands::Migrate {
-            dir,
-            global,
-            vault_base,
-            yes,
-        } => {
-            let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
-            let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
-
-            output::header(&format!(
-                "Migrating old .enc files to hash-based format in: {}",
-                base_dir.display()
-            ));
-
-            // Check for old format files first
-            let status = service.status(Some(&base_dir)).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })?;
-
-            let old_format_count = status
-                .orphaned
-                .iter()
-                .filter(|p| rsenv::application::hash::is_old_enc_format(p))
-                .count();
-
-            if old_format_count == 0 {
-                output::success("No old format .enc files found. Nothing to migrate.");
-                return Ok(());
-            }
-
-            output::info(&format!(
-                "Found {} old format .enc files to migrate",
-                old_format_count
-            ));
-
-            if !yes {
-                output::warning("This will decrypt files temporarily and rename them.");
-                output::warning("Make sure you have the decryption key available.");
-                println!();
-                output::info("Run with --yes to proceed, or press Ctrl+C to abort.");
-                return Ok(());
-            }
-
-            let migrated = service.migrate(Some(&base_dir)).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })?;
-
-            if migrated.is_empty() {
-                output::info("No files migrated");
-            } else {
-                output::success(&format!("Migrated {} files:", migrated.len()));
-                for (old_path, new_path) in &migrated {
-                    output::detail(&format!(
-                        "{} → {}",
-                        old_path.file_name().unwrap_or_default().to_string_lossy(),
-                        new_path.file_name().unwrap_or_default().to_string_lossy()
-                    ));
-                }
-            }
-
-            Ok(())
-        }
     }
 }
 
