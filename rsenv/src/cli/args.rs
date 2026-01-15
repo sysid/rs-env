@@ -383,16 +383,27 @@ pub enum ConfigCommands {
 
 #[derive(Subcommand, Debug)]
 pub enum HookCommands {
-    /// Install pre-commit hook in vault's git repo
+    /// Install pre-commit hook in git repo
     Install {
         /// Force overwrite if hook exists
         #[arg(short, long)]
         force: bool,
+        /// Target git repo (default: parent of vault_base_dir)
+        #[arg(long)]
+        dir: Option<PathBuf>,
     },
 
-    /// Remove pre-commit hook from vault's git repo
-    Remove,
+    /// Remove pre-commit hook from git repo
+    Remove {
+        /// Target git repo (default: parent of vault_base_dir)
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
 
     /// Show hook status
-    Status,
+    Status {
+        /// Target git repo (default: parent of vault_base_dir)
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
 }

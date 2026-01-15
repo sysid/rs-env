@@ -73,7 +73,7 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
         Some(Commands::Config { command }) => handle_config(command, &settings, project_dir),
         Some(Commands::Env { command }) => handle_env(command, project_dir),
         Some(Commands::Guard { command }) => handle_guard(command, project_dir, &settings),
-        Some(Commands::Hook { command }) => handle_hook(command, vault_path, &settings),
+        Some(Commands::Hook { command }) => handle_hook(command, &settings),
         Some(Commands::Info) => handle_info(project_dir, &settings),
         Some(Commands::Sops { command }) => handle_sops(command, vault_path, &settings),
         Some(Commands::Swap { command }) => {
@@ -1461,48 +1461,61 @@ fn handle_sops(
     }
 }
 
-/// Pre-commit hook template for vault git repos.
+/// Pre-commit hook template for global vault checking.
 const PRE_COMMIT_HOOK: &str = r#"#!/bin/bash
 # rsenv pre-commit hook - prevents committing with stale/unencrypted files
 # Installed by: rsenv hook install
-
-VAULT_DIR="$(git rev-parse --show-toplevel)"
 
 if ! command -v rsenv &> /dev/null; then
     echo "Warning: rsenv not found in PATH, skipping encryption check"
     exit 0
 fi
 
-if ! rsenv sops status --check --dir "$VAULT_DIR" 2>/dev/null; then
+if ! rsenv sops status --global --check 2>/dev/null; then
     echo ""
-    echo "ERROR: Unencrypted or stale files in vault."
-    echo "       Run 'rsenv sops encrypt' to update encryption."
-    echo "       Use 'rsenv sops status' to see details."
+    echo "ERROR: Unencrypted or stale files in vault(s)."
+    echo "       Run 'rsenv sops encrypt --global' to update encryption."
+    echo "       Use 'rsenv sops status --global' to see details."
     echo ""
     exit 1
 fi
 "#;
 
-fn handle_hook(
-    command: HookCommands,
-    vault_path: Option<std::path::PathBuf>,
-    _settings: &Settings,
-) -> rsenv::cli::CliResult<()> {
-    let vault_dir = vault_path.ok_or_else(|| {
-        rsenv::cli::CliError::Usage("No vault found. Run 'rsenv init' first.".into())
-    })?;
+fn handle_hook(command: HookCommands, settings: &Settings) -> rsenv::cli::CliResult<()> {
+    // Extract dir override from command and determine target directory
+    let dir_override = match &command {
+        HookCommands::Install { dir, .. } => dir.clone(),
+        HookCommands::Remove { dir } => dir.clone(),
+        HookCommands::Status { dir } => dir.clone(),
+    };
 
-    // Check if vault is a git repo
-    let git_dir = vault_dir.join(".git");
+    // Default: parent of vault_base_dir (e.g., ~/.rsenv if vault_base_dir is ~/.rsenv/vaults)
+    let target_dir = dir_override.unwrap_or_else(|| {
+        settings
+            .vault_base_dir
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| settings.vault_base_dir.clone())
+    });
+
+    // Verify target directory exists
+    if !target_dir.exists() {
+        return Err(rsenv::cli::CliError::Usage(format!(
+            "Target directory does not exist: {}",
+            target_dir.display()
+        )));
+    }
+
+    let git_dir = target_dir.join(".git");
     let hooks_dir = git_dir.join("hooks");
     let hook_path = hooks_dir.join("pre-commit");
 
     match command {
-        HookCommands::Install { force } => {
+        HookCommands::Install { force, .. } => {
             if !git_dir.exists() {
                 return Err(rsenv::cli::CliError::Usage(format!(
-                    "Vault is not a git repository: {}",
-                    vault_dir.display()
+                    "Not a git repository: {}",
+                    target_dir.display()
                 )));
             }
 
@@ -1562,9 +1575,9 @@ fn handle_hook(
                 "Installed pre-commit hook: {}",
                 hook_path.display()
             ));
-            output::info("Hook will block commits when unencrypted files exist in vault.");
+            output::info("Hook will block commits when unencrypted files exist in any vault.");
         }
-        HookCommands::Remove => {
+        HookCommands::Remove { .. } => {
             if !hook_path.exists() {
                 output::info("No pre-commit hook found");
                 return Ok(());
@@ -1590,11 +1603,11 @@ fn handle_hook(
 
             output::success(&format!("Removed pre-commit hook: {}", hook_path.display()));
         }
-        HookCommands::Status => {
+        HookCommands::Status { .. } => {
             if !git_dir.exists() {
                 output::warning(&format!(
-                    "Vault is not a git repository: {}",
-                    vault_dir.display()
+                    "Not a git repository: {}",
+                    target_dir.display()
                 ));
                 return Ok(());
             }
