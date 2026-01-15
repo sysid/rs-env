@@ -217,7 +217,7 @@ pub enum SwapCommands {
         /// Swap out all vaults
         #[arg(short, long, conflicts_with = "files")]
         global: bool,
-        /// Override vault_base_dir (requires --global)
+        /// Override vaults directory (requires --global)
         #[arg(long, requires = "global")]
         vault_base: Option<PathBuf>,
     },
@@ -239,7 +239,7 @@ pub enum SwapCommands {
         /// Silent mode: return exit code only (0=clean, 1=has active swaps)
         #[arg(short, long, requires = "global")]
         silent: bool,
-        /// Override vault_base_dir (requires --global)
+        /// Override vaults directory (requires --global)
         #[arg(long, requires = "global")]
         vault_base: Option<PathBuf>,
     },
@@ -261,10 +261,10 @@ pub enum SopsCommands {
         /// Directory (default: project vault)
         #[arg(short, long, conflicts_with_all = ["file", "global"])]
         dir: Option<PathBuf>,
-        /// Encrypt all vaults (entire vault_base_dir)
+        /// Encrypt all vaults
         #[arg(short, long, conflicts_with_all = ["file", "dir"])]
         global: bool,
-        /// Override vault_base_dir (requires --global)
+        /// Override vaults directory (requires --global)
         #[arg(long, requires = "global")]
         vault_base: Option<PathBuf>,
     },
@@ -277,10 +277,10 @@ pub enum SopsCommands {
         /// Directory (default: project vault)
         #[arg(short, long, conflicts_with_all = ["file", "global"])]
         dir: Option<PathBuf>,
-        /// Decrypt all vaults (entire vault_base_dir)
+        /// Decrypt all vaults
         #[arg(short, long, conflicts_with_all = ["file", "dir"])]
         global: bool,
-        /// Override vault_base_dir (requires --global)
+        /// Override vaults directory (requires --global)
         #[arg(long, requires = "global")]
         vault_base: Option<PathBuf>,
     },
@@ -290,10 +290,10 @@ pub enum SopsCommands {
         /// Directory (default: project vault)
         #[arg(short, long, conflicts_with = "global")]
         dir: Option<PathBuf>,
-        /// Clean all vaults (entire vault_base_dir)
+        /// Clean all vaults
         #[arg(short, long, conflicts_with = "dir")]
         global: bool,
-        /// Override vault_base_dir (requires --global)
+        /// Override vaults directory (requires --global)
         #[arg(long, requires = "global")]
         vault_base: Option<PathBuf>,
     },
@@ -303,10 +303,10 @@ pub enum SopsCommands {
         /// Directory (default: project vault)
         #[arg(short, long, conflicts_with = "global")]
         dir: Option<PathBuf>,
-        /// Show status for all vaults (entire vault_base_dir)
+        /// Show status for all vaults
         #[arg(short, long, conflicts_with = "dir")]
         global: bool,
-        /// Override vault_base_dir (requires --global)
+        /// Override vaults directory (requires --global)
         #[arg(long, requires = "global")]
         vault_base: Option<PathBuf>,
         /// Exit with code 1 if any files need encryption (for scripting/hooks)
@@ -372,21 +372,21 @@ pub enum HookCommands {
         /// Force overwrite if hook exists
         #[arg(short, long)]
         force: bool,
-        /// Target git repo (default: parent of vault_base_dir)
+        /// Target git repo (default: base_dir)
         #[arg(long)]
         dir: Option<PathBuf>,
     },
 
     /// Remove pre-commit hook from git repo
     Remove {
-        /// Target git repo (default: parent of vault_base_dir)
+        /// Target git repo (default: base_dir)
         #[arg(long)]
         dir: Option<PathBuf>,
     },
 
     /// Show hook status
     Status {
-        /// Target git repo (default: parent of vault_base_dir)
+        /// Target git repo (default: base_dir)
         #[arg(long)]
         dir: Option<PathBuf>,
     },

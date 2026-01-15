@@ -1,7 +1,7 @@
 //! Gitignore management service
 //!
 //! Two-tier gitignore system:
-//! - Tier 1: Global gitignore at `<vault_base_dir>/.gitignore`
+//! - Tier 1: Global gitignore at `<base_dir>/.gitignore`
 //! - Tier 2: Per-vault gitignore at `<vault>/.gitignore` (only if vault has local config)
 
 use std::collections::BTreeSet;
@@ -155,7 +155,7 @@ impl GitignoreService {
 
     /// Get global gitignore path.
     pub fn global_gitignore_path(&self) -> PathBuf {
-        self.global_settings.vault_base_dir.join(".gitignore")
+        self.global_settings.base_dir.join(".gitignore")
     }
 
     /// Get per-vault gitignore path.

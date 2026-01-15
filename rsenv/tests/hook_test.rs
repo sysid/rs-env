@@ -200,21 +200,19 @@ fn given_rsenv_hook_when_status_then_reports_installed() {
 // ============================================================
 
 #[test]
-fn given_vault_base_dir_when_default_target_then_uses_parent() {
+fn given_base_dir_when_default_target_then_uses_base_dir_directly() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    // Simulate vault_base_dir = /tmp/xxx/.rsenv/vaults
-    let rsenv_dir = temp.path().join(".rsenv");
-    let vault_base_dir = rsenv_dir.join("vaults");
-    fs::create_dir_all(&vault_base_dir).unwrap();
+    // Simulate base_dir = /tmp/xxx/.rsenv (where .git typically lives)
+    let base_dir = temp.path().join(".rsenv");
+    fs::create_dir_all(&base_dir).unwrap();
 
-    // The default target should be parent of vault_base_dir = .rsenv
-    let expected_target = vault_base_dir
-        .parent()
-        .expect("vault_base_dir should have parent");
+    // With new config, base_dir IS the target for hooks (no .parent() needed)
+    // vaults are stored in base_dir/vaults, but hooks go in base_dir/.git/hooks
+    let expected_hook_parent = base_dir.clone();
 
-    // Assert
-    assert_eq!(expected_target, rsenv_dir);
+    // Assert - base_dir is used directly
+    assert_eq!(expected_hook_parent, base_dir);
 }
 
 // ============================================================

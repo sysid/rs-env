@@ -953,10 +953,7 @@ fn handle_info(
             // Configuration summary
             println!();
             output::info("Config:");
-            output::detail(&format!(
-                "vault_base_dir: {}",
-                settings.vault_base_dir.display()
-            ));
+            output::detail(&format!("base_dir: {}", settings.base_dir.display()));
             output::detail(&format!("editor: {}", settings.editor));
             if let Some(ref gpg_key) = settings.sops.gpg_key {
                 let truncated = if gpg_key.len() > 16 {
@@ -1030,7 +1027,7 @@ fn handle_sops(
                 output::success(&format!("Created: {}", result.display()));
             } else {
                 // Directory/vault/global level
-                let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
+                let vault_base_dir = vault_base.unwrap_or_else(|| settings.vaults_dir());
                 let base_dir =
                     resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
                 output::header(&format!("Encrypting in: {}", base_dir.display()));
@@ -1064,7 +1061,7 @@ fn handle_sops(
                 output::success(&format!("Created: {}", result.display()));
             } else {
                 // Directory/vault/global level
-                let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
+                let vault_base_dir = vault_base.unwrap_or_else(|| settings.vaults_dir());
                 let base_dir =
                     resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
                 output::header(&format!("Decrypting in: {}", base_dir.display()));
@@ -1088,7 +1085,7 @@ fn handle_sops(
             global,
             vault_base,
         } => {
-            let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
+            let vault_base_dir = vault_base.unwrap_or_else(|| settings.vaults_dir());
             let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
             output::header(&format!("Cleaning in: {}", base_dir.display()));
             let deleted = service.clean(Some(&base_dir)).map_err(|e| {
@@ -1111,7 +1108,7 @@ fn handle_sops(
             vault_base,
             check,
         } => {
-            let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
+            let vault_base_dir = vault_base.unwrap_or_else(|| settings.vaults_dir());
             let base_dir = resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
             let status = service.status(Some(&base_dir)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
@@ -1427,14 +1424,8 @@ fn handle_hook(command: HookCommands, settings: &Settings) -> rsenv::cli::CliRes
         HookCommands::Status { dir } => dir.clone(),
     };
 
-    // Default: parent of vault_base_dir (e.g., ~/.rsenv if vault_base_dir is ~/.rsenv/vaults)
-    let target_dir = dir_override.unwrap_or_else(|| {
-        settings
-            .vault_base_dir
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| settings.vault_base_dir.clone())
-    });
+    // Default: base_dir (e.g., ~/.rsenv where .git typically lives)
+    let target_dir = dir_override.unwrap_or_else(|| settings.base_dir.clone());
 
     // Verify target directory exists
     if !target_dir.exists() {
@@ -1616,7 +1607,7 @@ fn handle_swap(
         } => {
             if global {
                 // Global: swap out all vaults
-                let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
+                let vault_base_dir = vault_base.unwrap_or_else(|| settings.vaults_dir());
 
                 let results = service.swap_out_all_vaults(&vault_base_dir).map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
@@ -1696,7 +1687,7 @@ fn handle_swap(
         } => {
             if global {
                 // Global: show status across all vaults
-                let vault_base_dir = vault_base.unwrap_or_else(|| settings.vault_base_dir.clone());
+                let vault_base_dir = vault_base.unwrap_or_else(|| settings.vaults_dir());
 
                 let statuses = service.status_all_vaults(&vault_base_dir).map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))

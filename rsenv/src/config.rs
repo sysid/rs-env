@@ -50,8 +50,8 @@ impl Default for SopsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Settings {
-    /// Base directory for vaults (default: ~/.rsenv/vaults)
-    pub vault_base_dir: PathBuf,
+    /// Base directory for rsenv (default: ~/.rsenv)
+    pub base_dir: PathBuf,
     /// Editor command (default: $EDITOR or "vim")
     pub editor: String,
     /// SOPS encryption settings
@@ -63,22 +63,22 @@ impl Default for Settings {
         // Try $EDITOR, fall back to vim
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".into());
 
-        // Default vault directory
-        let vault_base_dir = dirs_default_vault_dir();
+        // Default base directory
+        let base_dir = dirs_default_base_dir();
 
         Self {
-            vault_base_dir,
+            base_dir,
             editor,
             sops: SopsConfig::default(),
         }
     }
 }
 
-/// Get the default vault directory (~/.rsenv/vaults).
-fn dirs_default_vault_dir() -> PathBuf {
+/// Get the default base directory (~/.rsenv).
+fn dirs_default_base_dir() -> PathBuf {
     directories::BaseDirs::new()
-        .map(|dirs| dirs.home_dir().join(".rsenv").join("vaults"))
-        .unwrap_or_else(|| PathBuf::from("~/.rsenv/vaults"))
+        .map(|dirs| dirs.home_dir().join(".rsenv"))
+        .unwrap_or_else(|| PathBuf::from("~/.rsenv"))
 }
 
 /// Get the XDG config directory for rsenv.
@@ -97,13 +97,18 @@ pub fn vault_config_path(vault_dir: &Path) -> PathBuf {
 }
 
 impl Settings {
+    /// Get the vaults directory (base_dir/vaults).
+    pub fn vaults_dir(&self) -> PathBuf {
+        self.base_dir.join("vaults")
+    }
+
     /// Expand shell variables and tilde in path-like fields.
     ///
     /// Handles `~`, `$VAR`, and `${VAR}` syntax.
     fn expand_paths(&mut self) {
-        // Expand vault_base_dir
-        let expanded = expand_env_vars(self.vault_base_dir.to_string_lossy().as_ref());
-        self.vault_base_dir = PathBuf::from(expanded);
+        // Expand base_dir
+        let expanded = expand_env_vars(self.base_dir.to_string_lossy().as_ref());
+        self.base_dir = PathBuf::from(expanded);
 
         // Expand editor (may contain path like ~/bin/myeditor)
         self.editor = expand_env_vars(&self.editor);
@@ -126,8 +131,8 @@ impl Settings {
         let defaults = Settings::default();
         builder = builder
             .set_default(
-                "vault_base_dir",
-                defaults.vault_base_dir.to_string_lossy().to_string(),
+                "base_dir",
+                defaults.base_dir.to_string_lossy().to_string(),
             )
             .map_err(config_err)?
             .set_default("editor", defaults.editor.clone())
@@ -191,8 +196,8 @@ impl Settings {
         let defaults = Settings::default();
         builder = builder
             .set_default(
-                "vault_base_dir",
-                defaults.vault_base_dir.to_string_lossy().to_string(),
+                "base_dir",
+                defaults.base_dir.to_string_lossy().to_string(),
             )
             .map_err(config_err)?
             .set_default("editor", defaults.editor.clone())
@@ -245,8 +250,8 @@ impl Settings {
         let defaults = Settings::default();
         builder = builder
             .set_default(
-                "vault_base_dir",
-                defaults.vault_base_dir.to_string_lossy().to_string(),
+                "base_dir",
+                defaults.base_dir.to_string_lossy().to_string(),
             )
             .map_err(config_err)?
             .set_default("editor", defaults.editor.clone())
@@ -295,8 +300,8 @@ impl Settings {
 #   Local:  <vault_dir>/.rsenv.toml (project-specific, in vault)
 #   Env:    RSENV_* environment variables
 
-# Base directory for vaults
-# vault_base_dir = "~/.rsenv/vaults"
+# Base directory for rsenv (vaults stored in base_dir/vaults)
+# base_dir = "~/.rsenv"
 
 # Editor for editing env files
 # editor = "vim"
@@ -334,10 +339,8 @@ mod tests {
     #[test]
     fn given_no_config_when_loading_then_uses_defaults() {
         let settings = Settings::load(None).expect("load defaults");
-        assert!(settings
-            .vault_base_dir
-            .to_string_lossy()
-            .contains(".rsenv/vaults"));
+        assert!(settings.base_dir.to_string_lossy().contains(".rsenv"));
+        assert!(!settings.base_dir.to_string_lossy().contains("vaults"));
         assert!(!settings.editor.is_empty());
     }
 
@@ -349,9 +352,9 @@ mod tests {
     }
 
     #[test]
-    fn given_tilde_in_vault_base_dir_when_expand_paths_then_expands_to_home() {
+    fn given_tilde_in_base_dir_when_expand_paths_then_expands_to_home() {
         let mut settings = Settings {
-            vault_base_dir: PathBuf::from("~/.rsenv/vaults"),
+            base_dir: PathBuf::from("~/.rsenv"),
             editor: "~/bin/myeditor".to_string(),
             sops: SopsConfig::default(),
         };
@@ -359,15 +362,15 @@ mod tests {
         settings.expand_paths();
 
         let home = std::env::var("HOME").expect("HOME should be set");
-        let vault_str = settings.vault_base_dir.to_string_lossy();
+        let vault_str = settings.base_dir.to_string_lossy();
         assert!(
             vault_str.starts_with(&home),
-            "vault_base_dir should start with home dir: {}",
+            "base_dir should start with home dir: {}",
             vault_str
         );
         assert!(
             !vault_str.contains('~'),
-            "vault_base_dir should not contain tilde: {}",
+            "base_dir should not contain tilde: {}",
             vault_str
         );
         assert!(
@@ -380,7 +383,7 @@ mod tests {
     #[test]
     fn given_env_var_in_path_when_expand_paths_then_expands_variable() {
         let mut settings = Settings {
-            vault_base_dir: PathBuf::from("$HOME/.rsenv/vaults"),
+            base_dir: PathBuf::from("$HOME/.rsenv"),
             editor: "${HOME}/bin/myeditor".to_string(),
             sops: SopsConfig::default(),
         };
@@ -389,8 +392,8 @@ mod tests {
 
         let home = std::env::var("HOME").expect("HOME should be set");
         assert!(
-            settings.vault_base_dir.to_string_lossy().starts_with(&home),
-            "vault_base_dir should expand $HOME"
+            settings.base_dir.to_string_lossy().starts_with(&home),
+            "base_dir should expand $HOME"
         );
         assert!(
             settings.editor.starts_with(&home),

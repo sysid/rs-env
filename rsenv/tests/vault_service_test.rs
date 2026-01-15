@@ -9,10 +9,10 @@ use rsenv::application::services::VaultService;
 use rsenv::config::Settings;
 use rsenv::infrastructure::traits::RealFileSystem;
 
-/// Helper to create a test Settings with custom vault_base_dir
-fn test_settings(vault_base_dir: PathBuf) -> Settings {
+/// Helper to create a test Settings with custom base_dir
+fn test_settings(base_dir: PathBuf) -> Settings {
     Settings {
-        vault_base_dir,
+        base_dir,
         editor: "vim".to_string(),
         sops: Default::default(),
     }
@@ -26,14 +26,15 @@ fn test_settings(vault_base_dir: PathBuf) -> Settings {
 fn given_new_project_when_init_then_creates_vault_directory() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
-    std::fs::create_dir_all(&vault_base).unwrap();
-    // Canonicalize vault_base for comparison (handles /var -> /private/var on macOS)
-    let vault_base_canonical = std::fs::canonicalize(&vault_base).unwrap();
+    // Create vaults subdir and canonicalize for comparison (handles /var -> /private/var on macOS)
+    let vaults_dir = base_dir.join("vaults");
+    std::fs::create_dir_all(&vaults_dir).unwrap();
+    let vaults_dir_canonical = std::fs::canonicalize(&vaults_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -42,18 +43,18 @@ fn given_new_project_when_init_then_creates_vault_directory() {
 
     // Assert - vault directory was created
     assert!(vault.path.exists());
-    assert!(vault.path.starts_with(&vault_base_canonical));
+    assert!(vault.path.starts_with(&vaults_dir_canonical));
 }
 
 #[test]
 fn given_new_project_when_init_then_vault_has_sentinel_id() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -69,11 +70,11 @@ fn given_new_project_when_init_then_vault_has_sentinel_id() {
 fn given_new_project_when_init_then_creates_envrc_symlink() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -93,11 +94,11 @@ fn given_new_project_when_init_then_creates_envrc_symlink() {
 fn given_new_project_when_init_then_creates_dot_envrc_in_vault() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -117,11 +118,11 @@ fn given_new_project_when_init_then_creates_dot_envrc_in_vault() {
 fn given_new_project_when_init_then_creates_subdirectories() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -138,11 +139,11 @@ fn given_new_project_when_init_then_creates_subdirectories() {
 fn given_new_project_when_init_then_creates_default_env_files() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -161,11 +162,11 @@ fn given_new_project_when_init_then_creates_default_env_files() {
 fn given_new_project_when_init_then_env_files_have_correct_content() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -186,11 +187,11 @@ fn given_new_project_when_init_then_env_files_have_correct_content() {
 fn given_already_initialized_project_when_init_then_returns_existing_vault() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -211,11 +212,11 @@ fn given_already_initialized_project_when_init_then_returns_existing_vault() {
 fn given_initialized_project_when_get_then_returns_vault() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -234,11 +235,11 @@ fn given_initialized_project_when_get_then_returns_vault() {
 fn given_uninitialized_project_when_get_then_returns_none() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -257,7 +258,7 @@ fn given_uninitialized_project_when_get_then_returns_none() {
 fn given_file_in_project_when_guard_then_moves_to_vault() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
@@ -265,7 +266,7 @@ fn given_file_in_project_when_guard_then_moves_to_vault() {
     let config_file = project_dir.join("config.yml");
     std::fs::write(&config_file, "secret: password123\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let vault = service.init(&project_dir, false).unwrap();
@@ -284,14 +285,14 @@ fn given_file_in_project_when_guard_then_moves_to_vault() {
 fn given_file_in_project_when_guard_then_creates_symlink() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
     let config_file = project_dir.join("config.yml");
     std::fs::write(&config_file, "secret: password123\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let _vault = service.init(&project_dir, false).unwrap();
@@ -314,7 +315,7 @@ fn given_file_in_project_when_guard_then_creates_symlink() {
 fn given_file_in_subdir_when_guard_then_preserves_structure() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     let subdir = project_dir.join("config").join("secrets");
     std::fs::create_dir_all(&subdir).unwrap();
@@ -322,7 +323,7 @@ fn given_file_in_subdir_when_guard_then_preserves_structure() {
     let config_file = subdir.join("api.key");
     std::fs::write(&config_file, "sk-12345\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let _vault = service.init(&project_dir, false).unwrap();
@@ -339,14 +340,14 @@ fn given_file_in_subdir_when_guard_then_preserves_structure() {
 fn given_uninitialized_project_when_guard_then_returns_error() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
     let config_file = project_dir.join("config.yml");
     std::fs::write(&config_file, "secret: password123\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     // Note: NOT calling init()
@@ -366,14 +367,14 @@ fn given_uninitialized_project_when_guard_then_returns_error() {
 fn given_guarded_file_when_unguard_then_restores_original() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
     let config_file = project_dir.join("config.yml");
     std::fs::write(&config_file, "secret: password123\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let _vault = service.init(&project_dir, false).unwrap();
@@ -393,14 +394,14 @@ fn given_guarded_file_when_unguard_then_restores_original() {
 fn given_guarded_file_when_unguard_then_removes_from_vault() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
     let config_file = project_dir.join("config.yml");
     std::fs::write(&config_file, "secret: password123\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let _vault = service.init(&project_dir, false).unwrap();
@@ -418,14 +419,14 @@ fn given_guarded_file_when_unguard_then_removes_from_vault() {
 fn given_non_symlink_when_unguard_then_returns_error() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
     let config_file = project_dir.join("config.yml");
     std::fs::write(&config_file, "not guarded\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let _vault = service.init(&project_dir, false).unwrap();
@@ -446,11 +447,11 @@ fn given_non_symlink_when_unguard_then_returns_error() {
 fn given_new_project_when_init_then_dot_envrc_has_rsenv_section() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -478,11 +479,11 @@ fn given_new_project_when_init_then_dot_envrc_has_rsenv_section() {
 fn given_init_with_relative_when_checking_dot_envrc_then_config_relative_is_true() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -502,11 +503,11 @@ fn given_init_with_relative_when_checking_dot_envrc_then_config_relative_is_true
 fn given_init_with_absolute_when_checking_dot_envrc_then_config_relative_is_false() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -526,11 +527,11 @@ fn given_init_with_absolute_when_checking_dot_envrc_then_config_relative_is_fals
 fn given_init_when_checking_dot_envrc_then_has_rsenv_vault_export() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -555,11 +556,11 @@ fn given_init_when_checking_dot_envrc_then_has_rsenv_vault_export() {
 fn given_init_when_checking_dot_envrc_then_has_state_metadata() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -595,11 +596,11 @@ fn given_init_when_checking_dot_envrc_then_has_state_metadata() {
 fn given_initialized_project_when_reset_then_removes_envrc_symlink() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let _vault = service.init(&project_dir, false).unwrap();
@@ -625,7 +626,7 @@ fn given_initialized_project_when_reset_then_removes_envrc_symlink() {
 fn given_guarded_files_when_reset_then_restores_all_files() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
@@ -635,7 +636,7 @@ fn given_guarded_files_when_reset_then_restores_all_files() {
     std::fs::write(&file1, "config content").unwrap();
     std::fs::write(&file2, "secret content").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let _vault = service.init(&project_dir, false).unwrap();
@@ -665,7 +666,7 @@ fn given_guarded_files_when_reset_then_restores_all_files() {
 fn given_existing_envrc_when_init_then_preserves_content_in_dot_envrc() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
@@ -673,7 +674,7 @@ fn given_existing_envrc_when_init_then_preserves_content_in_dot_envrc() {
     let envrc_path = project_dir.join(".envrc");
     std::fs::write(&envrc_path, "original .envrc content\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let vault = service.init(&project_dir, false).unwrap();
@@ -710,11 +711,11 @@ fn given_existing_envrc_when_init_then_preserves_content_in_dot_envrc() {
 fn given_no_backup_when_reset_then_moves_dot_envrc_and_removes_section() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let _vault = service.init(&project_dir, false).unwrap();
@@ -740,11 +741,11 @@ fn given_no_backup_when_reset_then_moves_dot_envrc_and_removes_section() {
 fn given_reset_when_checking_vault_then_vault_still_exists() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let vault = service.init(&project_dir, false).unwrap();
@@ -764,11 +765,11 @@ fn given_reset_when_checking_vault_then_vault_still_exists() {
 fn given_uninitialized_project_when_reset_then_returns_error() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     // Note: NOT calling init()
@@ -784,7 +785,7 @@ fn given_uninitialized_project_when_reset_then_returns_error() {
 fn given_nested_guarded_files_when_reset_then_preserves_directory_structure() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     let subdir = project_dir.join("config").join("secrets");
     std::fs::create_dir_all(&subdir).unwrap();
@@ -792,7 +793,7 @@ fn given_nested_guarded_files_when_reset_then_preserves_directory_structure() {
     let nested_file = subdir.join("api.key");
     std::fs::write(&nested_file, "secret-api-key").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let _vault = service.init(&project_dir, false).unwrap();
@@ -822,7 +823,7 @@ fn given_nested_guarded_files_when_reset_then_preserves_directory_structure() {
 fn given_directory_when_guard_then_moves_to_vault_and_creates_symlink() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
@@ -832,7 +833,7 @@ fn given_directory_when_guard_then_moves_to_vault_and_creates_symlink() {
     std::fs::write(config_dir.join("api.key"), "sk-12345\n").unwrap();
     std::fs::write(config_dir.join("db.key"), "postgres://secret\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let vault = service.init(&project_dir, false).unwrap();
@@ -873,7 +874,7 @@ fn given_directory_when_guard_then_moves_to_vault_and_creates_symlink() {
 fn given_guarded_directory_when_unguard_then_restores() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
@@ -883,7 +884,7 @@ fn given_guarded_directory_when_unguard_then_restores() {
     std::fs::write(config_dir.join("api.key"), "sk-12345\n").unwrap();
     std::fs::write(config_dir.join("nested/deep.key"), "deep-secret\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let _vault = service.init(&project_dir, false).unwrap();
@@ -915,7 +916,7 @@ fn given_guarded_directory_when_unguard_then_restores() {
 fn given_nested_directory_when_guard_then_preserves_structure_in_vault() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     let subdir = project_dir.join("config").join("env");
     std::fs::create_dir_all(&subdir).unwrap();
@@ -925,7 +926,7 @@ fn given_nested_directory_when_guard_then_preserves_structure_in_vault() {
     std::fs::create_dir_all(&secrets_dir).unwrap();
     std::fs::write(secrets_dir.join("key.pem"), "-----BEGIN KEY-----\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let _vault = service.init(&project_dir, false).unwrap();
@@ -957,11 +958,11 @@ fn given_nested_directory_when_guard_then_preserves_structure_in_vault() {
 fn given_deleted_symlink_when_reconnect_then_recreates_symlink() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -986,13 +987,13 @@ fn given_deleted_symlink_when_reconnect_then_recreates_symlink() {
 fn given_moved_project_when_reconnect_then_updates_source_dir() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let old_project_dir = temp.path().join("old_location");
     let new_project_dir = temp.path().join("new_location");
     std::fs::create_dir_all(&old_project_dir).unwrap();
     std::fs::create_dir_all(&new_project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -1025,11 +1026,11 @@ fn given_moved_project_when_reconnect_then_updates_source_dir() {
 fn given_already_linked_when_reconnect_then_returns_success() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -1049,16 +1050,16 @@ fn given_already_linked_when_reconnect_then_returns_success() {
 fn given_not_rsenv_file_when_reconnect_then_returns_error() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
-    std::fs::create_dir_all(&vault_base).unwrap();
+    std::fs::create_dir_all(&base_dir).unwrap();
 
     // Create a file without rsenv section
-    let fake_envrc = vault_base.join("not-rsenv.envrc");
+    let fake_envrc = base_dir.join("not-rsenv.envrc");
     std::fs::write(&fake_envrc, "# just a regular file\nexport FOO=bar\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -1075,11 +1076,11 @@ fn given_not_rsenv_file_when_reconnect_then_returns_error() {
 fn given_envrc_exists_as_file_when_reconnect_then_returns_error() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
 
@@ -1109,7 +1110,7 @@ fn given_envrc_exists_as_file_when_reconnect_then_returns_error() {
 fn given_dotfile_when_guard_then_neutralizes_in_vault() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
@@ -1117,7 +1118,7 @@ fn given_dotfile_when_guard_then_neutralizes_in_vault() {
     let gitignore = project_dir.join(".gitignore");
     std::fs::write(&gitignore, "*.local\n*.tmp\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let vault = service.init(&project_dir, false).unwrap();
@@ -1153,7 +1154,7 @@ fn given_dotfile_when_guard_then_neutralizes_in_vault() {
 fn given_guarded_dotfile_when_unguard_then_restores_original_name() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     std::fs::create_dir_all(&project_dir).unwrap();
 
@@ -1161,7 +1162,7 @@ fn given_guarded_dotfile_when_unguard_then_restores_original_name() {
     let eslintrc = project_dir.join(".eslintrc");
     std::fs::write(&eslintrc, r#"{"extends": "standard"}"#).unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let _vault = service.init(&project_dir, false).unwrap();
@@ -1184,7 +1185,7 @@ fn given_guarded_dotfile_when_unguard_then_restores_original_name() {
 fn given_dotfile_in_subdir_when_guard_then_neutralizes_path() {
     // Arrange
     let temp = TempDir::new().unwrap();
-    let vault_base = temp.path().join("vaults");
+    let base_dir = temp.path().to_path_buf();
     let project_dir = temp.path().join("myproject");
     let subdir = project_dir.join(".hidden").join("config");
     std::fs::create_dir_all(&subdir).unwrap();
@@ -1193,7 +1194,7 @@ fn given_dotfile_in_subdir_when_guard_then_neutralizes_path() {
     let config = subdir.join(".secret");
     std::fs::write(&config, "secret=value\n").unwrap();
 
-    let settings = Arc::new(test_settings(vault_base));
+    let settings = Arc::new(test_settings(base_dir));
     let fs = Arc::new(RealFileSystem);
     let service = VaultService::new(fs, settings);
     let vault = service.init(&project_dir, false).unwrap();

@@ -122,7 +122,7 @@ impl VaultService {
         let sentinel_id = format!("{}-{}", project_name, short_id);
 
         // Create vault directory
-        let vault_path = self.settings.vault_base_dir.join(&sentinel_id);
+        let vault_path = self.settings.vaults_dir().join(&sentinel_id);
         debug!("init: creating vault at {}", vault_path.display());
         self.fs
             .create_dir_all(&vault_path)

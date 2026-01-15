@@ -10,9 +10,9 @@ use rsenv::config::{Settings, SopsConfig};
 use rsenv::infrastructure::traits::{RealCommandRunner, RealFileSystem};
 
 /// Helper to create test settings with custom SOPS config
-fn test_settings(vault_base_dir: PathBuf, sops: SopsConfig) -> Settings {
+fn test_settings(base_dir: PathBuf, sops: SopsConfig) -> Settings {
     Settings {
-        vault_base_dir,
+        base_dir,
         editor: "vim".to_string(),
         sops,
     }

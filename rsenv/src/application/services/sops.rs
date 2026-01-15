@@ -160,7 +160,7 @@ impl SopsService {
         );
         let dir = base_dir
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.settings.vault_base_dir.clone());
+            .unwrap_or_else(|| self.settings.vaults_dir());
 
         // Collect plaintext files matching encryption patterns
         let plaintext_files = self.collect_files(
@@ -507,7 +507,7 @@ impl SopsService {
         );
         let dir = base_dir
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.settings.vault_base_dir.clone());
+            .unwrap_or_else(|| self.settings.vaults_dir());
 
         let files = self.collect_files(&dir, &self.settings.sops.file_extensions_dec, &[])?;
 

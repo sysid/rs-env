@@ -1,7 +1,7 @@
 //! Tests for GitignoreService
 //!
 //! Tests the two-tier gitignore management:
-//! - Global gitignore at vault_base_dir
+//! - Global gitignore at base_dir
 //! - Per-vault gitignore (only if vault has local config)
 
 use std::path::PathBuf;
@@ -14,9 +14,9 @@ use rsenv::config::{Settings, SopsConfig};
 use rsenv::infrastructure::traits::RealFileSystem;
 
 /// Helper to create test settings with custom SOPS config.
-fn test_settings(vault_base_dir: PathBuf, sops: SopsConfig) -> Settings {
+fn test_settings(base_dir: PathBuf, sops: SopsConfig) -> Settings {
     Settings {
-        vault_base_dir,
+        base_dir,
         editor: "vim".to_string(),
         sops,
     }
