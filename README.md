@@ -60,6 +60,7 @@ rsenv env select            # Interactive environment selection
 | `guard` | Protect sensitive files |
 | `swap`  | Toggle dev/prod configs |
 | `sops`  | Encrypt/decrypt vault |
+| `hook`  | Manage git pre-commit hooks |
 | `config`| Manage settings |
 | `info`  | Show project status |
 
