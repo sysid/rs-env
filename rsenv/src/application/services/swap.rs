@@ -359,11 +359,11 @@ impl SwapService {
         let mut swapped = Vec::new();
 
         for file in files {
-            // Normalize to absolute project path
+            // Normalize to absolute project path, sanitizing trailing whitespace
             let project_file = if file.is_absolute() {
-                file.clone()
+                sanitize_path(file)
             } else {
-                project_dir.join(file)
+                sanitize_path(&project_dir.join(file))
             };
 
             // Get relative path for vault lookup
@@ -756,9 +756,9 @@ impl SwapService {
 
         for file in files {
             let project_file = if file.is_absolute() {
-                file.clone()
+                sanitize_path(file)
             } else {
-                project_dir.join(file)
+                sanitize_path(&project_dir.join(file))
             };
 
             let relative = project_file.strip_prefix(project_dir).map_err(|_| {
@@ -1375,6 +1375,32 @@ impl SwapService {
     }
 }
 
+/// Sanitize path by trimming trailing whitespace from each component.
+/// Handles NBSP (U+00A0) and other whitespace that can sneak in via copy-paste.
+fn sanitize_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut result = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::Normal(s) => {
+                let s = s.to_string_lossy();
+                let trimmed = s.trim_end_matches(|c: char| c.is_whitespace());
+                if !trimmed.is_empty() {
+                    result.push(trimmed);
+                }
+            }
+            Component::Prefix(p) => result.push(p.as_os_str()),
+            Component::RootDir => result.push("/"),
+            Component::CurDir => result.push("."),
+            Component::ParentDir => result.push(".."),
+        }
+    }
+
+    result
+}
+
 /// Filters swap files to only include leaf entries.
 /// An entry is a leaf if no other entry in the list has it as an ancestor.
 fn filter_to_leaves(mut files: Vec<SwapFile>) -> Vec<SwapFile> {
@@ -1511,5 +1537,34 @@ mod tests {
         let files: Vec<SwapFile> = vec![];
         let result = filter_to_leaves(files);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn given_path_with_trailing_nbsp_when_sanitize_then_trimmed() {
+        // U+00A0 is non-breaking space
+        let path = PathBuf::from("thoughts/doc\u{00A0}");
+        let result = sanitize_path(&path);
+        assert_eq!(result, PathBuf::from("thoughts/doc"));
+    }
+
+    #[test]
+    fn given_path_with_trailing_space_when_sanitize_then_trimmed() {
+        let path = PathBuf::from("thoughts/doc ");
+        let result = sanitize_path(&path);
+        assert_eq!(result, PathBuf::from("thoughts/doc"));
+    }
+
+    #[test]
+    fn given_clean_path_when_sanitize_then_unchanged() {
+        let path = PathBuf::from("thoughts/doc/file.txt");
+        let result = sanitize_path(&path);
+        assert_eq!(result, PathBuf::from("thoughts/doc/file.txt"));
+    }
+
+    #[test]
+    fn given_path_with_multiple_trailing_whitespace_when_sanitize_then_all_trimmed() {
+        let path = PathBuf::from("a\u{00A0}/b /c\t");
+        let result = sanitize_path(&path);
+        assert_eq!(result, PathBuf::from("a/b/c"));
     }
 }
