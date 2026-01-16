@@ -483,9 +483,22 @@ impl VaultService {
     /// Create default environment files in the envs subdirectory.
     fn create_default_env_files(&self, vault_dir: &Path) -> ApplicationResult<()> {
         let envs_dir = vault_dir.join("envs");
-        for env in ["none", "local", "test", "int", "prod"] {
+        for env in ["none", "local", "test", "int", "e2e", "prod"] {
             let path = envs_dir.join(format!("{}.env", env));
-            let content = format!("export RUN_ENV=\"{}\"\n", env);
+            let content = if env == "none" {
+                // none.env is the root - no parent link
+                format!(
+                    "################################## {env}.env ##################################\n\
+                     export RUN_ENV={env}\n"
+                )
+            } else {
+                // All others link to none.env
+                format!(
+                    "################################## {env}.env ##################################\n\
+                     # rsenv: none.env\n\
+                     export RUN_ENV={env}\n"
+                )
+            };
             self.fs
                 .write(&path, &content)
                 .map_err(|e| ApplicationError::OperationFailed {

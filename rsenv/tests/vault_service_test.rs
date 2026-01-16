@@ -152,9 +152,11 @@ fn given_new_project_when_init_then_creates_default_env_files() {
 
     // Assert - env files exist
     let envs_dir = vault.path.join("envs");
+    assert!(envs_dir.join("none.env").exists());
     assert!(envs_dir.join("local.env").exists());
     assert!(envs_dir.join("test.env").exists());
     assert!(envs_dir.join("int.env").exists());
+    assert!(envs_dir.join("e2e.env").exists());
     assert!(envs_dir.join("prod.env").exists());
 }
 
@@ -176,11 +178,30 @@ fn given_new_project_when_init_then_env_files_have_correct_content() {
     // Assert - env files have correct content
     let envs_dir = vault.path.join("envs");
 
+    // none.env is the root - no parent link
+    let none_content = std::fs::read_to_string(envs_dir.join("none.env")).unwrap();
+    assert_eq!(
+        none_content,
+        "################################## none.env ##################################\n\
+         export RUN_ENV=none\n"
+    );
+
+    // All other envs link to none.env
     let local_content = std::fs::read_to_string(envs_dir.join("local.env")).unwrap();
-    assert_eq!(local_content, "export RUN_ENV=\"local\"\n");
+    assert_eq!(
+        local_content,
+        "################################## local.env ##################################\n\
+         # rsenv: none.env\n\
+         export RUN_ENV=local\n"
+    );
 
     let prod_content = std::fs::read_to_string(envs_dir.join("prod.env")).unwrap();
-    assert_eq!(prod_content, "export RUN_ENV=\"prod\"\n");
+    assert_eq!(
+        prod_content,
+        "################################## prod.env ##################################\n\
+         # rsenv: none.env\n\
+         export RUN_ENV=prod\n"
+    );
 }
 
 #[test]
