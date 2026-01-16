@@ -74,7 +74,7 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
         Some(Commands::Env { command }) => handle_env(command, project_dir),
         Some(Commands::Guard { command }) => handle_guard(command, project_dir, &settings),
         Some(Commands::Hook { command }) => handle_hook(command, &settings),
-        Some(Commands::Info) => handle_info(project_dir, &settings),
+        Some(Commands::Info { check }) => handle_info(project_dir, &settings, check),
         Some(Commands::Sops { command }) => handle_sops(command, vault_path, &settings),
         Some(Commands::Swap { command }) => {
             // Pass cli_project_dir directly so vault-wide commands can distinguish
@@ -867,12 +867,23 @@ fn handle_guard(
 fn handle_info(
     project_dir: Option<std::path::PathBuf>,
     settings: &Settings,
+    check: bool,
 ) -> rsenv::cli::CliResult<()> {
     let project_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
 
     let fs = Arc::new(RealFileSystem);
     let settings_arc = Arc::new(settings.clone());
     let vault_service = Arc::new(VaultService::new(fs.clone(), settings_arc.clone()));
+
+    // --check mode: silent, just return exit code
+    if check {
+        let vault = vault_service.get(&project_dir);
+        match vault {
+            Ok(Some(_)) => return Ok(()),        // Valid vault → exit 0
+            Ok(None) => std::process::exit(1),   // Not initialized → exit 1
+            Err(_) => std::process::exit(1),     // Invalid → exit 1
+        }
+    }
 
     output::header(&format!("Project: {}", project_dir.display()));
 

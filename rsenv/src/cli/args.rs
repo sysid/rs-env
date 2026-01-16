@@ -67,7 +67,11 @@ pub enum Commands {
     },
 
     /// Show status
-    Info,
+    Info {
+        /// Silent mode: return exit code only (0=valid vault, 1=no/invalid vault)
+        #[arg(long)]
+        check: bool,
+    },
 
     /// Generate shell completions
     Completion {
