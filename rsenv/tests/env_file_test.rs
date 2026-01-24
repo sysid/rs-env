@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use rsenv::domain::EnvFile;
+use rsenv::domain::{shell_quote, EnvFile};
 
 #[test]
 fn given_env_file_with_rsenv_directive_when_parsing_then_extracts_parent() {
@@ -249,4 +249,100 @@ fn given_unquoted_value_with_trailing_comment_when_parsing_then_comment_stripped
 
     // Assert
     assert_eq!(env_file.variables.get("PORT"), Some(&"8080".to_string()));
+}
+
+// --- shell_quote tests ---
+
+#[test]
+fn given_value_with_spaces_when_shell_quoting_then_adds_quotes() {
+    assert_eq!(
+        shell_quote("--reverse --height 100%"),
+        "\"--reverse --height 100%\""
+    );
+}
+
+#[test]
+fn given_simple_value_when_shell_quoting_then_no_quotes() {
+    assert_eq!(shell_quote("simple"), "simple");
+}
+
+#[test]
+fn given_value_with_embedded_quote_when_shell_quoting_then_wraps() {
+    assert_eq!(shell_quote("say \"hello\""), "\"say \"hello\"\"");
+}
+
+#[test]
+fn given_empty_value_when_shell_quoting_then_adds_quotes() {
+    assert_eq!(shell_quote(""), "\"\"");
+}
+
+#[test]
+fn given_value_with_dollar_when_shell_quoting_then_preserves_for_expansion() {
+    // $ is NOT escaped - allows shell variable expansion
+    assert_eq!(shell_quote("$HOME/bin"), "\"$HOME/bin\"");
+}
+
+#[test]
+fn given_value_with_backtick_when_shell_quoting_then_wraps() {
+    assert_eq!(shell_quote("echo `date`"), "\"echo `date`\"");
+}
+
+#[test]
+fn given_value_with_single_quote_when_shell_quoting_then_adds_quotes() {
+    assert_eq!(shell_quote("it's"), "\"it's\"");
+}
+
+#[test]
+fn given_value_with_backslash_when_shell_quoting_then_adds_quotes() {
+    assert_eq!(shell_quote("path\\to"), "\"path\\to\"");
+}
+
+#[test]
+fn given_value_with_semicolon_when_shell_quoting_then_adds_quotes() {
+    assert_eq!(shell_quote("cmd;cmd2"), "\"cmd;cmd2\"");
+}
+
+#[test]
+fn given_value_with_pipe_when_shell_quoting_then_adds_quotes() {
+    assert_eq!(shell_quote("a|b"), "\"a|b\"");
+}
+
+#[test]
+fn given_value_with_ampersand_when_shell_quoting_then_adds_quotes() {
+    assert_eq!(shell_quote("a&b"), "\"a&b\"");
+}
+
+#[test]
+fn given_value_with_parentheses_when_shell_quoting_then_adds_quotes() {
+    assert_eq!(shell_quote("(group)"), "\"(group)\"");
+}
+
+#[test]
+fn given_value_with_angle_brackets_when_shell_quoting_then_adds_quotes() {
+    assert_eq!(shell_quote("a<b>c"), "\"a<b>c\"");
+}
+
+#[test]
+fn given_value_with_tab_when_shell_quoting_then_adds_quotes() {
+    assert_eq!(shell_quote("a\tb"), "\"a\tb\"");
+}
+
+#[test]
+fn given_numeric_value_when_shell_quoting_then_no_quotes() {
+    assert_eq!(shell_quote("12345"), "12345");
+}
+
+#[test]
+fn given_path_without_special_chars_when_shell_quoting_then_no_quotes() {
+    assert_eq!(shell_quote("/usr/local/bin"), "/usr/local/bin");
+}
+
+#[test]
+fn given_flag_without_spaces_when_shell_quoting_then_no_quotes() {
+    assert_eq!(shell_quote("--verbose"), "--verbose");
+}
+
+#[test]
+fn given_alphanumeric_with_hyphens_when_shell_quoting_then_no_quotes() {
+    assert_eq!(shell_quote("my-app-v2.0"), "my-app-v2.0");
 }

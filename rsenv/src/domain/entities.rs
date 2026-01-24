@@ -255,3 +255,17 @@ pub struct StaleFile {
     /// Current hash of the plaintext content
     pub new_hash: String,
 }
+
+/// Quote a value for shell export if it contains spaces or special characters.
+/// Returns the value wrapped in double quotes if needed.
+pub fn shell_quote(value: &str) -> String {
+    // Characters that require quoting
+    let needs_quoting = value.is_empty()
+        || value.contains(|c: char| c.is_whitespace() || "\"'`$\\!;&|()<>".contains(c));
+
+    if !needs_quoting {
+        return value.to_string();
+    }
+
+    format!("\"{}\"", value)
+}

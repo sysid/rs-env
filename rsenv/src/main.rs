@@ -21,7 +21,7 @@ use rsenv::cli::args::{
 };
 use rsenv::cli::output;
 use rsenv::config::{global_config_dir, global_config_path, vault_config_path, Settings};
-use rsenv::domain::{TreeBuilder, TreeNodeConvert};
+use rsenv::domain::{shell_quote, TreeBuilder, TreeNodeConvert};
 use rsenv::exitcode;
 use rsenv::infrastructure::traits::RealCommandRunner;
 use rsenv::infrastructure::traits::{
@@ -109,7 +109,7 @@ fn handle_env(
 
             // Output as shell-sourceable format
             for (key, value) in &result.variables {
-                println!("export {}={:?}", key, value);
+                println!("export {}={}", key, shell_quote(value));
             }
             Ok(())
         }
@@ -122,7 +122,7 @@ fn handle_env(
 
             let mut exports = String::new();
             for (k, v) in &output.variables {
-                exports.push_str(&format!("export {}={}\n", k, v));
+                exports.push_str(&format!("export {}={}\n", k, shell_quote(v)));
             }
 
             update_vars_section(&fs, &envrc_path, &exports).map_err(|e| {
@@ -234,7 +234,7 @@ fn handle_env(
 
                     // Output as shell-sourceable format
                     for (key, value) in &result.variables {
-                        println!("export {}={:?}", key, value);
+                        println!("export {}={}", key, shell_quote(value));
                     }
                 }
                 None => {
