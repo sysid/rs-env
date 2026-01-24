@@ -41,6 +41,11 @@ This is a complete rewrite of V1 with 100% functional compatibility and new feat
 ## Quick Start
 
 ```bash
+# macOS (Homebrew)
+brew tap sysid/rsenv
+brew install rsenv
+
+# Or via Cargo
 cargo install rsenv
 
 rsenv init vault            # Create vault for project
