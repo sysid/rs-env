@@ -137,11 +137,10 @@ release: check-github-token  ## Release current version (2.0.0-alpha.1 → 2.0.0
 .PHONY: create-release
 create-release: check-github-token  ## Create GitHub release via gh CLI
 	@command -v gh >/dev/null || { echo "gh CLI not installed"; exit 1; }
-	@if echo "$(VERSION)" | grep -qE '-(alpha|beta|rc)'; then \
-		gh release create "v$(VERSION)" --generate-notes --prerelease; \
-	else \
-		gh release create "v$(VERSION)" --generate-notes --latest; \
-	fi
+	@case "$(VERSION)" in \
+		*alpha*|*beta*|*rc*) gh release create "v$(VERSION)" --generate-notes --prerelease ;; \
+		*) gh release create "v$(VERSION)" --generate-notes --latest ;; \
+	esac
 
 .PHONY: upload
 upload:  ## Publish to crates.io
