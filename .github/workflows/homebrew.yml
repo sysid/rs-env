@@ -1,0 +1,63 @@
+name: Update Homebrew Formula
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to update to (e.g., 5.1.2). Leave empty for latest release.'
+        required: false
+        type: string
+
+jobs:
+  homebrew:
+    name: Bump Homebrew formula
+    runs-on: ubuntu-latest
+    # Skip prereleases (alpha, beta, rc) - only applies to release trigger
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    steps:
+      - name: Determine version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ -n "${{ inputs.version }}" ]]; then
+            echo "tag=v${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            # Fetch latest release tag
+            LATEST=$(gh release view --repo sysid/rs-env --json tagName -q .tagName)
+            echo "tag=${LATEST}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update formula in homebrew-rsenv
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${TAG#v}"
+          TARBALL_URL="https://github.com/sysid/rs-env/archive/refs/tags/${TAG}.tar.gz"
+
+          # Calculate SHA256 of release tarball
+          SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | cut -d' ' -f1)
+
+          echo "Updating formula to version $VERSION (sha256: $SHA256)"
+
+          # Clone homebrew tap
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/sysid/homebrew-rsenv.git" tap
+          cd tap
+
+          # Update version URL and SHA256 in formula
+          sed -i "s|url \"https://github.com/sysid/rs-env/archive/refs/tags/v[^\"]*\.tar\.gz\"|url \"${TARBALL_URL}\"|" rsenv.rb
+          sed -i "s|sha256 \"[a-f0-9]*\"|sha256 \"${SHA256}\"|" rsenv.rb
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add rsenv.rb
+          git diff --cached --quiet || git commit -m "Bump rsenv to v${VERSION}"
+          git push
