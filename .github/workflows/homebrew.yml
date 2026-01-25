@@ -14,8 +14,15 @@ jobs:
   homebrew:
     name: Bump Homebrew formula
     runs-on: ubuntu-latest
-    # Skip prereleases (alpha, beta, rc) - only applies to release trigger
-    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    # Skip prereleases (alpha, beta, rc) - check both flag AND tag name pattern
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (!github.event.release.prerelease &&
+         !contains(github.event.release.tag_name, '-alpha') &&
+         !contains(github.event.release.tag_name, '-beta') &&
+         !contains(github.event.release.tag_name, '-rc'))
+      }}
     steps:
       - name: Determine version
         id: version
