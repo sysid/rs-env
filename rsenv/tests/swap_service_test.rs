@@ -1968,6 +1968,58 @@ fn given_swapped_files_when_swap_out_vault_then_swaps_all_out() {
 }
 
 #[test]
+fn given_dotfile_swapped_in_when_swap_out_vault_then_restores_correctly() {
+    // Regression test: status_impl must use restore_path() when building project_path
+    // from neutralized vault paths. Without this, swap_out_vault would try to move
+    // project/dot.claude instead of project/.claude
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create .claude/config.json in project (dotfile directory)
+    let claude_dir = project_dir.join(".claude");
+    std::fs::create_dir_all(&claude_dir).unwrap();
+    let project_file = claude_dir.join("config.json");
+    std::fs::write(&project_file, "original\n").unwrap();
+
+    // Create override at NEUTRALIZED path in vault (dot.claude)
+    let swap_dir = vault_path.join("swap");
+    let vault_claude_dir = swap_dir.join("dot.claude");
+    std::fs::create_dir_all(&vault_claude_dir).unwrap();
+    std::fs::write(vault_claude_dir.join("config.json"), "override\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Swap in via explicit path
+    service
+        .swap_in(&project_dir, &[project_file.clone()])
+        .unwrap();
+
+    // Verify swap in worked
+    let content = std::fs::read_to_string(&project_file).unwrap();
+    assert!(content.contains("override"), "should have override content");
+
+    // Act - swap out via vault-out (discovery path, not explicit)
+    // This exercises status_impl -> swap_out with discovered paths
+    let result = service.swap_out_vault(&project_dir).unwrap();
+
+    // Assert
+    assert_eq!(result.len(), 1, "should swap out one file");
+
+    // The key assertion: project_path in result should be .claude, not dot.claude
+    assert_eq!(
+        result[0].project_path,
+        project_file,
+        "project_path should be .claude/config.json, not dot.claude/config.json"
+    );
+
+    // Verify file is back to original content
+    let final_content = std::fs::read_to_string(&project_file).unwrap();
+    assert_eq!(final_content, "original\n", "should restore original");
+}
+
+#[test]
 fn given_no_vault_when_swap_out_vault_then_returns_empty() {
     // Arrange
     let temp = TempDir::new().unwrap();
@@ -2284,5 +2336,334 @@ fn given_mismatched_source_dir_when_status_then_still_works() {
         status.len(),
         1,
         "should still find swap file despite metadata mismatch"
+    );
+}
+
+// ============================================================
+// Dotfile path neutralization tests
+// ============================================================
+
+#[test]
+fn given_dotfile_path_when_swap_init_then_creates_neutralized_vault_path() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create .github/copilot-instructions.md in project
+    let github_dir = project_dir.join(".github");
+    std::fs::create_dir_all(&github_dir).unwrap();
+    let project_file = github_dir.join("copilot-instructions.md");
+    std::fs::write(&project_file, "# Instructions\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let initialized = service
+        .swap_init(&project_dir, &[project_file.clone()])
+        .unwrap();
+
+    // Assert
+    assert_eq!(initialized.len(), 1);
+
+    // Vault should have dot.github/copilot-instructions.md (neutralized)
+    let swap_dir = vault_path.join("swap");
+    let neutralized_path = swap_dir.join("dot.github").join("copilot-instructions.md");
+    assert!(
+        neutralized_path.exists(),
+        "vault should have neutralized path: {}",
+        neutralized_path.display()
+    );
+
+    // Non-neutralized path should NOT exist
+    let non_neutralized = swap_dir.join(".github").join("copilot-instructions.md");
+    assert!(
+        !non_neutralized.exists(),
+        "non-neutralized path should NOT exist: {}",
+        non_neutralized.display()
+    );
+
+    // Project file should be removed
+    assert!(!project_file.exists(), "project file should be moved to vault");
+}
+
+#[test]
+fn given_nested_dotfile_path_when_swap_init_then_neutralizes_all_segments() {
+    // Test: .hidden/.secret/config.yml → dot.hidden/dot.secret/config.yml
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create nested dotfile path
+    let nested_dir = project_dir.join(".hidden").join(".secret");
+    std::fs::create_dir_all(&nested_dir).unwrap();
+    let project_file = nested_dir.join("config.yml");
+    std::fs::write(&project_file, "secret: value\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    service
+        .swap_init(&project_dir, &[project_file.clone()])
+        .unwrap();
+
+    // Assert - all dotfile segments should be neutralized
+    let swap_dir = vault_path.join("swap");
+    let neutralized_path = swap_dir
+        .join("dot.hidden")
+        .join("dot.secret")
+        .join("config.yml");
+    assert!(
+        neutralized_path.exists(),
+        "all dotfile segments should be neutralized: {}",
+        neutralized_path.display()
+    );
+}
+
+#[test]
+fn given_dotfile_in_vault_when_swap_in_then_finds_neutralized_path() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+    let hostname = get_hostname();
+
+    // Create original in project
+    let github_dir = project_dir.join(".github");
+    std::fs::create_dir_all(&github_dir).unwrap();
+    let project_file = github_dir.join("config.md");
+    std::fs::write(&project_file, "original\n").unwrap();
+
+    // Create override at NEUTRALIZED path in vault
+    let swap_dir = vault_path.join("swap");
+    let vault_dotgithub = swap_dir.join("dot.github");
+    std::fs::create_dir_all(&vault_dotgithub).unwrap();
+    std::fs::write(vault_dotgithub.join("config.md"), "override\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let swapped = service
+        .swap_in(&project_dir, &[project_file.clone()])
+        .unwrap();
+
+    // Assert
+    assert_eq!(swapped.len(), 1);
+    assert_eq!(
+        swapped[0].state,
+        SwapState::In {
+            hostname: hostname.clone()
+        }
+    );
+
+    // Project file should have override content
+    let content = std::fs::read_to_string(&project_file).unwrap();
+    assert!(content.contains("override"), "should have override content");
+
+    // Sentinel should be at neutralized path
+    let sentinel = vault_dotgithub.join(format!("config.md@@{}@@rsenv_active", hostname));
+    assert!(
+        sentinel.exists(),
+        "sentinel should be at neutralized path: {}",
+        sentinel.display()
+    );
+}
+
+#[test]
+fn given_dotfile_swapped_in_when_swap_out_then_restores_to_neutralized_path() {
+    // Full round-trip test for dotfile paths
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create .github/config.md in project
+    let github_dir = project_dir.join(".github");
+    std::fs::create_dir_all(&github_dir).unwrap();
+    let project_file = github_dir.join("config.md");
+    std::fs::write(&project_file, "original\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Initialize (move to vault)
+    service
+        .swap_init(&project_dir, &[project_file.clone()])
+        .unwrap();
+
+    // Swap in
+    service
+        .swap_in(&project_dir, &[project_file.clone()])
+        .unwrap();
+
+    // Modify the file
+    std::fs::write(&project_file, "modified\n").unwrap();
+
+    // Act - swap out
+    service
+        .swap_out(&project_dir, &[project_file.clone()])
+        .unwrap();
+
+    // Assert - vault file should be at neutralized path with modifications
+    let swap_dir = vault_path.join("swap");
+    let vault_file = swap_dir.join("dot.github").join("config.md");
+    assert!(
+        vault_file.exists(),
+        "vault file should be at neutralized path: {}",
+        vault_file.display()
+    );
+
+    let vault_content = std::fs::read_to_string(&vault_file).unwrap();
+    assert!(
+        vault_content.contains("modified"),
+        "vault should capture modifications"
+    );
+
+    // Non-neutralized path should NOT exist
+    let wrong_path = swap_dir.join(".github").join("config.md");
+    assert!(
+        !wrong_path.exists(),
+        "non-neutralized path should NOT exist"
+    );
+}
+
+// ============================================================
+// Broken symlink tests
+// ============================================================
+
+#[test]
+fn given_broken_symlink_in_vault_when_swap_in_then_succeeds() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create original in project
+    let project_file = project_dir.join("link.md");
+    std::fs::write(&project_file, "original\n").unwrap();
+
+    // Create a BROKEN symlink in vault (target doesn't exist)
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    let vault_link = swap_dir.join("link.md");
+
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("../nonexistent-target.md", &vault_link).unwrap();
+
+    // Verify the symlink is broken (target doesn't exist)
+    assert!(
+        vault_link.symlink_metadata().is_ok(),
+        "symlink should exist"
+    );
+    assert!(!vault_link.exists(), "symlink target should NOT exist (broken)");
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act - swap in should work with broken symlink
+    let result = service.swap_in(&project_dir, &[project_file.clone()]);
+
+    // Assert - should succeed
+    assert!(result.is_ok(), "swap_in should work with broken symlink: {:?}", result.err());
+    let swapped = result.unwrap();
+    assert_eq!(swapped.len(), 1);
+
+    // Project should now have the symlink
+    assert!(
+        project_file.symlink_metadata().is_ok(),
+        "project should have the symlink"
+    );
+}
+
+#[test]
+fn given_broken_symlink_when_swap_init_then_preserves_symlink() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create a broken symlink in project
+    let project_link = project_dir.join("broken-link.md");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("../nonexistent.md", &project_link).unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let result = service.swap_init(&project_dir, &[project_link.clone()]);
+
+    // Assert - should succeed and preserve symlink
+    assert!(result.is_ok(), "swap_init should work with broken symlink");
+
+    // Vault should have the symlink
+    let swap_dir = vault_path.join("swap");
+    let vault_link = swap_dir.join("broken-link.md");
+    assert!(
+        vault_link.symlink_metadata().is_ok(),
+        "vault should have the symlink"
+    );
+
+    // Should still be a symlink
+    assert!(
+        vault_link
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "vault file should be a symlink"
+    );
+}
+
+#[test]
+fn given_broken_symlink_with_dotpath_when_full_roundtrip_then_works() {
+    // Full test: .github/instructions.md (symlink) → dot.github/instructions.md
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create .github directory and a broken symlink inside
+    let github_dir = project_dir.join(".github");
+    std::fs::create_dir_all(&github_dir).unwrap();
+    let project_link = github_dir.join("instructions.md");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("../AGENTS.md", &project_link).unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act 1: swap init
+    let init_result = service.swap_init(&project_dir, &[project_link.clone()]);
+    assert!(init_result.is_ok(), "swap_init failed: {:?}", init_result.err());
+
+    // Assert: vault has neutralized path with symlink
+    let swap_dir = vault_path.join("swap");
+    let vault_link = swap_dir.join("dot.github").join("instructions.md");
+    assert!(
+        vault_link.symlink_metadata().is_ok(),
+        "vault should have symlink at neutralized path: {}",
+        vault_link.display()
+    );
+
+    // Act 2: swap in
+    let in_result = service.swap_in(&project_dir, &[project_link.clone()]);
+    assert!(in_result.is_ok(), "swap_in failed: {:?}", in_result.err());
+
+    // Assert: project has the symlink back
+    assert!(
+        project_link.symlink_metadata().is_ok(),
+        "project should have symlink after swap_in"
+    );
+
+    // Act 3: swap out
+    let out_result = service.swap_out(&project_dir, &[project_link.clone()]);
+    assert!(out_result.is_ok(), "swap_out failed: {:?}", out_result.err());
+
+    // Assert: vault has symlink at neutralized path
+    assert!(
+        vault_link.symlink_metadata().is_ok(),
+        "vault should have symlink at neutralized path after swap_out"
     );
 }

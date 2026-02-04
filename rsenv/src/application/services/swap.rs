@@ -30,7 +30,7 @@ use std::sync::Arc;
 use tracing::debug;
 use walkdir::WalkDir;
 
-use crate::application::dotfile::{is_dotfile, neutralize_name, neutralize_path, restore_name};
+use crate::application::dotfile::{is_dotfile, neutralize_name, neutralize_path, restore_name, restore_path};
 use crate::application::parse_rsenv_metadata;
 use crate::application::services::VaultService;
 use crate::application::{ApplicationError, ApplicationResult, IoResultExt};
@@ -98,14 +98,15 @@ impl SwapService {
     // ============================================================
 
     /// Get sentinel path in vault for a file.
-    /// Format: `vault/swap/<rel_path>@@<hostname>@@rsenv_active`
+    /// Format: `vault/swap/<neutralized_rel_path>@@<hostname>@@rsenv_active`
     fn get_sentinel_path(swap_dir: &Path, relative: &Path, hostname: &str) -> PathBuf {
+        let neutralized = neutralize_path(relative);
         let parent = swap_dir
-            .join(relative)
+            .join(&neutralized)
             .parent()
             .unwrap_or(swap_dir)
             .to_path_buf();
-        let file_name = relative
+        let file_name = neutralized
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
@@ -113,14 +114,15 @@ impl SwapService {
     }
 
     /// Get backup path in vault for a file.
-    /// Format: `vault/swap/<rel_path>.rsenv_original`
+    /// Format: `vault/swap/<neutralized_rel_path>.rsenv_original`
     fn get_backup_path(swap_dir: &Path, relative: &Path) -> PathBuf {
+        let neutralized = neutralize_path(relative);
         let parent = swap_dir
-            .join(relative)
+            .join(&neutralized)
             .parent()
             .unwrap_or(swap_dir)
             .to_path_buf();
-        let file_name = relative
+        let file_name = neutralized
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
@@ -130,8 +132,9 @@ impl SwapService {
     /// Find any sentinel for a file (from any host) in vault.
     /// Returns `(sentinel_path, hostname)` if found.
     fn find_any_sentinel(&self, swap_dir: &Path, relative: &Path) -> Option<(PathBuf, String)> {
-        let sentinel_dir = swap_dir.join(relative).parent()?.to_path_buf();
-        let base_name = relative.file_name()?.to_string_lossy().to_string();
+        let neutralized = neutralize_path(relative);
+        let sentinel_dir = swap_dir.join(&neutralized).parent()?.to_path_buf();
+        let base_name = neutralized.file_name()?.to_string_lossy().to_string();
 
         if !self.fs.exists(&sentinel_dir) {
             return None;
@@ -401,9 +404,10 @@ impl SwapService {
             // 1. Prefer neutralized form (dot.xxx) - this is the expected form after init
             // 2. Fall back to original form if neutralized doesn't exist
             //    (this allows the bare dotfile check below to catch and reject it)
-            let vault_file = if self.fs.exists(&vault_file_neutralized) {
+            // Note: Use exists_or_is_symlink() to handle broken symlinks in vault
+            let vault_file = if self.fs.exists_or_is_symlink(&vault_file_neutralized) {
                 vault_file_neutralized
-            } else if self.fs.exists(&vault_file_original) {
+            } else if self.fs.exists_or_is_symlink(&vault_file_original) {
                 vault_file_original
             } else {
                 // Neither exists - will fail with "no vault override" error below
@@ -432,8 +436,8 @@ impl SwapService {
                 }
             }
 
-            // 2. Check vault override exists
-            if !self.fs.exists(&vault_file) {
+            // 2. Check vault override exists (including broken symlinks)
+            if !self.fs.exists_or_is_symlink(&vault_file) {
                 return Err(ApplicationError::OperationFailed {
                     context: format!("no vault override for {}", project_file.display()),
                     source: Box::new(std::io::Error::new(
@@ -612,7 +616,9 @@ impl SwapService {
                 }
             })?;
 
-            let vault_file = swap_dir.join(relative);
+            // Neutralize path for vault storage (e.g., .github → dot.github)
+            let neutralized_relative = neutralize_path(relative);
+            let vault_file = swap_dir.join(&neutralized_relative);
             let backup_path = Self::get_backup_path(&swap_dir, relative);
 
             // Find sentinel in VAULT
@@ -641,7 +647,8 @@ impl SwapService {
 
                     // 1. MOVE modified project content back to vault (captures changes!)
                     // Use move_path for cross-device support (vault may be on different FS)
-                    let project_existed = self.fs.exists(&project_file);
+                    // Use exists_or_is_symlink to handle symlinks correctly
+                    let project_existed = self.fs.exists_or_is_symlink(&project_file);
                     if project_existed {
                         debug!(
                             "swap_out: moving {} to vault at {}",
@@ -662,8 +669,11 @@ impl SwapService {
                             }
                         })?;
 
-                        // Neutralize any dot-files in vault
-                        self.neutralize_dotfiles(&vault_file)?;
+                        // Path is already neutralized, but for directories we still need to
+                        // neutralize any dotfiles INSIDE the directory
+                        if self.fs.is_dir(&vault_file) {
+                            self.neutralize_dotfiles(&vault_file)?;
+                        }
                     }
 
                     // 2. Restore original from backup in VAULT
@@ -775,10 +785,12 @@ impl SwapService {
                 }
             })?;
 
-            let vault_file = swap_dir.join(relative);
+            // Neutralize path BEFORE creating vault file (e.g., .github → dot.github)
+            let neutralized_relative = neutralize_path(relative);
+            let vault_file = swap_dir.join(&neutralized_relative);
 
-            // Check project file exists
-            if !self.fs.exists(&project_file) {
+            // Check project file exists (including symlinks)
+            if !self.fs.exists_or_is_symlink(&project_file) {
                 return Err(ApplicationError::OperationFailed {
                     context: format!("project file does not exist: {}", project_file.display()),
                     source: Box::new(std::io::Error::new(
@@ -788,8 +800,8 @@ impl SwapService {
                 });
             }
 
-            // Check vault file does NOT exist
-            if self.fs.exists(&vault_file) {
+            // Check vault file does NOT exist (including broken symlinks)
+            if self.fs.exists_or_is_symlink(&vault_file) {
                 return Err(ApplicationError::OperationFailed {
                     context: format!("vault already has file: {}", vault_file.display()),
                     source: Box::new(std::io::Error::new(
@@ -822,8 +834,11 @@ impl SwapService {
                 }
             })?;
 
-            // Neutralize any dot-files in vault
-            self.neutralize_dotfiles(&vault_file)?;
+            // Path is already neutralized, but for directories we still need to
+            // neutralize any dotfiles INSIDE the directory
+            if self.fs.is_dir(&vault_file) {
+                self.neutralize_dotfiles(&vault_file)?;
+            }
 
             initialized.push(SwapFile {
                 project_path: project_file,
@@ -938,7 +953,7 @@ impl SwapService {
 
                     if !seen_paths.contains(relative) {
                         seen_paths.insert(relative.to_path_buf());
-                        let project_path = project_dir.join(relative);
+                        let project_path = project_dir.join(restore_path(relative));
                         let state = self.get_swap_state(&swap_dir, relative)?;
 
                         files.push(SwapFile {
@@ -964,7 +979,7 @@ impl SwapService {
 
             if !seen_paths.contains(relative) {
                 seen_paths.insert(relative.to_path_buf());
-                let project_path = project_dir.join(relative);
+                let project_path = project_dir.join(restore_path(relative));
                 let state = self.get_swap_state(&swap_dir, relative)?;
 
                 files.push(SwapFile {

@@ -15,8 +15,12 @@ pub trait FileSystem: Send + Sync {
     /// Write string content to file.
     fn write(&self, path: &Path, content: &str) -> io::Result<()>;
 
-    /// Check if path exists.
+    /// Check if path exists (follows symlinks).
     fn exists(&self, path: &Path) -> bool;
+
+    /// Check if path exists or is a symlink (even broken).
+    /// Unlike exists(), this returns true for broken symlinks.
+    fn exists_or_is_symlink(&self, path: &Path) -> bool;
 
     /// Check if path is a file.
     fn is_file(&self, path: &Path) -> bool;
@@ -130,6 +134,10 @@ impl FileSystem for RealFileSystem {
         path.exists()
     }
 
+    fn exists_or_is_symlink(&self, path: &Path) -> bool {
+        path.symlink_metadata().is_ok()
+    }
+
     fn is_file(&self, path: &Path) -> bool {
         path.is_file()
     }
@@ -223,7 +231,11 @@ impl FileSystem for RealFileSystem {
     }
 
     fn copy_any(&self, from: &Path, to: &Path) -> io::Result<()> {
-        if from.is_dir() {
+        // Handle symlinks first (before is_dir which follows symlinks)
+        if self.is_symlink(from) {
+            let target = self.read_link(from)?;
+            self.symlink(&target, to)
+        } else if from.is_dir() {
             self.copy_dir(from, to)
         } else {
             self.copy(from, to).map(|_| ())
