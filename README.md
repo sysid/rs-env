@@ -49,7 +49,55 @@ there (as `dot.envrc`), and creates the symlink.
 
 ---
 
-## 2. Environment Hierarchy
+## 2. File Swapping
+
+Swap temporarily replaces project files with your dev versions.
+Unlike guard, this is reversible — swap in when you start work, swap out when done.
+
+```
+  ┌─ NORMAL STATE (swapped out) ──────────────────────────────────────────┐
+  │                                                                       │
+  │  Project                              Vault/swap                      │
+  │  ┌──────────────────────┐             ┌──────────────────────┐        │
+  │  │ docker-compose.yml   │             │ docker-compose.yml   │        │
+  │  │ (official version)   │             │ (your dev version)   │        │
+  │  └──────────────────────┘             └──────────────────────┘        │
+  │                                                                       │
+  └───────────────────────────────────────────────────────────────────────┘
+                          │ rsenv swap in
+                          ▼
+  ┌─ SWAPPED IN (working) ────────────────────────────────────────────────┐
+  │                                                                       │
+  │  Project                              Vault/swap                      │
+  │  ┌──────────────────────┐             ┌──────────────────────────┐    │
+  │  │ docker-compose.yml   │             │ docker-compose.yml       │    │
+  │  │ (your dev version)   │             │   .rsenv_original        │    │
+  │  │  ◄── moved here      │             │   ◄── backup of official │    │
+  │  └──────────────────────┘             │                          │    │
+  │                                       │ docker-compose.yml       │    │
+  │                                       │   .<hostname>.rsenv_active    │
+  │                                       │   ◄── sentinel (who did it)   │
+  │                                       └──────────────────────────┘    │
+  │                                                                       │
+  └───────────────────────────────────────────────────────────────────────┘
+                          │ rsenv swap out
+                          ▼
+               back to normal state
+        (your changes to dev version are PRESERVED)
+```
+
+**Hostname tracking**: The sentinel `.<hostname>.rsenv_active` records which
+machine swapped the file in, preventing conflicts when sharing vaults.
+
+**Key commands**:
+- `rsenv swap init <files>` — set up files for swapping (first time)
+- `rsenv swap in` — replace project files with vault versions
+- `rsenv swap out` — restore originals (no args = all files)
+- `rsenv swap status` — show what's swapped in, by which host
+
+---
+
+## 3. Environment Hierarchy
 
 Env files form a tree using the `# rsenv: parent.env` directive.
 Children inherit all parent variables and can override them.
@@ -95,7 +143,7 @@ Children inherit all parent variables and can override them.
 
 ---
 
-## 3. File Guarding
+## 4. File Guarding
 
 Guard permanently moves sensitive files to the vault and leaves a symlink behind.
 Git sees the symlink, not the secret.
@@ -122,54 +170,6 @@ side effects: `.gitignore` → `dot.gitignore`, `.envrc` → `dot.envrc`.
 - `rsenv guard add <file>` — move to vault, create symlink
 - `rsenv guard list` — show all guarded files
 - `rsenv guard restore <file>` — move back to project
-
----
-
-## 4. File Swapping
-
-Swap temporarily replaces project files with your dev versions.
-Unlike guard, this is reversible — swap in when you start work, swap out when done.
-
-```
-  ┌─ NORMAL STATE (swapped out) ──────────────────────────────────────────┐
-  │                                                                       │
-  │  Project                              Vault/swap                      │
-  │  ┌──────────────────────┐             ┌──────────────────────┐        │
-  │  │ docker-compose.yml   │             │ docker-compose.yml   │        │
-  │  │ (official version)   │             │ (your dev version)   │        │
-  │  └──────────────────────┘             └──────────────────────┘        │
-  │                                                                       │
-  └───────────────────────────────────────────────────────────────────────┘
-                          │ rsenv swap in
-                          ▼
-  ┌─ SWAPPED IN (working) ────────────────────────────────────────────────┐
-  │                                                                       │
-  │  Project                              Vault/swap                      │
-  │  ┌──────────────────────┐             ┌──────────────────────────┐    │
-  │  │ docker-compose.yml   │             │ docker-compose.yml       │    │
-  │  │ (your dev version)   │             │   .rsenv_original        │    │
-  │  │  ◄── moved here      │             │   ◄── backup of official │    │
-  │  └──────────────────────┘             │                          │    │
-  │                                       │ docker-compose.yml       │    │
-  │                                       │   .<hostname>.rsenv_active    │
-  │                                       │   ◄── sentinel (who did it)   │
-  │                                       └──────────────────────────┘    │
-  │                                                                       │
-  └───────────────────────────────────────────────────────────────────────┘
-                          │ rsenv swap out
-                          ▼
-               back to normal state
-        (your changes to dev version are PRESERVED)
-```
-
-**Hostname tracking**: The sentinel `.<hostname>.rsenv_active` records which
-machine swapped the file in, preventing conflicts when sharing vaults.
-
-**Key commands**:
-- `rsenv swap init <files>` — set up files for swapping (first time)
-- `rsenv swap in` — replace project files with vault versions
-- `rsenv swap out` — restore originals (no args = all files)
-- `rsenv swap status` — show what's swapped in, by which host
 
 ---
 
