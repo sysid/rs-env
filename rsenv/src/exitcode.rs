@@ -3,6 +3,9 @@
 /// Successful termination
 pub const OK: i32 = 0;
 
+/// Project not rsenv-managed (no vault found)
+pub const UNMANAGED: i32 = 2;
+
 /// Command line usage error
 pub const USAGE: i32 = 64;
 

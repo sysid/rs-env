@@ -94,6 +94,7 @@ machine swapped the file in, preventing conflicts when sharing vaults.
 - `rsenv swap in` — replace project files with vault versions
 - `rsenv swap out` — restore originals (no args = all files)
 - `rsenv swap status` — show what's swapped in, by which host
+- `rsenv swap status --silent` — exit code only: 0=clean, 1=dirty, 2=unmanaged
 
 ---
 

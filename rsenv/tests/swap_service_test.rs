@@ -2009,8 +2009,7 @@ fn given_dotfile_swapped_in_when_swap_out_vault_then_restores_correctly() {
 
     // The key assertion: project_path in result should be .claude, not dot.claude
     assert_eq!(
-        result[0].project_path,
-        project_file,
+        result[0].project_path, project_file,
         "project_path should be .claude/config.json, not dot.claude/config.json"
     );
 
@@ -2385,7 +2384,10 @@ fn given_dotfile_path_when_swap_init_then_creates_neutralized_vault_path() {
     );
 
     // Project file should be removed
-    assert!(!project_file.exists(), "project file should be moved to vault");
+    assert!(
+        !project_file.exists(),
+        "project file should be moved to vault"
+    );
 }
 
 #[test]
@@ -2556,7 +2558,10 @@ fn given_broken_symlink_in_vault_when_swap_in_then_succeeds() {
         vault_link.symlink_metadata().is_ok(),
         "symlink should exist"
     );
-    assert!(!vault_link.exists(), "symlink target should NOT exist (broken)");
+    assert!(
+        !vault_link.exists(),
+        "symlink target should NOT exist (broken)"
+    );
 
     let fs = Arc::new(RealFileSystem);
     let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
@@ -2566,7 +2571,11 @@ fn given_broken_symlink_in_vault_when_swap_in_then_succeeds() {
     let result = service.swap_in(&project_dir, &[project_file.clone()]);
 
     // Assert - should succeed
-    assert!(result.is_ok(), "swap_in should work with broken symlink: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "swap_in should work with broken symlink: {:?}",
+        result.err()
+    );
     let swapped = result.unwrap();
     assert_eq!(swapped.len(), 1);
 
@@ -2636,7 +2645,11 @@ fn given_broken_symlink_with_dotpath_when_full_roundtrip_then_works() {
 
     // Act 1: swap init
     let init_result = service.swap_init(&project_dir, &[project_link.clone()]);
-    assert!(init_result.is_ok(), "swap_init failed: {:?}", init_result.err());
+    assert!(
+        init_result.is_ok(),
+        "swap_init failed: {:?}",
+        init_result.err()
+    );
 
     // Assert: vault has neutralized path with symlink
     let swap_dir = vault_path.join("swap");
@@ -2659,11 +2672,221 @@ fn given_broken_symlink_with_dotpath_when_full_roundtrip_then_works() {
 
     // Act 3: swap out
     let out_result = service.swap_out(&project_dir, &[project_link.clone()]);
-    assert!(out_result.is_ok(), "swap_out failed: {:?}", out_result.err());
+    assert!(
+        out_result.is_ok(),
+        "swap_out failed: {:?}",
+        out_result.err()
+    );
 
     // Assert: vault has symlink at neutralized path
     assert!(
         vault_link.symlink_metadata().is_ok(),
         "vault should have symlink at neutralized path after swap_out"
+    );
+}
+
+// ============================================================
+// status_quiet() tests — silent mode without metadata warnings
+// ============================================================
+
+#[test]
+fn given_no_vault_when_status_quiet_then_returns_empty() {
+    // Arrange: project dir with no vault (no .envrc symlink)
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("unmanaged");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    let base_dir = temp.path().to_path_buf();
+    let settings = Arc::new(test_settings(base_dir));
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let status = service.status_quiet(&project_dir).unwrap();
+
+    // Assert
+    assert!(
+        status.is_empty(),
+        "unmanaged project should return empty status"
+    );
+}
+
+#[test]
+fn given_managed_project_when_status_quiet_then_returns_status_without_warnings() {
+    // Arrange: managed project with a swap file in "out" state
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create vault swap file (not swapped in — state is Out)
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override content\n").unwrap();
+
+    // Create project file
+    std::fs::write(project_dir.join("config.yml"), "original content\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act — status_quiet should return status without calling validate_metadata
+    let status = service.status_quiet(&project_dir).unwrap();
+
+    // Assert: should find the swap file in "out" state
+    assert_eq!(status.len(), 1, "should find one swappable file");
+    assert!(
+        matches!(status[0].state, SwapState::Out),
+        "file should be in Out state"
+    );
+}
+
+// ============================================================
+// Silent mode exit code logic tests (project-level)
+// These test the data conditions that drive CLI exit codes:
+//   vault_service.get() = None  → exit 2 (unmanaged)
+//   status_quiet() all Out/empty → exit 0 (clean)
+//   status_quiet() any In        → exit 1 (dirty)
+// ============================================================
+
+#[test]
+fn given_unmanaged_dir_when_silent_status_then_exit_2() {
+    // Arrange: directory with no vault — simulates exit code 2
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("no_vault");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    let base_dir = temp.path().to_path_buf();
+    let settings = Arc::new(test_settings(base_dir));
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+
+    // Act: check vault existence (what CLI does before status_quiet)
+    let vault = vault_service.get(&project_dir).unwrap();
+
+    // Assert: no vault → CLI would exit 2
+    assert!(vault.is_none(), "unmanaged dir should have no vault");
+}
+
+#[test]
+fn given_managed_clean_when_silent_status_then_exit_0() {
+    // Arrange: managed project, swap file in Out state → exit 0 (clean)
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Vault has swap file but NOT swapped in
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("app.conf"), "override\n").unwrap();
+    std::fs::write(project_dir.join("app.conf"), "original\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let status = service.status_quiet(&project_dir).unwrap();
+
+    // Assert: no SwapState::In → CLI would exit 0
+    let has_active = status
+        .iter()
+        .any(|f| matches!(&f.state, SwapState::In { .. }));
+    assert!(!has_active, "clean project should have no active swaps");
+}
+
+#[test]
+fn given_managed_dirty_when_silent_status_then_exit_1() {
+    // Arrange: managed project, swap in a file → exit 1 (dirty)
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Create swap file in vault
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("settings.yml"), "override\n").unwrap();
+    std::fs::write(project_dir.join("settings.yml"), "original\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Swap in to make it dirty
+    service
+        .swap_in(&project_dir, &[project_dir.join("settings.yml")])
+        .unwrap();
+
+    // Act
+    let status = service.status_quiet(&project_dir).unwrap();
+
+    // Assert: has SwapState::In → CLI would exit 1
+    let has_active = status
+        .iter()
+        .any(|f| matches!(&f.state, SwapState::In { .. }));
+    assert!(has_active, "dirty project should have active swaps");
+}
+
+// ============================================================
+// Global silent mode regression tests (--global --silent)
+// These verify backward compatibility: exit 0 (no active swaps)
+// and exit 1 (has active swaps) are preserved unchanged.
+// ============================================================
+
+#[test]
+fn given_global_silent_no_swaps_when_status_then_exit_0() {
+    // Arrange: managed project with swap file in Out state
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+    let vault_base = settings.vaults_dir();
+
+    // Vault has swap file but NOT swapped in
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("app.conf"), "override\n").unwrap();
+    std::fs::write(project_dir.join("app.conf"), "original\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act: same call as --global --silent CLI path
+    let statuses = service.status_all_vaults(&vault_base).unwrap();
+    let has_active = !statuses.is_empty();
+
+    // Assert: no active swaps → CLI would exit 0
+    assert!(
+        !has_active,
+        "clean global state should have no active swaps (exit 0)"
+    );
+}
+
+#[test]
+fn given_global_silent_active_swaps_when_status_then_exit_1() {
+    // Arrange: managed project with a file swapped in
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+    let vault_base = settings.vaults_dir();
+
+    let project_file = project_dir.join("docker-compose.yml");
+    std::fs::write(&project_file, "original\n").unwrap();
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("docker-compose.yml"), "override\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Swap in to create active state
+    service.swap_in(&project_dir, &[project_file]).unwrap();
+
+    // Act: same call as --global --silent CLI path
+    let statuses = service.status_all_vaults(&vault_base).unwrap();
+    let has_active = !statuses.is_empty();
+
+    // Assert: has active swaps → CLI would exit 1
+    assert!(
+        has_active,
+        "dirty global state should have active swaps (exit 1)"
     );
 }

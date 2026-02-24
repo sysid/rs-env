@@ -240,8 +240,8 @@ pub enum SwapCommands {
         /// Show status across all vaults
         #[arg(short, long)]
         global: bool,
-        /// Silent mode: return exit code only (0=clean, 1=has active swaps)
-        #[arg(short, long, requires = "global")]
+        /// Silent mode: exit code only (0=clean, 1=dirty, 2=unmanaged)
+        #[arg(short, long)]
         silent: bool,
         /// Override vaults directory (requires --global)
         #[arg(long, requires = "global")]

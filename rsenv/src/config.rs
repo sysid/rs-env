@@ -277,10 +277,7 @@ impl Settings {
                 .base_dir
                 .clone()
                 .unwrap_or_else(|| self.base_dir.clone()),
-            editor: global
-                .editor
-                .clone()
-                .unwrap_or_else(|| self.editor.clone()),
+            editor: global.editor.clone().unwrap_or_else(|| self.editor.clone()),
             sops: self.sops.apply_global(&global.sops),
         }
     }
@@ -383,10 +380,7 @@ impl Settings {
         // 1. Start with defaults
         let defaults = Settings::default();
         builder = builder
-            .set_default(
-                "base_dir",
-                defaults.base_dir.to_string_lossy().to_string(),
-            )
+            .set_default("base_dir", defaults.base_dir.to_string_lossy().to_string())
             .map_err(config_err)?
             .set_default("editor", defaults.editor.clone())
             .map_err(config_err)?
@@ -437,10 +431,7 @@ impl Settings {
         // Start with defaults (needed for deserialization)
         let defaults = Settings::default();
         builder = builder
-            .set_default(
-                "base_dir",
-                defaults.base_dir.to_string_lossy().to_string(),
-            )
+            .set_default("base_dir", defaults.base_dir.to_string_lossy().to_string())
             .map_err(config_err)?
             .set_default("editor", defaults.editor.clone())
             .map_err(config_err)?
@@ -619,7 +610,10 @@ mod tests {
         let overlay = vec!["!a".to_string(), "c".to_string()];
         let result = SopsConfig::merge_array(&base, &overlay);
 
-        assert!(!result.contains(&"a".to_string()), "a should be removed by !a");
+        assert!(
+            !result.contains(&"a".to_string()),
+            "a should be removed by !a"
+        );
         assert!(result.contains(&"b".to_string()));
         assert!(result.contains(&"c".to_string()));
         assert_eq!(result.len(), 2);
@@ -684,12 +678,12 @@ mod tests {
         };
 
         let overlay = RawSopsConfig {
-            gpg_key: None, // Should NOT override base
+            gpg_key: None,                            // Should NOT override base
             age_key: Some("overlay-age".to_string()), // Should be set
             file_extensions_enc: Some(vec!["yaml".to_string(), "!env".to_string()]), // Union with negation
-            file_names_enc: Some(vec!["secrets.txt".to_string()]), // Union
+            file_names_enc: Some(vec!["secrets.txt".to_string()]),                   // Union
             file_extensions_dec: None, // Should keep base
-            file_names_dec: None, // Should keep base
+            file_names_dec: None,      // Should keep base
         };
 
         let result = base.merge(&overlay);
@@ -731,9 +725,9 @@ mod tests {
             gpg_key: None,
             age_key: Some("global-age".to_string()),
             file_extensions_enc: Some(vec!["yaml".to_string(), "json".to_string()]), // REPLACES base
-            file_names_enc: Some(vec!["secrets.txt".to_string()]),                   // REPLACES base
-            file_extensions_dec: None, // Keeps base
-            file_names_dec: None,      // Keeps base
+            file_names_enc: Some(vec!["secrets.txt".to_string()]), // REPLACES base
+            file_extensions_dec: None,                             // Keeps base
+            file_names_dec: None,                                  // Keeps base
         };
 
         let result = base.apply_global(&global);

@@ -30,7 +30,9 @@ use std::sync::Arc;
 use tracing::debug;
 use walkdir::WalkDir;
 
-use crate::application::dotfile::{is_dotfile, neutralize_name, neutralize_path, restore_name, restore_path};
+use crate::application::dotfile::{
+    is_dotfile, neutralize_name, neutralize_path, restore_name, restore_path,
+};
 use crate::application::parse_rsenv_metadata;
 use crate::application::services::VaultService;
 use crate::application::{ApplicationError, ApplicationResult, IoResultExt};
@@ -192,7 +194,7 @@ impl SwapService {
             }
 
             // Sort by depth (deepest first) to avoid invalidating parent paths
-            to_rename.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
+            to_rename.sort_by_key(|b| std::cmp::Reverse(b.components().count()));
 
             for dotpath in to_rename {
                 if let Some(name) = dotpath.file_name() {
@@ -251,7 +253,7 @@ impl SwapService {
             }
 
             // Sort by depth (deepest first) to avoid invalidating parent paths
-            to_rename.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
+            to_rename.sort_by_key(|b| std::cmp::Reverse(b.components().count()));
 
             for neutralized_path in to_rename {
                 if let Some(name) = neutralized_path.file_name() {
@@ -872,6 +874,19 @@ impl SwapService {
         // Validate metadata - warn if out of sync
         self.validate_metadata(&vault, project_dir);
 
+        self.status_impl(&vault.path, project_dir)
+    }
+
+    /// Status check without metadata validation warnings (for silent/scripting mode).
+    pub fn status_quiet(&self, project_dir: &Path) -> ApplicationResult<Vec<SwapFile>> {
+        debug!("status_quiet: project_dir={}", project_dir.display());
+        let vault = match self.vault_service.get(project_dir)? {
+            Some(v) => v,
+            None => {
+                debug!("status_quiet: no vault found");
+                return Ok(vec![]);
+            }
+        };
         self.status_impl(&vault.path, project_dir)
     }
 

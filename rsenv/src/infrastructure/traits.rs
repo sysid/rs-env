@@ -381,10 +381,10 @@ impl Editor for EnvironmentEditor {
         if status.success() {
             Ok(())
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("editor exited with status: {}", status),
-            ))
+            Err(io::Error::other(format!(
+                "editor exited with status: {}",
+                status
+            )))
         }
     }
 }

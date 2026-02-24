@@ -879,9 +879,9 @@ fn handle_info(
     if check {
         let vault = vault_service.get(&project_dir);
         match vault {
-            Ok(Some(_)) => return Ok(()),        // Valid vault → exit 0
-            Ok(None) => std::process::exit(1),   // Not initialized → exit 1
-            Err(_) => std::process::exit(1),     // Invalid → exit 1
+            Ok(Some(_)) => return Ok(()),      // Valid vault → exit 0
+            Ok(None) => std::process::exit(1), // Not initialized → exit 1
+            Err(_) => std::process::exit(1),   // Invalid → exit 1
         }
     }
 
@@ -1545,10 +1545,7 @@ fn handle_hook(command: HookCommands, settings: &Settings) -> rsenv::cli::CliRes
         }
         HookCommands::Status { .. } => {
             if !git_dir.exists() {
-                output::warning(&format!(
-                    "Not a git repository: {}",
-                    target_dir.display()
-                ));
+                output::warning(&format!("Not a git repository: {}", target_dir.display()));
                 return Ok(());
             }
 
@@ -1589,6 +1586,7 @@ fn handle_swap(
     let fs = Arc::new(RealFileSystem);
     let settings = Arc::new(settings.clone());
     let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let vault_service_for_check = vault_service.clone();
     let service = SwapService::new(fs, vault_service, settings.clone());
 
     match command {
@@ -1740,6 +1738,25 @@ fn handle_swap(
                     }
                 }
                 Ok(())
+            } else if silent {
+                // Project-level silent: exit code only (0=clean, 1=dirty, 2=unmanaged)
+                match vault_service_for_check.get(&project_dir) {
+                    Ok(Some(_)) => {
+                        let status = service.status_quiet(&project_dir).map_err(|e| {
+                            rsenv::cli::CliError::Infra(
+                                rsenv::infrastructure::InfraError::Application(e),
+                            )
+                        })?;
+                        let has_active = status
+                            .iter()
+                            .any(|f| matches!(&f.state, rsenv::domain::SwapState::In { .. }));
+                        if has_active {
+                            std::process::exit(1);
+                        }
+                        Ok(()) // exit 0: clean
+                    }
+                    _ => std::process::exit(rsenv::exitcode::UNMANAGED),
+                }
             } else {
                 // Project-level: show status for current project
                 let status = service.status(&project_dir).map_err(|e| {

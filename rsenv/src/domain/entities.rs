@@ -85,8 +85,7 @@ impl EnvFile {
             }
 
             // v1 compatibility: only parse "export VAR=value" lines
-            if trimmed.starts_with("export ") {
-                let rest = &trimmed[7..]; // skip "export "
+            if let Some(rest) = trimmed.strip_prefix("export ") {
                 if let Some((key, value)) = parse_env_line(rest) {
                     variables.insert(key.to_string(), value);
                 }
@@ -143,10 +142,11 @@ fn strip_trailing_comment(s: &str) -> &str {
 /// Strip surrounding quotes (single or double) from a value.
 fn strip_quotes(s: &str) -> String {
     let s = s.trim();
-    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
-        if s.len() >= 2 {
-            return s[1..s.len() - 1].to_string();
-        }
+    if ((s.starts_with('"') && s.ends_with('"'))
+        || (s.starts_with('\'') && s.ends_with('\'')))
+        && s.len() >= 2
+    {
+        return s[1..s.len() - 1].to_string();
     }
     s.to_string()
 }

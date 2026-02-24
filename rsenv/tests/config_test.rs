@@ -43,15 +43,24 @@ file_extensions_enc = ["yaml"]
     // Current: ["envrc", "env"], Vault adds: ["yaml"]
     // Expected: ["env", "envrc", "yaml"] (sorted)
     assert!(
-        settings.sops.file_extensions_enc.contains(&"env".to_string()),
+        settings
+            .sops
+            .file_extensions_enc
+            .contains(&"env".to_string()),
         "Should contain default 'env'"
     );
     assert!(
-        settings.sops.file_extensions_enc.contains(&"envrc".to_string()),
+        settings
+            .sops
+            .file_extensions_enc
+            .contains(&"envrc".to_string()),
         "Should contain default 'envrc'"
     );
     assert!(
-        settings.sops.file_extensions_enc.contains(&"yaml".to_string()),
+        settings
+            .sops
+            .file_extensions_enc
+            .contains(&"yaml".to_string()),
         "Should contain vault-added 'yaml'"
     );
     assert_eq!(
@@ -81,15 +90,24 @@ file_extensions_enc = ["yaml", "!env"]
     // Current (defaults): ["envrc", "env"], Vault: ["yaml", "!env"]
     // Expected: ["envrc", "yaml"]
     assert!(
-        !settings.sops.file_extensions_enc.contains(&"env".to_string()),
+        !settings
+            .sops
+            .file_extensions_enc
+            .contains(&"env".to_string()),
         "'env' should be removed by !env"
     );
     assert!(
-        settings.sops.file_extensions_enc.contains(&"envrc".to_string()),
+        settings
+            .sops
+            .file_extensions_enc
+            .contains(&"envrc".to_string()),
         "Should keep 'envrc'"
     );
     assert!(
-        settings.sops.file_extensions_enc.contains(&"yaml".to_string()),
+        settings
+            .sops
+            .file_extensions_enc
+            .contains(&"yaml".to_string()),
         "Should add 'yaml'"
     );
     assert_eq!(
@@ -139,8 +157,14 @@ gpg_key = "TEST-KEY"
     let settings = Settings::load(Some(vault_path)).expect("load settings");
 
     // Assert: Arrays should be inherited from current config (defaults when no global)
-    assert!(settings.sops.file_extensions_enc.contains(&"env".to_string()));
-    assert!(settings.sops.file_extensions_enc.contains(&"envrc".to_string()));
+    assert!(settings
+        .sops
+        .file_extensions_enc
+        .contains(&"env".to_string()));
+    assert!(settings
+        .sops
+        .file_extensions_enc
+        .contains(&"envrc".to_string()));
     assert_eq!(settings.sops.file_extensions_enc.len(), 2);
     // But gpg_key should be from vault
     assert_eq!(settings.sops.gpg_key, Some("TEST-KEY".to_string()));
@@ -166,11 +190,17 @@ file_names_enc = ["secrets.txt", "credentials.json"]
     // Assert: file_extensions_enc merged (defaults + vault values)
     // Note: may also include values from user's global config
     assert!(
-        settings.sops.file_extensions_enc.contains(&"yaml".to_string()),
+        settings
+            .sops
+            .file_extensions_enc
+            .contains(&"yaml".to_string()),
         "Should contain vault-added 'yaml'"
     );
     assert!(
-        settings.sops.file_extensions_enc.contains(&"env".to_string()),
+        settings
+            .sops
+            .file_extensions_enc
+            .contains(&"env".to_string()),
         "Should contain default 'env'"
     );
     assert!(
@@ -180,11 +210,17 @@ file_names_enc = ["secrets.txt", "credentials.json"]
 
     // Assert: file_names_enc contains vault values (may also have global config values)
     assert!(
-        settings.sops.file_names_enc.contains(&"secrets.txt".to_string()),
+        settings
+            .sops
+            .file_names_enc
+            .contains(&"secrets.txt".to_string()),
         "Should contain vault-added 'secrets.txt'"
     );
     assert!(
-        settings.sops.file_names_enc.contains(&"credentials.json".to_string()),
+        settings
+            .sops
+            .file_names_enc
+            .contains(&"credentials.json".to_string()),
         "Should contain vault-added 'credentials.json'"
     );
     assert!(

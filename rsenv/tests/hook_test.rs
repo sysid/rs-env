@@ -71,7 +71,10 @@ fn given_dir_flag_when_hook_install_then_installs_at_specified_location() {
     fs::write(&hook_path, &hook_content).unwrap();
 
     // Assert
-    assert!(hook_path.exists(), "Hook should be installed at custom location");
+    assert!(
+        hook_path.exists(),
+        "Hook should be installed at custom location"
+    );
     let content = fs::read_to_string(&hook_path).unwrap();
     assert!(content.contains(RSENV_HOOK_SIGNATURE));
 }
