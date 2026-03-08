@@ -1137,6 +1137,22 @@ fn handle_sops(
             output::header(&format!("SOPS Status for: {}", base_dir.display()));
             println!();
 
+            if !status.current.is_empty() {
+                output::success(&format!("Current (up-to-date) ({}):", status.current.len()));
+                for path in &status.current {
+                    output::detail(&path.display());
+                }
+                println!();
+            }
+
+            if !status.orphaned.is_empty() {
+                output::info(&format!("Orphaned .enc files ({}):", status.orphaned.len()));
+                for path in &status.orphaned {
+                    output::detail(&path.display());
+                }
+                println!();
+            }
+
             if !status.pending_encrypt.is_empty() {
                 output::warning(&format!(
                     "Pending encryption ({}):",
@@ -1160,22 +1176,6 @@ fn handle_sops(
                         &stale_file.old_hash,
                         &stale_file.new_hash
                     ));
-                }
-                println!();
-            }
-
-            if !status.current.is_empty() {
-                output::success(&format!("Current (up-to-date) ({}):", status.current.len()));
-                for path in &status.current {
-                    output::detail(&path.display());
-                }
-                println!();
-            }
-
-            if !status.orphaned.is_empty() {
-                output::info(&format!("Orphaned .enc files ({}):", status.orphaned.len()));
-                for path in &status.orphaned {
-                    output::detail(&path.display());
                 }
                 println!();
             }
