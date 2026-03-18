@@ -54,6 +54,9 @@ there (as `dot.envrc`), and creates the symlink.
 Swap temporarily replaces project files with your dev versions.
 Unlike guard, this is reversible — swap in when you start work, swap out when done.
 
+![demo](doc/demo.gif)
+
+
 ```
   ┌─ NORMAL STATE (swapped out) ──────────────────────────────────────────┐
   │                                                                       │
