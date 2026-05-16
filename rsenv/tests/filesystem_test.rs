@@ -78,6 +78,70 @@ fn given_nonexistent_source_when_copy_any_then_returns_error() {
     assert!(result.is_err());
 }
 
+#[test]
+fn given_directory_with_broken_symlink_when_copy_any_then_preserves_symlink() {
+    // Regression: copy_dir used to call std::fs::copy on symlinks, which follows
+    // the link and fails when the target is unreachable in the copy's context.
+    // The vault swap-in path hits exactly this: a relative symlink whose target
+    // only resolves at the project location, not in the vault.
+    let temp = TempDir::new().unwrap();
+    let src_dir = temp.path().join("source");
+    let dst_dir = temp.path().join("dest");
+    fs::create_dir_all(&src_dir).unwrap();
+
+    let link = src_dir.join("skills");
+    let target = std::path::PathBuf::from("../.agents/skills"); // unresolvable from src_dir
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&target, &link).unwrap();
+
+    let fs = RealFileSystem;
+
+    fs.copy_any(&src_dir, &dst_dir).unwrap();
+
+    let copied = dst_dir.join("skills");
+    let meta = std::fs::symlink_metadata(&copied).unwrap();
+    assert!(meta.file_type().is_symlink(), "entry should remain a symlink");
+    assert_eq!(std::fs::read_link(&copied).unwrap(), target);
+}
+
+#[test]
+fn given_directory_with_symlink_to_dir_when_copy_any_then_does_not_recurse() {
+    // A symlink to a real directory must be copied as a symlink, not followed
+    // and recursed into (which would duplicate content and could loop).
+    let temp = TempDir::new().unwrap();
+    let real_outside = temp.path().join("outside");
+    fs::create_dir_all(&real_outside).unwrap();
+    fs::write(real_outside.join("payload.txt"), "should-not-be-copied").unwrap();
+
+    let src_dir = temp.path().join("source");
+    let dst_dir = temp.path().join("dest");
+    fs::create_dir_all(&src_dir).unwrap();
+
+    let link = src_dir.join("link_to_outside");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real_outside, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&real_outside, &link).unwrap();
+
+    let fs = RealFileSystem;
+
+    fs.copy_any(&src_dir, &dst_dir).unwrap();
+
+    let copied = dst_dir.join("link_to_outside");
+    let meta = std::fs::symlink_metadata(&copied).unwrap();
+    assert!(meta.file_type().is_symlink());
+    assert!(
+        !dst_dir.join("link_to_outside/payload.txt").exists()
+            || std::fs::symlink_metadata(dst_dir.join("link_to_outside"))
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+        "must not have materialised contents under the symlink as real files"
+    );
+}
+
 // ============================================================
 // remove_any tests
 // ============================================================

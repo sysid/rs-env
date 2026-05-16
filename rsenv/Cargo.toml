@@ -19,9 +19,9 @@ thiserror = "2"
 
 # Serialization & Config
 serde = { version = "1", features = ["derive"] }
-config = "0.14"
-toml = "0.8"
-directories = "5"
+config = "0.15"
+toml = "1.1"
+directories = "6"
 
 # Filesystem
 walkdir = "2"
@@ -30,24 +30,24 @@ shellexpand = "3"
 fs_extra = "1"
 
 # Interactive
-skim = "0.10"
+skim = "4.6"
 
 # Terminal output
-colored = "2"
+colored = "3"
 
 # Arena-based trees
 generational-arena = "0.2"
 
 # Utilities
 regex = "1"
-itertools = "0.13"
+itertools = "0.14"
 uuid = { version = "1", features = ["v4"] }
 hostname = "0.4"
 rayon = "1"
 chrono = "0.4"
 
 # Hashing (for content-addressed encryption)
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 
 # Logging
@@ -55,10 +55,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Tree display
-termtree = "0.5"
+termtree = "1.0"
 
 # Temp files (for vimscript generation)
 tempfile = "3"
 
 [dev-dependencies]
-rstest = "0.23"
+rstest = "0.26"

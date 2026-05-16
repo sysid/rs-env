@@ -220,8 +220,16 @@ impl FileSystem for RealFileSystem {
                 .strip_prefix(from)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
             let target = to.join(rel_path);
+            let file_type = entry.file_type();
 
-            if entry.file_type().is_dir() {
+            // Preserve symlinks instead of following them. std::fs::copy follows the
+            // link and fails when the target is unreachable in the destination context
+            // (e.g. vault swap-in copying a relative symlink whose target only resolves
+            // at the project location).
+            if file_type.is_symlink() {
+                let link_target = std::fs::read_link(entry.path())?;
+                self.symlink(&link_target, &target)?;
+            } else if file_type.is_dir() {
                 std::fs::create_dir_all(&target)?;
             } else {
                 std::fs::copy(entry.path(), &target)?;
@@ -339,8 +347,8 @@ impl Selector for SkimSelector {
             .join("\n");
 
         let options = SkimOptionsBuilder::default()
-            .prompt(Some(prompt))
-            .height(Some("50%"))
+            .prompt(prompt)
+            .height("50%")
             .multi(false)
             .build()
             .map_err(|e| format!("failed to build skim options: {e}"))?;
@@ -348,21 +356,19 @@ impl Selector for SkimSelector {
         let item_reader = SkimItemReader::default();
         let items_arc = item_reader.of_bufread(Cursor::new(input));
 
-        let output = Skim::run_with(&options, Some(items_arc));
+        let output = Skim::run_with(options, Some(items_arc))
+            .map_err(|e| format!("skim run failed: {e}"))?;
 
-        match output {
-            Some(out) if out.is_abort => Ok(None),
-            Some(out) => {
-                if let Some(selected) = out.selected_items.first() {
-                    let display = selected.output().to_string();
-                    // Find the matching item
-                    let item = items.iter().find(|i| i.display == display).cloned();
-                    Ok(item)
-                } else {
-                    Ok(None)
-                }
-            }
-            None => Ok(None),
+        if output.is_abort {
+            return Ok(None);
+        }
+
+        if let Some(selected) = output.selected_items.first() {
+            let display = selected.item.output().to_string();
+            let item = items.iter().find(|i| i.display == display).cloned();
+            Ok(item)
+        } else {
+            Ok(None)
         }
     }
 }
