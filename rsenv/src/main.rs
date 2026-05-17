@@ -1729,10 +1729,11 @@ fn handle_swap(
                                 rsenv::domain::SwapState::In { hostname } => hostname,
                                 _ => "unknown",
                             };
+                            let marker = format!("in ({})", hostname).green();
                             output::detail(&format!(
-                                "{} [in ({})]",
+                                "{} [{}]",
                                 display_path.display(),
-                                hostname
+                                marker
                             ));
                         }
                     }
@@ -1780,7 +1781,7 @@ fn handle_swap(
                             .to_string()
                     };
                     let state_str = match &file.state {
-                        rsenv::domain::SwapState::Out => "out".normal(),
+                        rsenv::domain::SwapState::Out => "out".red(),
                         rsenv::domain::SwapState::In { hostname } => {
                             format!("in ({})", hostname).green()
                         }
