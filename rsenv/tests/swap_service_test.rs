@@ -1566,6 +1566,41 @@ fn given_directory_in_vault_when_delete_then_removes_entire_directory() {
     assert!(!backup_dir.exists(), "backup dir should be deleted");
 }
 
+#[test]
+fn given_dotfile_path_when_delete_then_removes_neutralized_vault_artifact() {
+    // Regression: `swap delete .github/...` reported success but left the vault
+    // entry behind, because delete() did not neutralize the path (.github →
+    // dot.github) the way swap in/out/init do. Caller passes the PROJECT path.
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    // Caller-facing project path uses the real dot segment.
+    let project_file = project_dir.join(".github/skills/tw-cucumber-to-http");
+
+    // Vault stores it neutralized: .github → dot.github
+    let swap_dir = vault_path.join("swap");
+    let vault_file = swap_dir.join("dot.github/skills/tw-cucumber-to-http");
+    std::fs::create_dir_all(vault_file.parent().unwrap()).unwrap();
+    std::fs::write(&vault_file, "vault override\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let deleted = service
+        .delete(&project_dir, &[project_file.clone()])
+        .unwrap();
+
+    // Assert
+    assert_eq!(deleted.len(), 1);
+    assert!(
+        !vault_file.exists(),
+        "neutralized vault entry should be deleted"
+    );
+}
+
 // ============================================================
 // move_path() tests (FileSystem trait)
 // ============================================================

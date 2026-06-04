@@ -248,9 +248,10 @@ pub enum SwapCommands {
         vault_base: Option<PathBuf>,
     },
 
-    /// Remove files from swap management
+    /// Remove files from swap management (deletes vault override + backup, not the project file)
     Delete {
-        /// Files to delete
+        /// Project paths (as you'd pass to `swap in`/`out`), NOT vault paths.
+        /// Dotfiles are matched automatically (e.g. .github → dot.github).
         files: Vec<PathBuf>,
     },
 }

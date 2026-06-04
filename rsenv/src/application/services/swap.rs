@@ -1350,7 +1350,10 @@ impl SwapService {
                 });
             }
 
-            let vault_file = swap_dir.join(&relative);
+            // Vault stores neutralized dotfiles (e.g. .github → dot.github),
+            // matching swap in/out/init. Without this the override is never found.
+            let neutralized_relative = neutralize_path(&relative);
+            let vault_file = swap_dir.join(&neutralized_relative);
             to_delete.push((project_file, vault_file, relative));
         }
 
