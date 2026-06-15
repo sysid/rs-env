@@ -1,6 +1,6 @@
 //! Domain entities: core data structures
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 /// A project linked to a vault.
@@ -30,6 +30,10 @@ pub struct EnvFile {
     pub parents: Vec<PathBuf>,
     /// Parsed environment variables
     pub variables: BTreeMap<String, String>,
+    /// Keys whose source value was single-quoted and must be emitted as a
+    /// literal (no shell expansion). Keys absent here keep the legacy
+    /// double-quoted/unquoted behavior (expansion preserved).
+    pub literal_keys: BTreeSet<String>,
 }
 
 impl EnvFile {
@@ -45,6 +49,7 @@ impl EnvFile {
     pub fn parse(content: &str, file_path: PathBuf) -> Result<Self, EnvFileParseError> {
         let mut parents = Vec::new();
         let mut variables = BTreeMap::new();
+        let mut literal_keys = BTreeSet::new();
 
         let parent_dir = file_path.parent();
 
@@ -86,7 +91,10 @@ impl EnvFile {
 
             // v1 compatibility: only parse "export VAR=value" lines
             if let Some(rest) = trimmed.strip_prefix("export ") {
-                if let Some((key, value)) = parse_env_line(rest) {
+                if let Some((key, value, single_quoted)) = parse_env_line(rest) {
+                    if single_quoted {
+                        literal_keys.insert(key.to_string());
+                    }
                     variables.insert(key.to_string(), value);
                 }
             }
@@ -96,24 +104,36 @@ impl EnvFile {
             path: file_path,
             parents,
             variables,
+            literal_keys,
         })
     }
 }
 
 /// Parse a single environment variable line.
-/// Returns (key, value) with trailing comments and quotes stripped from value.
-fn parse_env_line(line: &str) -> Option<(&str, String)> {
+/// Returns (key, value, single_quoted) with trailing comments and quotes
+/// stripped from value. `single_quoted` records whether the source value was
+/// wrapped in single quotes (literal intent) so the writer can reproduce it.
+fn parse_env_line(line: &str) -> Option<(&str, String, bool)> {
     let eq_pos = line.find('=')?;
     let key = line[..eq_pos].trim();
     let value = line[eq_pos + 1..].trim();
 
-    // Strip trailing comment (outside quotes) before stripping quotes
+    // Strip trailing comment (outside quotes) before inspecting/stripping quotes
     let value = strip_trailing_comment(value);
+
+    // Record quote style before stripping (single quote = literal, no expansion)
+    let single_quoted = is_single_quoted(value);
 
     // Strip surrounding quotes
     let value = strip_quotes(value);
 
-    Some((key, value))
+    Some((key, value, single_quoted))
+}
+
+/// Whether a (comment-stripped) value is wrapped in single quotes.
+fn is_single_quoted(s: &str) -> bool {
+    let s = s.trim();
+    s.len() >= 2 && s.starts_with('\'') && s.ends_with('\'')
 }
 
 /// Strip trailing comment from a value, respecting quotes.
@@ -257,8 +277,15 @@ pub struct StaleFile {
 }
 
 /// Quote a value for shell export if it contains spaces or special characters.
-/// Returns the value wrapped in double quotes if needed.
-pub fn shell_quote(value: &str) -> String {
+///
+/// `literal` selects the quoting strategy, mirroring the source's intent:
+/// - `false` (value was double-quoted or unquoted): wrap in double quotes,
+///   leaving `$`, backticks etc. for the shell to expand on source. Legacy
+///   behavior.
+/// - `true` (value was single-quoted): wrap in POSIX single quotes so the
+///   shell treats the value as a literal — no expansion, no command
+///   substitution. An embedded single quote becomes `'\''`.
+pub fn shell_quote(value: &str, literal: bool) -> String {
     // Characters that require quoting
     let needs_quoting = value.is_empty()
         || value.contains(|c: char| c.is_whitespace() || "\"'`$\\!;&|()<>".contains(c));
@@ -267,5 +294,9 @@ pub fn shell_quote(value: &str) -> String {
         return value.to_string();
     }
 
-    format!("\"{}\"", value)
+    if literal {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    } else {
+        format!("\"{}\"", value)
+    }
 }

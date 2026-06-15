@@ -2,7 +2,7 @@
 //!
 //! Handles building merged environment variables from hierarchical env files.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -18,6 +18,9 @@ use crate::infrastructure::traits::FileSystem;
 pub struct EnvOutput {
     /// Merged environment variables (parents overridden by children)
     pub variables: BTreeMap<String, String>,
+    /// Keys to emit as shell literals (single-quoted in source). Merged with
+    /// the same child-overrides-parent precedence as `variables`.
+    pub literal_keys: BTreeSet<String>,
     /// Files in the hierarchy, in BFS order (roots first)
     pub files: Vec<EnvFile>,
 }
@@ -55,13 +58,24 @@ impl EnvironmentService {
 
         // Merge variables: iterate in reverse (roots first) so children override
         let mut variables = BTreeMap::new();
+        let mut literal_keys = BTreeSet::new();
         for file in files.iter().rev() {
             for (key, value) in &file.variables {
                 variables.insert(key.clone(), value.clone());
+                // The redefining file also decides the quote style for this key.
+                if file.literal_keys.contains(key) {
+                    literal_keys.insert(key.clone());
+                } else {
+                    literal_keys.remove(key);
+                }
             }
         }
 
-        Ok(EnvOutput { variables, files })
+        Ok(EnvOutput {
+            variables,
+            literal_keys,
+            files,
+        })
     }
 
     /// Collect all files in the hierarchy via BFS traversal.

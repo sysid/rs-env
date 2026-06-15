@@ -251,98 +251,161 @@ fn given_unquoted_value_with_trailing_comment_when_parsing_then_comment_stripped
     assert_eq!(env_file.variables.get("PORT"), Some(&"8080".to_string()));
 }
 
-// --- shell_quote tests ---
+// --- shell_quote tests (expansion mode: literal = false) ---
+// literal = false reproduces the legacy double-quote behavior used for values
+// that were double-quoted or unquoted in the source (shell expansion preserved).
 
 #[test]
 fn given_value_with_spaces_when_shell_quoting_then_adds_quotes() {
     assert_eq!(
-        shell_quote("--reverse --height 100%"),
+        shell_quote("--reverse --height 100%", false),
         "\"--reverse --height 100%\""
     );
 }
 
 #[test]
 fn given_simple_value_when_shell_quoting_then_no_quotes() {
-    assert_eq!(shell_quote("simple"), "simple");
-}
-
-#[test]
-fn given_value_with_embedded_quote_when_shell_quoting_then_wraps() {
-    assert_eq!(shell_quote("say \"hello\""), "\"say \"hello\"\"");
+    assert_eq!(shell_quote("simple", false), "simple");
 }
 
 #[test]
 fn given_empty_value_when_shell_quoting_then_adds_quotes() {
-    assert_eq!(shell_quote(""), "\"\"");
+    assert_eq!(shell_quote("", false), "\"\"");
 }
 
 #[test]
 fn given_value_with_dollar_when_shell_quoting_then_preserves_for_expansion() {
-    // $ is NOT escaped - allows shell variable expansion
-    assert_eq!(shell_quote("$HOME/bin"), "\"$HOME/bin\"");
+    // Non-literal (double-quoted/unquoted source) keeps $ unescaped for expansion.
+    assert_eq!(shell_quote("$HOME/bin", false), "\"$HOME/bin\"");
+}
+
+#[test]
+fn given_value_with_embedded_quote_when_shell_quoting_then_wraps() {
+    assert_eq!(shell_quote("say \"hello\"", false), "\"say \"hello\"\"");
 }
 
 #[test]
 fn given_value_with_backtick_when_shell_quoting_then_wraps() {
-    assert_eq!(shell_quote("echo `date`"), "\"echo `date`\"");
+    assert_eq!(shell_quote("echo `date`", false), "\"echo `date`\"");
 }
 
 #[test]
 fn given_value_with_single_quote_when_shell_quoting_then_adds_quotes() {
-    assert_eq!(shell_quote("it's"), "\"it's\"");
+    assert_eq!(shell_quote("it's", false), "\"it's\"");
 }
 
 #[test]
 fn given_value_with_backslash_when_shell_quoting_then_adds_quotes() {
-    assert_eq!(shell_quote("path\\to"), "\"path\\to\"");
+    assert_eq!(shell_quote("path\\to", false), "\"path\\to\"");
 }
 
 #[test]
 fn given_value_with_semicolon_when_shell_quoting_then_adds_quotes() {
-    assert_eq!(shell_quote("cmd;cmd2"), "\"cmd;cmd2\"");
+    assert_eq!(shell_quote("cmd;cmd2", false), "\"cmd;cmd2\"");
 }
 
 #[test]
 fn given_value_with_pipe_when_shell_quoting_then_adds_quotes() {
-    assert_eq!(shell_quote("a|b"), "\"a|b\"");
+    assert_eq!(shell_quote("a|b", false), "\"a|b\"");
 }
 
 #[test]
 fn given_value_with_ampersand_when_shell_quoting_then_adds_quotes() {
-    assert_eq!(shell_quote("a&b"), "\"a&b\"");
+    assert_eq!(shell_quote("a&b", false), "\"a&b\"");
 }
 
 #[test]
 fn given_value_with_parentheses_when_shell_quoting_then_adds_quotes() {
-    assert_eq!(shell_quote("(group)"), "\"(group)\"");
+    assert_eq!(shell_quote("(group)", false), "\"(group)\"");
 }
 
 #[test]
 fn given_value_with_angle_brackets_when_shell_quoting_then_adds_quotes() {
-    assert_eq!(shell_quote("a<b>c"), "\"a<b>c\"");
+    assert_eq!(shell_quote("a<b>c", false), "\"a<b>c\"");
 }
 
 #[test]
 fn given_value_with_tab_when_shell_quoting_then_adds_quotes() {
-    assert_eq!(shell_quote("a\tb"), "\"a\tb\"");
-}
-
-#[test]
-fn given_numeric_value_when_shell_quoting_then_no_quotes() {
-    assert_eq!(shell_quote("12345"), "12345");
-}
-
-#[test]
-fn given_path_without_special_chars_when_shell_quoting_then_no_quotes() {
-    assert_eq!(shell_quote("/usr/local/bin"), "/usr/local/bin");
+    assert_eq!(shell_quote("a\tb", false), "\"a\tb\"");
 }
 
 #[test]
 fn given_flag_without_spaces_when_shell_quoting_then_no_quotes() {
-    assert_eq!(shell_quote("--verbose"), "--verbose");
+    assert_eq!(shell_quote("--verbose", false), "--verbose");
+}
+
+#[test]
+fn given_numeric_value_when_shell_quoting_then_no_quotes() {
+    assert_eq!(shell_quote("12345", false), "12345");
+}
+
+#[test]
+fn given_path_without_special_chars_when_shell_quoting_then_no_quotes() {
+    assert_eq!(shell_quote("/usr/local/bin", false), "/usr/local/bin");
 }
 
 #[test]
 fn given_alphanumeric_with_hyphens_when_shell_quoting_then_no_quotes() {
-    assert_eq!(shell_quote("my-app-v2.0"), "my-app-v2.0");
+    assert_eq!(shell_quote("my-app-v2.0", false), "my-app-v2.0");
+}
+
+// --- shell_quote tests (literal mode: literal = true) ---
+// literal = true is used for values that were single-quoted in the source.
+// Output must be a POSIX single-quoted literal so the shell performs NO
+// expansion or command substitution when the .envrc is sourced.
+
+#[test]
+fn given_literal_value_with_dollar_when_shell_quoting_then_single_quotes_no_expansion() {
+    // Regression: a password containing $ must survive sourcing verbatim.
+    assert_eq!(
+        shell_quote("0$s7-e|ZKi~dMz3eYqH_6UFE(N-.", true),
+        "'0$s7-e|ZKi~dMz3eYqH_6UFE(N-.'"
+    );
+}
+
+#[test]
+fn given_literal_value_with_backtick_when_shell_quoting_then_single_quotes_no_substitution() {
+    // Backticks inside single quotes are literal - no command substitution.
+    assert_eq!(shell_quote("echo `date`", true), "'echo `date`'");
+}
+
+#[test]
+fn given_literal_value_with_embedded_single_quote_when_shell_quoting_then_escapes() {
+    // POSIX idiom: close quote, escaped quote, reopen quote.
+    assert_eq!(shell_quote("it's", true), "'it'\\''s'");
+}
+
+#[test]
+fn given_literal_empty_value_when_shell_quoting_then_single_quotes() {
+    assert_eq!(shell_quote("", true), "''");
+}
+
+#[test]
+fn given_literal_simple_value_when_shell_quoting_then_no_quotes() {
+    // No special characters - bare output is already literal.
+    assert_eq!(shell_quote("simple", true), "simple");
+}
+
+// --- parse quote-style intent tests ---
+
+#[test]
+fn given_single_quoted_value_when_parsing_then_marks_key_literal() {
+    let content = "export PW='a$b'\n";
+    let env_file = EnvFile::parse(content, PathBuf::from("/project/local.env")).unwrap();
+    assert_eq!(env_file.variables.get("PW"), Some(&"a$b".to_string()));
+    assert!(env_file.literal_keys.contains("PW"));
+}
+
+#[test]
+fn given_double_quoted_value_when_parsing_then_key_not_literal() {
+    let content = "export P=\"$HOME/bin\"\n";
+    let env_file = EnvFile::parse(content, PathBuf::from("/project/local.env")).unwrap();
+    assert!(!env_file.literal_keys.contains("P"));
+}
+
+#[test]
+fn given_unquoted_value_when_parsing_then_key_not_literal() {
+    let content = "export P=plain\n";
+    let env_file = EnvFile::parse(content, PathBuf::from("/project/local.env")).unwrap();
+    assert!(!env_file.literal_keys.contains("P"));
 }

@@ -38,6 +38,62 @@ export BAZ=qux
 }
 
 #[test]
+fn given_single_quoted_value_when_building_then_marks_key_literal() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let leaf = create_env_file(&temp, "local.env", "export PW='a$b'\n");
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+
+    // Act
+    let result = service.build(&leaf).unwrap();
+
+    // Assert - single-quoted source is preserved as a literal key
+    assert_eq!(result.variables.get("PW"), Some(&"a$b".to_string()));
+    assert!(result.literal_keys.contains("PW"));
+}
+
+#[test]
+fn given_child_double_quotes_a_parent_literal_when_building_then_child_style_wins() {
+    // Arrange - parent declares KEY single-quoted (literal), child redeclares it
+    // double-quoted (expansion). Child override must also override the quote style.
+    let temp = TempDir::new().unwrap();
+    let _base = create_env_file(&temp, "base.env", "export KEY='from_base'\n");
+    let leaf = create_env_file(
+        &temp,
+        "local.env",
+        "# rsenv: base.env\nexport KEY=\"from_local\"\n",
+    );
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+
+    // Act
+    let result = service.build(&leaf).unwrap();
+
+    // Assert - child wins on value AND on quote style (no longer literal)
+    assert_eq!(result.variables.get("KEY"), Some(&"from_local".to_string()));
+    assert!(!result.literal_keys.contains("KEY"));
+}
+
+#[test]
+fn given_child_single_quotes_a_parent_expansion_when_building_then_child_style_wins() {
+    // Arrange - reverse direction: parent double-quoted, child single-quoted.
+    let temp = TempDir::new().unwrap();
+    let _base = create_env_file(&temp, "base.env", "export KEY=\"from_base\"\n");
+    let leaf = create_env_file(
+        &temp,
+        "local.env",
+        "# rsenv: base.env\nexport KEY='from_local'\n",
+    );
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+
+    // Act
+    let result = service.build(&leaf).unwrap();
+
+    // Assert - child wins; KEY is now literal
+    assert_eq!(result.variables.get("KEY"), Some(&"from_local".to_string()));
+    assert!(result.literal_keys.contains("KEY"));
+}
+
+#[test]
 fn given_env_file_with_parent_when_building_then_merges_variables() {
     // Arrange - v1 format uses export prefix
     let temp = TempDir::new().unwrap();
