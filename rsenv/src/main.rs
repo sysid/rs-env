@@ -109,7 +109,8 @@ fn handle_env(
 
             // Output as shell-sourceable format
             for (key, value) in &result.variables {
-                println!("export {}={}", key, shell_quote(value));
+                let literal = result.literal_keys.contains(key);
+                println!("export {}={}", key, shell_quote(value, literal));
             }
             Ok(())
         }
@@ -122,7 +123,8 @@ fn handle_env(
 
             let mut exports = String::new();
             for (k, v) in &output.variables {
-                exports.push_str(&format!("export {}={}\n", k, shell_quote(v)));
+                let literal = output.literal_keys.contains(k);
+                exports.push_str(&format!("export {}={}\n", k, shell_quote(v, literal)));
             }
 
             update_vars_section(&fs, &envrc_path, &exports).map_err(|e| {
@@ -234,7 +236,8 @@ fn handle_env(
 
                     // Output as shell-sourceable format
                     for (key, value) in &result.variables {
-                        println!("export {}={}", key, shell_quote(value));
+                        let literal = result.literal_keys.contains(key);
+                        println!("export {}={}", key, shell_quote(value, literal));
                     }
                 }
                 None => {

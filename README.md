@@ -139,6 +139,16 @@ Children inherit all parent variables and can override them.
   └────────────────────────────────────────────┘
 ```
 
+**Quoting** — rsenv preserves the source's quote style, matching shell semantics:
+
+```
+  export PW='p@$$w0rd'      ◄ single quotes → emitted literal (no expansion)
+  export DIR="$HOME/bin"    ◄ double quotes → $HOME expands when sourced
+```
+
+Store secrets that contain `$`, backticks, or other shell metacharacters in
+**single quotes** so they survive sourcing verbatim.
+
 **Key commands**:
 - `rsenv env tree` — visualize the hierarchy
 - `rsenv env select` — fuzzy-pick an env, write to `.envrc`
