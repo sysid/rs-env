@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tracing::debug;
 
 use crate::application::dotfile::neutralize_path;
+use crate::application::services::environment::{default_env_content, DEFAULT_ENVS};
 use crate::application::{ApplicationError, ApplicationResult, IoResultExt};
 use crate::config::Settings;
 use crate::domain::{GuardedFile, Vault};
@@ -483,24 +484,10 @@ impl VaultService {
     /// Create default environment files in the envs subdirectory.
     fn create_default_env_files(&self, vault_dir: &Path) -> ApplicationResult<()> {
         let envs_dir = vault_dir.join("envs");
-        for env in ["none", "local", "test", "int", "e2e", "prod"] {
+        for env in DEFAULT_ENVS {
             let path = envs_dir.join(format!("{}.env", env));
-            let content = if env == "none" {
-                // none.env is the root - no parent link
-                format!(
-                    "################################## {env}.env ##################################\n\
-                     export RUN_ENV={env}\n"
-                )
-            } else {
-                // All others link to none.env
-                format!(
-                    "################################## {env}.env ##################################\n\
-                     # rsenv: none.env\n\
-                     export RUN_ENV={env}\n"
-                )
-            };
             self.fs
-                .write(&path, &content)
+                .write(&path, &default_env_content(env))
                 .map_err(|e| ApplicationError::OperationFailed {
                     context: format!("create env file: {}", path.display()),
                     source: Box::new(e),

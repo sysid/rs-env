@@ -71,7 +71,7 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
     match cli.command {
         Some(Commands::Init { command }) => handle_init(command, project_dir, &settings),
         Some(Commands::Config { command }) => handle_config(command, &settings, project_dir),
-        Some(Commands::Env { command }) => handle_env(command, project_dir),
+        Some(Commands::Env { command }) => handle_env(command, project_dir, vault_path),
         Some(Commands::Guard { command }) => handle_guard(command, project_dir, &settings),
         Some(Commands::Hook { command }) => handle_hook(command, &settings),
         Some(Commands::Info { check }) => handle_info(project_dir, &settings, check),
@@ -97,6 +97,7 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
 fn handle_env(
     command: EnvCommands,
     project_dir: Option<std::path::PathBuf>,
+    vault_path: Option<std::path::PathBuf>,
 ) -> rsenv::cli::CliResult<()> {
     let fs = Arc::new(RealFileSystem);
     let service = EnvironmentService::new(fs);
@@ -187,6 +188,26 @@ fn handle_env(
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
             output::action("Unlinked", &file.display());
+            Ok(())
+        }
+        EnvCommands::Init { clear } => {
+            let vault_dir = vault_path.ok_or_else(|| {
+                rsenv::cli::CliError::Usage("No vault found. Run 'rsenv init vault' first.".into())
+            })?;
+            let envs_dir = vault_dir.join("envs");
+
+            let (swept, created) = service.init_files(&envs_dir, clear).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if swept > 0 {
+                let label = if clear { "Removed" } else { "Backed up" };
+                output::action(label, &format!("{} files", swept));
+            }
+            output::action(
+                "Initialized",
+                &format!("{} env files in {}", created, envs_dir.display()),
+            );
             Ok(())
         }
         EnvCommands::Select { dir } => {

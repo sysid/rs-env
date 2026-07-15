@@ -751,3 +751,220 @@ fn given_nonexistent_file_when_building_then_returns_file_not_found() {
     // Assert
     assert!(result.is_err());
 }
+
+// ============================================================
+// init_files()
+// ============================================================
+
+/// Names of the files `init_files` is expected to generate.
+const EXPECTED_DEFAULTS: [&str; 6] = [
+    "none.env",
+    "local.env",
+    "test.env",
+    "int.env",
+    "e2e.env",
+    "prod.env",
+];
+
+/// Sorted file names directly under `dir`, so tests can assert on exact directory contents.
+fn list_files(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .expect("read envs dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn given_empty_dir_when_init_files_then_creates_six_defaults() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let envs_dir = temp.path().join("envs");
+    std::fs::create_dir_all(&envs_dir).unwrap();
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+
+    // Act
+    let (swept, created) = service.init_files(&envs_dir, false).unwrap();
+
+    // Assert
+    assert_eq!(swept, 0, "empty dir has nothing to sweep");
+    assert_eq!(created, 6);
+    for name in EXPECTED_DEFAULTS {
+        assert!(envs_dir.join(name).exists(), "{name} should exist");
+    }
+}
+
+#[test]
+fn given_empty_dir_when_init_files_then_content_matches_vault_defaults() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let envs_dir = temp.path().join("envs");
+    std::fs::create_dir_all(&envs_dir).unwrap();
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+
+    // Act
+    service.init_files(&envs_dir, false).unwrap();
+
+    // Assert - none.env is the hierarchy root: no parent link
+    let none = std::fs::read_to_string(envs_dir.join("none.env")).unwrap();
+    assert_eq!(
+        none,
+        "################################## none.env ##################################\n\
+         export RUN_ENV=none\n"
+    );
+
+    // Assert - every other env links to none.env
+    let local = std::fs::read_to_string(envs_dir.join("local.env")).unwrap();
+    assert_eq!(
+        local,
+        "################################## local.env ##################################\n\
+         # rsenv: none.env\n\
+         export RUN_ENV=local\n"
+    );
+}
+
+#[test]
+fn given_existing_env_files_when_init_files_then_backs_up_to_bkp() {
+    // Arrange - a hand-edited local.env
+    let temp = TempDir::new().unwrap();
+    let envs_dir = temp.path().join("envs");
+    std::fs::create_dir_all(&envs_dir).unwrap();
+    std::fs::write(envs_dir.join("local.env"), "export SECRET=mine\n").unwrap();
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+
+    // Act
+    let (swept, created) = service.init_files(&envs_dir, false).unwrap();
+
+    // Assert - the user's content survives in the .bkp
+    assert_eq!(swept, 1);
+    assert_eq!(created, 6);
+    assert_eq!(
+        std::fs::read_to_string(envs_dir.join("local.env.bkp")).unwrap(),
+        "export SECRET=mine\n"
+    );
+
+    // Assert - local.env itself was regenerated
+    assert!(std::fs::read_to_string(envs_dir.join("local.env"))
+        .unwrap()
+        .contains("export RUN_ENV=local"));
+}
+
+#[test]
+fn given_unrelated_files_when_init_files_then_they_are_backed_up_too() {
+    // Arrange - the sweep is "every file", not just the six defaults or just *.env
+    let temp = TempDir::new().unwrap();
+    let envs_dir = temp.path().join("envs");
+    std::fs::create_dir_all(&envs_dir).unwrap();
+    std::fs::write(envs_dir.join("custom.env"), "export CUSTOM=1\n").unwrap();
+    std::fs::write(envs_dir.join("README.md"), "notes\n").unwrap();
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+
+    // Act
+    let (swept, _) = service.init_files(&envs_dir, false).unwrap();
+
+    // Assert
+    assert_eq!(swept, 2);
+    assert_eq!(
+        std::fs::read_to_string(envs_dir.join("custom.env.bkp")).unwrap(),
+        "export CUSTOM=1\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(envs_dir.join("README.md.bkp")).unwrap(),
+        "notes\n"
+    );
+    assert!(
+        !envs_dir.join("custom.env").exists(),
+        "custom.env is moved aside, not regenerated"
+    );
+}
+
+#[test]
+fn given_existing_bkp_when_init_files_then_overwritten_and_not_cascaded() {
+    // Arrange - run once to lay down a first generation of .bkp files
+    let temp = TempDir::new().unwrap();
+    let envs_dir = temp.path().join("envs");
+    std::fs::create_dir_all(&envs_dir).unwrap();
+    std::fs::write(envs_dir.join("local.env"), "export SECRET=mine\n").unwrap();
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+    service.init_files(&envs_dir, false).unwrap();
+
+    // Act - second run sweeps the generated files over the existing .bkp
+    let (swept, _) = service.init_files(&envs_dir, false).unwrap();
+
+    // Assert - existing .bkp files are skipped by the sweep, only the 6 defaults move
+    assert_eq!(swept, 6);
+
+    // Assert - .bkp now holds the previous (generated) version; no deeper cascade
+    assert!(std::fs::read_to_string(envs_dir.join("local.env.bkp"))
+        .unwrap()
+        .contains("export RUN_ENV=local"));
+    assert!(
+        !envs_dir.join("local.env.bkp.bkp").exists(),
+        "backups must not cascade"
+    );
+
+    // Assert - directory stays bounded at 6 defaults + 6 backups
+    assert_eq!(list_files(&envs_dir).len(), 12);
+}
+
+#[test]
+fn given_clear_when_init_files_then_removes_all_including_bkp() {
+    // Arrange - a dirty envs dir: user file, unrelated file, and a stale backup
+    let temp = TempDir::new().unwrap();
+    let envs_dir = temp.path().join("envs");
+    std::fs::create_dir_all(&envs_dir).unwrap();
+    std::fs::write(envs_dir.join("local.env"), "export SECRET=mine\n").unwrap();
+    std::fs::write(envs_dir.join("custom.env"), "export CUSTOM=1\n").unwrap();
+    std::fs::write(envs_dir.join("local.env.bkp"), "old\n").unwrap();
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+
+    // Act
+    let (swept, created) = service.init_files(&envs_dir, true).unwrap();
+
+    // Assert - everything was deleted, nothing was backed up
+    assert_eq!(swept, 3);
+    assert_eq!(created, 6);
+
+    let mut expected: Vec<String> = EXPECTED_DEFAULTS.iter().map(|s| s.to_string()).collect();
+    expected.sort();
+    assert_eq!(
+        list_files(&envs_dir),
+        expected,
+        "--clear leaves exactly the six defaults"
+    );
+}
+
+#[test]
+fn given_missing_envs_dir_when_init_files_then_creates_it() {
+    // Arrange - vault whose envs/ was deleted outright
+    let temp = TempDir::new().unwrap();
+    let envs_dir = temp.path().join("envs");
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+
+    // Act
+    let (swept, created) = service.init_files(&envs_dir, false).unwrap();
+
+    // Assert
+    assert_eq!(swept, 0);
+    assert_eq!(created, 6);
+    assert!(envs_dir.is_dir());
+}
+
+#[test]
+fn given_regenerated_files_when_building_leaf_then_hierarchy_resolves_to_none_root() {
+    // Arrange - the generated files must form a usable hierarchy, not just exist
+    let temp = TempDir::new().unwrap();
+    let envs_dir = temp.path().join("envs");
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+    service.init_files(&envs_dir, false).unwrap();
+
+    // Act
+    let result = service.build(&envs_dir.join("prod.env")).unwrap();
+
+    // Assert - child overrides the root's RUN_ENV, and both files are in the hierarchy
+    assert_eq!(result.variables.get("RUN_ENV"), Some(&"prod".to_string()));
+    assert_eq!(result.files.len(), 2);
+}

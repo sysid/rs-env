@@ -32,6 +32,29 @@ pub struct EnvHierarchy {
     pub files: Vec<EnvFile>,
 }
 
+/// Environments scaffolded into a vault's `envs/` directory. `none` comes first: it is the
+/// hierarchy root that all others link to.
+pub(crate) const DEFAULT_ENVS: [&str; 6] = ["none", "local", "test", "int", "e2e", "prod"];
+
+/// Body of a default env file.
+///
+/// `none.env` is the hierarchy root and carries no parent link; every other env declares
+/// `none.env` as its parent, so anything added to the root is inherited by all of them.
+pub(crate) fn default_env_content(env: &str) -> String {
+    if env == "none" {
+        format!(
+            "################################## {env}.env ##################################\n\
+             export RUN_ENV={env}\n"
+        )
+    } else {
+        format!(
+            "################################## {env}.env ##################################\n\
+             # rsenv: none.env\n\
+             export RUN_ENV={env}\n"
+        )
+    }
+}
+
 /// Service for building hierarchical environment variables.
 pub struct EnvironmentService {
     fs: Arc<dyn FileSystem>,
@@ -203,6 +226,79 @@ impl EnvironmentService {
 
         debug!("get_hierarchy: found {} env files", files.len());
         Ok(EnvHierarchy { files })
+    }
+
+    /// Regenerate the default env files in `envs_dir`.
+    ///
+    /// Every existing file is swept aside first: renamed to `<name>.bkp`, or deleted when
+    /// `clear` is set. Files already ending in `.bkp` are left alone by the rename path so
+    /// backups never cascade into `.bkp.bkp` - a `.bkp` therefore holds the immediately
+    /// previous version only, and is overwritten by a second call.
+    ///
+    /// Returns `(swept, created)`.
+    pub fn init_files(&self, envs_dir: &Path, clear: bool) -> ApplicationResult<(usize, usize)> {
+        debug!("init_files: envs_dir={} clear={}", envs_dir.display(), clear);
+
+        // Tolerate a vault whose envs/ was deleted outright
+        self.fs
+            .create_dir_all(envs_dir)
+            .map_err(|e| ApplicationError::OperationFailed {
+                context: format!("create envs directory: {}", envs_dir.display()),
+                source: Box::new(e),
+            })?;
+
+        // Snapshot the listing before mutating it. The FileSystem trait has no read_dir, so
+        // enumerate with WalkDir as get_hierarchy does.
+        let existing: Vec<PathBuf> = walkdir::WalkDir::new(envs_dir)
+            .max_depth(1)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .map(|e| e.path().to_path_buf())
+            .collect();
+
+        let mut swept = 0;
+        for path in existing {
+            if clear {
+                self.fs
+                    .remove_file(&path)
+                    .map_err(|e| ApplicationError::OperationFailed {
+                        context: format!("remove env file: {}", path.display()),
+                        source: Box::new(e),
+                    })?;
+                swept += 1;
+                continue;
+            }
+
+            if path.extension().map(|ext| ext == "bkp").unwrap_or(false) {
+                continue;
+            }
+
+            let backup = path.with_extension(format!(
+                "{}.bkp",
+                path.extension().unwrap_or_default().to_string_lossy()
+            ));
+            self.fs
+                .rename(&path, &backup)
+                .map_err(|e| ApplicationError::OperationFailed {
+                    context: format!("back up env file: {} -> {}", path.display(), backup.display()),
+                    source: Box::new(e),
+                })?;
+            swept += 1;
+        }
+
+        for env in DEFAULT_ENVS {
+            let path = envs_dir.join(format!("{env}.env"));
+            self.fs
+                .write(&path, &default_env_content(env))
+                .map_err(|e| ApplicationError::OperationFailed {
+                    context: format!("create env file: {}", path.display()),
+                    source: Box::new(e),
+                })?;
+        }
+
+        debug!("init_files: swept {} files", swept);
+        Ok((swept, DEFAULT_ENVS.len()))
     }
 
     fn count_rsenv_directives(content: &str) -> usize {
