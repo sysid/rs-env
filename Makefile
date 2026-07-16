@@ -24,6 +24,26 @@ test:  ## Run all tests (single-threaded, required)
 test-verbose:  ## Run tests with debug logging
 	cd $(pkg_src) && RUST_LOG=DEBUG cargo test -- --test-threads=1 --nocapture
 
+# NOTE: recipes must be single logical lines (\-continued). The .ONESHELL above is
+# silently ignored by the GNU make 3.81 that macOS ships (needs >= 3.82).
+#
+# Not covered by `make test`: skim drives the terminal directly, so the selector has
+# no automated test. Run this after touching SkimSelector or bumping the skim crate.
+.PHONY: test-skim
+test-skim: build-debug  ## Interactive smoke test of the skim selector (needs a TTY)
+	@test -t 0 || { echo "-E- test-skim is interactive: run it from a terminal, not a pipe or CI."; exit 1; }
+	@d=$$(mktemp -d); \
+	trap 'rm -rf "$$d"' EXIT; \
+	printf '# rsenv:\nexport BASE=1\n'              > "$$d/base.env"; \
+	printf '# rsenv: base.env\nexport STAGE=dev\n'  > "$$d/dev.env"; \
+	printf '# rsenv: base.env\nexport STAGE=prod\n' > "$$d/prod.env"; \
+	echo "-M- Fixture: $$d  (dev.env and prod.env both inherit base.env)"; \
+	echo "-M- Expect a 3-entry picker. Type to filter, Enter to pick, Esc to abort."; \
+	echo "-M-   pick dev.env -> prints BASE=1 and STAGE=dev"; \
+	echo "-M-   Esc          -> no output, exit 0"; \
+	echo; \
+	$(pkg_src)/target/debug/$(BINARY) env select "$$d"
+
 .PHONY: watch
 watch:  ## Run tests on file changes (requires cargo-watch)
 	cd $(pkg_src) && cargo watch -x 'test -- --test-threads=1'
