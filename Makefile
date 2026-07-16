@@ -7,6 +7,8 @@ VERSION = $(shell cat VERSION)
 SHELL = bash
 .ONESHELL:
 
+VERSION       = $(shell cat VERSION)
+
 # Paths
 app_root := $(CURDIR)
 pkg_src = $(app_root)/rsenv
@@ -166,6 +168,14 @@ create-release: check-github-token  ## Create GitHub release via gh CLI
 upload:  ## Publish to crates.io
 	@test -n "$$CARGO_REGISTRY_TOKEN" || { echo "Error: CARGO_REGISTRY_TOKEN not set"; exit 1; }
 	cd $(pkg_src) && cargo publish
+
+.PHONY: fix-version
+fix-version: check-github-token  ## fix-version of Cargo.toml, re-connect with HEAD
+	git add rsenv/Cargo.lock
+	git commit --amend --no-edit
+	git tag -f "v$(VERSION)"
+	git push --force-with-lease
+	git push --tags --force
 
 ################################################################################
 # Clean                                                                        #
