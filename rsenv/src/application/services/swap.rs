@@ -41,6 +41,72 @@ use crate::config::Settings;
 use crate::domain::{expand_env_vars, SwapFile, SwapState, Vault, VaultSwapStatus};
 use crate::infrastructure::traits::FileSystem;
 
+/// How a path changed relative to the swap-in baseline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwapChangeKind {
+    /// Present in the project, absent from the baseline.
+    Added,
+    /// Present in the baseline, absent from the project.
+    Deleted,
+    /// Content (or symlink target) differs.
+    Modified,
+    /// Changed between file, directory and symlink.
+    TypeChanged,
+}
+
+/// One changed path inside a swapped-in entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwapChange {
+    /// Path relative to the swapped entry root, in PROJECT-side (restored) naming.
+    /// Empty when the swapped entry is itself a file or symlink.
+    pub relative_path: PathBuf,
+    /// Absolute path in the project. Does not exist for `Deleted`.
+    pub project_path: PathBuf,
+    /// Absolute path of the baseline copy. Does not exist for `Added`.
+    /// Opaque to callers - do not parse it.
+    pub baseline_path: PathBuf,
+    pub kind: SwapChangeKind,
+    /// True when either side is non-UTF-8 or contains NUL, so a patch must not be rendered.
+    pub is_binary: bool,
+}
+
+/// Diff of one swapped-in entry against its swap-in baseline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwapEntryDiff {
+    /// Swapped entry root in the project (file, directory or symlink).
+    pub project_path: PathBuf,
+    /// Host that performed the swap-in.
+    pub hostname: String,
+    /// Empty means clean.
+    pub changes: Vec<SwapChange>,
+    /// The swapped entry is missing from the project entirely - an interrupted swap-in,
+    /// or a manual deletion. Reported as one fact rather than N deletions.
+    pub project_root_missing: bool,
+}
+
+/// A sentinel found in a vault's `swap/` directory.
+///
+/// A sentinel marks a swapped-IN entry. Its name is
+/// `<neutralized_base>@@<hostname>@@rsenv_active` and it holds a byte copy of the vault
+/// override as it stood at swap-in time, so it is the baseline for `diff`.
+#[derive(Debug, Clone)]
+struct SentinelEntry {
+    /// Absolute path of the sentinel itself.
+    sentinel_path: PathBuf,
+    /// Path of the un-suffixed override relative to `swap/`. Still NEUTRALIZED.
+    vault_relative: PathBuf,
+    /// Host that performed the swap-in.
+    hostname: String,
+}
+
+/// Git's heuristic: NUL in the leading block, or content that is not valid UTF-8.
+///
+/// Public so the patch renderer uses the same definition that populated
+/// [`SwapChange::is_binary`] - the two must never disagree.
+pub fn is_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(8192).any(|b| *b == 0) || std::str::from_utf8(bytes).is_err()
+}
+
 /// File swap-in/swap-out service.
 pub struct SwapService {
     fs: Arc<dyn FileSystem>,
@@ -911,19 +977,6 @@ impl SwapService {
         let mut files = Vec::new();
         let mut seen_paths = std::collections::HashSet::new();
 
-        // Helper to check if a path is inside a sentinel/backup directory
-        let is_inside_special_dir = |path: &Path| -> bool {
-            path.ancestors().skip(1).any(|ancestor| {
-                ancestor
-                    .file_name()
-                    .map(|n| {
-                        let s = n.to_string_lossy();
-                        s.ends_with("@@rsenv_active") || s.ends_with(".rsenv_original")
-                    })
-                    .unwrap_or(false)
-            })
-        };
-
         // Walk vault swap directory (files AND directories)
         for entry in WalkDir::new(&swap_dir)
             .into_iter()
@@ -949,10 +1002,7 @@ impl SwapService {
 
             // Handle sentinel files/directories (indicates swapped-in state)
             if name.ends_with("@@rsenv_active") {
-                let parts: Vec<&str> = name.split("@@").collect();
-
-                if parts.len() == 3 && parts[2] == "rsenv_active" {
-                    let base_name = parts[0];
+                if let Some((base_name, _hostname)) = parse_sentinel_name(&name) {
                     let parent = entry_path.parent().unwrap_or(&swap_dir);
                     let base_vault_path = parent.join(base_name);
 
@@ -1008,6 +1058,320 @@ impl SwapService {
         let files = filter_to_leaves(files);
         debug!("status_impl: found {} swap files", files.len());
         Ok(files)
+    }
+
+    // ============================================================
+    // Diff against the swap-in baseline
+    // ============================================================
+
+    /// Find every sentinel in a vault's swap directory.
+    ///
+    /// Uses `filter_entry` so a sentinel is yielded but never descended into: its contents
+    /// are the swapped payload, not swap units of their own.
+    fn find_sentinels(&self, swap_dir: &Path) -> ApplicationResult<Vec<SentinelEntry>> {
+        let mut found = Vec::new();
+
+        for entry in WalkDir::new(swap_dir)
+            .into_iter()
+            .filter_entry(|e| !is_inside_special_dir(e.path()))
+            .filter_map(|e| e.ok())
+            .filter(|e| e.depth() > 0)
+        {
+            let entry_path = entry.path().to_path_buf();
+            let name = match entry_path.file_name() {
+                Some(n) => n.to_string_lossy().to_string(),
+                None => continue,
+            };
+
+            let (base_name, hostname) = match parse_sentinel_name(&name) {
+                Some(parsed) => parsed,
+                None => continue,
+            };
+
+            let parent = entry_path.parent().unwrap_or(swap_dir);
+            let base_vault_path = parent.join(base_name);
+            let vault_relative = base_vault_path.strip_prefix(swap_dir).map_err(|_| {
+                ApplicationError::OperationFailed {
+                    context: format!("strip prefix from {}", base_vault_path.display()),
+                    source: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "path error",
+                    )),
+                }
+            })?;
+
+            found.push(SentinelEntry {
+                sentinel_path: entry_path.clone(),
+                vault_relative: vault_relative.to_path_buf(),
+                hostname: hostname.to_string(),
+            });
+        }
+
+        Ok(found)
+    }
+
+    /// Map a sentinel's vault-relative path to the entry's root in the project.
+    ///
+    /// Interior components need no probing: the directory branch of `restore_dotfiles`
+    /// renames every `dot.*` unconditionally, so `restore_path` models it exactly. The
+    /// BASENAME is different - the file branch only renames when the destination name is a
+    /// bare dotfile, so a file swapped in under its vault name keeps that name on disk.
+    /// Probe for it rather than trusting the mapping.
+    fn resolve_project_root(&self, project_dir: &Path, vault_relative: &Path) -> PathBuf {
+        let restored = project_dir.join(restore_path(vault_relative));
+        if self.fs.exists_or_is_symlink(&restored) {
+            return restored;
+        }
+
+        let parent_rel = vault_relative.parent().unwrap_or_else(|| Path::new(""));
+        let verbatim = project_dir
+            .join(restore_path(parent_rel))
+            .join(vault_relative.file_name().unwrap_or_default());
+        if self.fs.exists_or_is_symlink(&verbatim) {
+            return verbatim;
+        }
+
+        // Neither exists: report the canonical (restored) form as missing.
+        restored
+    }
+
+    /// Compare one path pair. Returns `None` when they are equivalent.
+    ///
+    /// Symlinks are compared by TARGET and never followed: vault trees carry relative
+    /// symlinks that only resolve at the project location, so a baseline copy is routinely
+    /// dangling where it sits. Reading through it would fail.
+    fn compare_pair(
+        &self,
+        baseline: &Path,
+        project: &Path,
+    ) -> ApplicationResult<Option<(SwapChangeKind, bool)>> {
+        let baseline_is_link = self.fs.is_symlink(baseline);
+        let project_is_link = self.fs.is_symlink(project);
+
+        if baseline_is_link || project_is_link {
+            if baseline_is_link != project_is_link {
+                return Ok(Some((SwapChangeKind::TypeChanged, false)));
+            }
+            let baseline_target = self
+                .fs
+                .read_link(baseline)
+                .with_path_context("read symlink", baseline)?;
+            let project_target = self
+                .fs
+                .read_link(project)
+                .with_path_context("read symlink", project)?;
+            return Ok(if baseline_target == project_target {
+                None
+            } else {
+                Some((SwapChangeKind::Modified, false))
+            });
+        }
+
+        let baseline_is_dir = self.fs.is_dir(baseline);
+        let project_is_dir = self.fs.is_dir(project);
+        if baseline_is_dir != project_is_dir {
+            return Ok(Some((SwapChangeKind::TypeChanged, false)));
+        }
+        if baseline_is_dir {
+            // Directories carry no content of their own; their entries are compared.
+            return Ok(None);
+        }
+
+        let baseline_bytes = self
+            .fs
+            .read_bytes(baseline)
+            .with_path_context("read", baseline)?;
+        let project_bytes = self
+            .fs
+            .read_bytes(project)
+            .with_path_context("read", project)?;
+
+        Ok(if baseline_bytes == project_bytes {
+            None
+        } else {
+            Some((
+                SwapChangeKind::Modified,
+                is_binary(&baseline_bytes) || is_binary(&project_bytes),
+            ))
+        })
+    }
+
+    /// Compare a swapped entry against its baseline.
+    fn compare_entry(
+        &self,
+        baseline_root: &Path,
+        project_root: &Path,
+    ) -> ApplicationResult<Vec<SwapChange>> {
+        // A non-directory entry is a single unit; the root IS the comparison.
+        if !self.fs.is_dir(baseline_root) || self.fs.is_symlink(baseline_root) {
+            return Ok(match self.compare_pair(baseline_root, project_root)? {
+                None => vec![],
+                Some((kind, is_binary)) => vec![SwapChange {
+                    relative_path: PathBuf::new(),
+                    project_path: project_root.to_path_buf(),
+                    baseline_path: baseline_root.to_path_buf(),
+                    kind,
+                    is_binary,
+                }],
+            });
+        }
+
+        // Baseline side: map vault -> project with restore_path. This is the ONLY
+        // direction used. neutralize_path is never called, because it is not injective -
+        // a literal `dot.foo` and a real `.foo` both map to `dot.foo`.
+        let mut baseline_by_project_rel: std::collections::BTreeMap<PathBuf, PathBuf> =
+            std::collections::BTreeMap::new();
+        for entry in WalkDir::new(baseline_root)
+            .min_depth(1)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if let Ok(vault_rel) = entry.path().strip_prefix(baseline_root) {
+                baseline_by_project_rel.insert(restore_path(vault_rel), entry.path().to_path_buf());
+            }
+        }
+
+        // Project side: relative paths as they actually are. No mapping needed.
+        let mut project_rels: std::collections::BTreeSet<PathBuf> =
+            std::collections::BTreeSet::new();
+        for entry in WalkDir::new(project_root)
+            .min_depth(1)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if let Ok(rel) = entry.path().strip_prefix(project_root) {
+                project_rels.insert(rel.to_path_buf());
+            }
+        }
+
+        let mut changes = Vec::new();
+
+        for (project_rel, baseline_path) in &baseline_by_project_rel {
+            let project_path = project_root.join(project_rel);
+
+            if !project_rels.contains(project_rel) {
+                changes.push(SwapChange {
+                    relative_path: project_rel.clone(),
+                    project_path,
+                    baseline_path: baseline_path.clone(),
+                    kind: SwapChangeKind::Deleted,
+                    is_binary: false,
+                });
+                continue;
+            }
+
+            if let Some((kind, is_binary)) = self.compare_pair(baseline_path, &project_path)? {
+                changes.push(SwapChange {
+                    relative_path: project_rel.clone(),
+                    project_path,
+                    baseline_path: baseline_path.clone(),
+                    kind,
+                    is_binary,
+                });
+            }
+        }
+
+        for project_rel in &project_rels {
+            if !baseline_by_project_rel.contains_key(project_rel) {
+                changes.push(SwapChange {
+                    relative_path: project_rel.clone(),
+                    project_path: project_root.join(project_rel),
+                    baseline_path: baseline_root.join(neutralize_path(project_rel)),
+                    kind: SwapChangeKind::Added,
+                    is_binary: false,
+                });
+            }
+        }
+
+        changes.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+        Ok(changes)
+    }
+
+    /// Diff swapped-in entries against their swap-in baseline.
+    ///
+    /// Answers "what changed since swap-in" - the baseline is the sentinel copy taken when
+    /// the entry was swapped in, which is exactly what `swap out` will capture back into
+    /// the vault.
+    ///
+    /// Sentinels are enumerated directly rather than via `status()`, because
+    /// `filter_to_leaves` drops a swapped-in directory as soon as a descendant gets its own
+    /// vault override. Foreign-host sentinels are skipped: they describe another machine's
+    /// baseline.
+    ///
+    /// # Arguments
+    /// * `project_dir` - Project directory
+    /// * `files` - Entries to diff; empty means all swapped-in entries in the vault
+    pub fn diff(
+        &self,
+        project_dir: &Path,
+        files: &[PathBuf],
+    ) -> ApplicationResult<Vec<SwapEntryDiff>> {
+        let vault = match self.vault_service.get(project_dir)? {
+            Some(v) => v,
+            None => {
+                debug!("diff: no vault found");
+                return Ok(vec![]);
+            }
+        };
+
+        let swap_dir = vault.path.join("swap");
+        if !self.fs.exists(&swap_dir) {
+            return Ok(vec![]);
+        }
+
+        let hostname = Self::get_hostname()?;
+
+        let wanted: Vec<PathBuf> = files
+            .iter()
+            .map(|f| {
+                if f.is_absolute() {
+                    sanitize_path(f)
+                } else {
+                    sanitize_path(&project_dir.join(f))
+                }
+            })
+            .collect();
+
+        let mut diffs = Vec::new();
+
+        for sentinel in self.find_sentinels(&swap_dir)? {
+            if sentinel.hostname != hostname {
+                debug!(
+                    "diff: skipping {} - swapped in by host '{}'",
+                    sentinel.sentinel_path.display(),
+                    sentinel.hostname
+                );
+                continue;
+            }
+
+            let project_root = self.resolve_project_root(project_dir, &sentinel.vault_relative);
+
+            if !wanted.is_empty() && !wanted.contains(&project_root) {
+                continue;
+            }
+
+            if !self.fs.exists_or_is_symlink(&project_root) {
+                diffs.push(SwapEntryDiff {
+                    project_path: project_root,
+                    hostname: sentinel.hostname,
+                    changes: vec![],
+                    project_root_missing: true,
+                });
+                continue;
+            }
+
+            let changes = self.compare_entry(&sentinel.sentinel_path, &project_root)?;
+            diffs.push(SwapEntryDiff {
+                project_path: project_root,
+                hostname: sentinel.hostname,
+                changes,
+                project_root_missing: false,
+            });
+        }
+
+        diffs.sort_by(|a, b| a.project_path.cmp(&b.project_path));
+        debug!("diff: {} swapped-in entries", diffs.len());
+        Ok(diffs)
     }
 
     /// Swap out all projects under a base directory.
@@ -1405,6 +1769,43 @@ impl SwapService {
                 context: "get hostname".to_string(),
                 source: Box::new(e),
             })
+    }
+}
+
+/// True when `path` lies *inside* a sentinel or backup directory.
+///
+/// Entries under those trees are the swapped content itself, not swap units. Without this
+/// check a file inside a swapped directory that happens to be named
+/// `x@@host@@rsenv_active` would be mistaken for a sentinel of its own.
+fn is_inside_special_dir(path: &Path) -> bool {
+    path.ancestors().skip(1).any(|ancestor| {
+        ancestor
+            .file_name()
+            .map(|n| {
+                let s = n.to_string_lossy();
+                s.ends_with("@@rsenv_active") || s.ends_with(".rsenv_original")
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// Parse a sentinel file name of the form `<base>@@<hostname>@@rsenv_active`.
+///
+/// Returns `(base_name, hostname)`, where `base_name` is still NEUTRALIZED
+/// (`dot.claude`, not `.claude`).
+///
+/// Shared by `status_impl` and `find_sentinels` so the two can never disagree about what
+/// counts as a sentinel. Note a base name containing `@@` yields more than three parts and
+/// is deliberately not recognised — matching the existing behaviour of `find_any_sentinel`.
+fn parse_sentinel_name(name: &str) -> Option<(&str, &str)> {
+    if !name.ends_with("@@rsenv_active") {
+        return None;
+    }
+    let parts: Vec<&str> = name.split("@@").collect();
+    if parts.len() == 3 && parts[2] == "rsenv_active" {
+        Some((parts[0], parts[1]))
+    } else {
+        None
     }
 }
 

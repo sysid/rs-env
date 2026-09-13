@@ -35,6 +35,9 @@ skim = "5.1"
 # Terminal output
 colored = "3"
 
+# Unified diff rendering (swap diff --patch)
+similar = "2"
+
 # Arena-based trees
 generational-arena = "0.2"
 

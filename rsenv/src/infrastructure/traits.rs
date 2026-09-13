@@ -12,6 +12,12 @@ pub trait FileSystem: Send + Sync {
     /// Read file contents to string.
     fn read_to_string(&self, path: &Path) -> io::Result<String>;
 
+    /// Read file contents as raw bytes.
+    ///
+    /// Needed wherever content may not be valid UTF-8 — swapped trees routinely carry
+    /// media files and git object/index files, which `read_to_string` cannot represent.
+    fn read_bytes(&self, path: &Path) -> io::Result<Vec<u8>>;
+
     /// Write string content to file.
     fn write(&self, path: &Path, content: &str) -> io::Result<()>;
 
@@ -124,6 +130,10 @@ pub struct RealFileSystem;
 impl FileSystem for RealFileSystem {
     fn read_to_string(&self, path: &Path) -> io::Result<String> {
         std::fs::read_to_string(path)
+    }
+
+    fn read_bytes(&self, path: &Path) -> io::Result<Vec<u8>> {
+        std::fs::read(path)
     }
 
     fn write(&self, path: &Path, content: &str) -> io::Result<()> {

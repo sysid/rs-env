@@ -7,12 +7,12 @@
 //! - swap_in MOVES vault to project (vault file removed)
 //! - swap_out MOVES modifications back to vault
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tempfile::TempDir;
 
-use rsenv::application::services::{SwapService, VaultService};
+use rsenv::application::services::{SwapChangeKind, SwapService, VaultService};
 use rsenv::config::Settings;
 use rsenv::domain::SwapState;
 use rsenv::infrastructure::traits::RealFileSystem;
@@ -2924,4 +2924,576 @@ fn given_global_silent_active_swaps_when_status_then_exit_1() {
         has_active,
         "dirty global state should have active swaps (exit 1)"
     );
+}
+
+// ============================================================
+// swap diff - neutralization inside swapped directories
+//
+// The vault stores dotfiles neutralized (.gitignore -> dot.gitignore) at EVERY path
+// component, recursively inside a swapped directory. The sentinel is a verbatim copy of
+// that neutralized tree, while the project holds the restored names. Every test in this
+// group fails against an implementation that compares names verbatim.
+// ============================================================
+
+#[test]
+fn given_swapped_in_dir_with_neutralized_dotfile_when_diff_then_reports_clean() {
+    // Arrange: vault override directory holding a NEUTRALIZED dotfile
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("appdir")).unwrap();
+    std::fs::write(swap_dir.join("appdir/dot.gitignore"), "target\n").unwrap();
+    std::fs::write(swap_dir.join("appdir/regular.txt"), "plain\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("appdir")])
+        .unwrap();
+
+    // Sanity: project side is restored, sentinel side stays neutralized
+    assert!(project_dir.join("appdir/.gitignore").exists());
+
+    // Act: nothing has been edited since swap-in
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert: a verbatim comparison would report Deleted(dot.gitignore) + Added(.gitignore)
+    assert_eq!(diffs.len(), 1);
+    assert!(
+        diffs[0].changes.is_empty(),
+        "expected clean, got {:?}",
+        diffs[0].changes
+    );
+}
+
+#[test]
+fn given_swapped_in_dir_with_modified_dotfile_when_diff_then_reports_modified_with_restored_name() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("appdir")).unwrap();
+    std::fs::write(swap_dir.join("appdir/dot.gitignore"), "target\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("appdir")])
+        .unwrap();
+
+    // Act: edit the restored dotfile in the project
+    std::fs::write(project_dir.join("appdir/.gitignore"), "target\nbuild\n").unwrap();
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert: reported under the PROJECT-side name, not the vault-side one
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].changes.len(), 1);
+    assert_eq!(diffs[0].changes[0].kind, SwapChangeKind::Modified);
+    assert_eq!(
+        diffs[0].changes[0].relative_path,
+        PathBuf::from(".gitignore"),
+        "must report the project name, not dot.gitignore"
+    );
+}
+
+#[test]
+fn given_nested_dot_directories_when_diff_then_all_components_restored() {
+    // Arrange: dotfile neutralization applies to EVERY component, not just the basename
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("appdir/dot.config/dot.local")).unwrap();
+    std::fs::write(
+        swap_dir.join("appdir/dot.config/dot.local/settings.json"),
+        "{}\n",
+    )
+    .unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("appdir")])
+        .unwrap();
+    assert!(project_dir
+        .join("appdir/.config/.local/settings.json")
+        .exists());
+
+    // Act
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert: catches an implementation that only restores the basename
+    assert_eq!(diffs.len(), 1);
+    assert!(
+        diffs[0].changes.is_empty(),
+        "expected clean, got {:?}",
+        diffs[0].changes
+    );
+}
+
+#[test]
+fn given_dot_directory_root_when_diff_then_maps_sentinel_root() {
+    // Arrange: the swapped ROOT is itself a dotfile, so the sentinel root is
+    // `dot.claude@@<host>@@rsenv_active`
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("dot.claude")).unwrap();
+    std::fs::write(swap_dir.join("dot.claude/settings.json"), "{}\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join(".claude")])
+        .unwrap();
+    assert!(project_dir.join(".claude/settings.json").exists());
+
+    // Act
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert: catches stripping the @@ suffix without also restoring the name
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].project_path, project_dir.join(".claude"));
+    assert!(
+        diffs[0].changes.is_empty(),
+        "expected clean, got {:?}",
+        diffs[0].changes
+    );
+}
+
+#[test]
+fn given_deleted_dotfile_in_swapped_dir_when_diff_then_reports_deleted_with_restored_name() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("appdir")).unwrap();
+    std::fs::write(swap_dir.join("appdir/dot.gitignore"), "target\n").unwrap();
+    std::fs::write(swap_dir.join("appdir/keep.txt"), "keep\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("appdir")])
+        .unwrap();
+
+    // Act: delete the restored dotfile from the project
+    std::fs::remove_file(project_dir.join("appdir/.gitignore")).unwrap();
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].changes.len(), 1);
+    assert_eq!(diffs[0].changes[0].kind, SwapChangeKind::Deleted);
+    assert_eq!(
+        diffs[0].changes[0].relative_path,
+        PathBuf::from(".gitignore")
+    );
+}
+
+#[test]
+fn given_added_file_in_swapped_dir_when_diff_then_reports_added() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("appdir")).unwrap();
+    std::fs::write(swap_dir.join("appdir/existing.txt"), "old\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("appdir")])
+        .unwrap();
+
+    // Act: write a new file into the swapped directory
+    std::fs::write(project_dir.join("appdir/notes.md"), "new\n").unwrap();
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].changes.len(), 1);
+    assert_eq!(diffs[0].changes[0].kind, SwapChangeKind::Added);
+    assert_eq!(diffs[0].changes[0].relative_path, PathBuf::from("notes.md"));
+}
+
+// ============================================================
+// swap diff - the non-injectivity trap
+//
+// neutralize_name is NOT injective: both ".foo" and a literal "dot.foo" map to "dot.foo".
+// These tests pin the rule that only the vault->project direction (restore_path) is used.
+// ============================================================
+
+#[test]
+fn given_new_literal_dot_file_alongside_restored_dotfile_when_diff_then_distinguishes_them() {
+    // Arrange: sentinel holds `dot.env`, which swap-in restores to `.env`
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("appdir")).unwrap();
+    std::fs::write(swap_dir.join("appdir/dot.env"), "A=1\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("appdir")])
+        .unwrap();
+    assert!(project_dir.join("appdir/.env").exists());
+
+    // Act: create a NEW file literally named `dot.env` beside the restored `.env`
+    std::fs::write(project_dir.join("appdir/dot.env"), "literal\n").unwrap();
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert: an implementation that neutralizes the PROJECT side collides both onto
+    // `dot.env` and reports the opposite of this.
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(
+        diffs[0].changes.len(),
+        1,
+        "only the literal dot.env is new, got {:?}",
+        diffs[0].changes
+    );
+    assert_eq!(diffs[0].changes[0].kind, SwapChangeKind::Added);
+    assert_eq!(diffs[0].changes[0].relative_path, PathBuf::from("dot.env"));
+}
+
+// ============================================================
+// swap diff - input set and host filtering
+// ============================================================
+
+#[test]
+fn given_ancestor_swapped_in_and_descendant_initialized_when_diff_then_still_reports_ancestor() {
+    // Arrange: `filter_to_leaves` in status() drops an entry that is an ancestor of another,
+    // so sourcing the diff input set from status() would lose the swapped-in directory.
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("thoughts")).unwrap();
+    std::fs::write(swap_dir.join("thoughts/existing.md"), "hello\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("thoughts")])
+        .unwrap();
+
+    // A descendant gets its own vault override while the ancestor is swapped in
+    std::fs::write(project_dir.join("thoughts/notes.md"), "note\n").unwrap();
+    service
+        .swap_init(&project_dir, &[project_dir.join("thoughts/notes.md")])
+        .unwrap();
+
+    // Act
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert: the swapped-in `thoughts` entry must still be diffed
+    assert!(
+        diffs
+            .iter()
+            .any(|d| d.project_path == project_dir.join("thoughts")),
+        "swapped-in ancestor must still be reported, got {:?}",
+        diffs.iter().map(|d| &d.project_path).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn given_sentinel_from_other_host_when_diff_then_skipped() {
+    // Arrange: a sentinel written by a different machine describes that machine's
+    // baseline - diffing it against our project is meaningless.
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(
+        swap_dir.join("config.yml@@otherhost@@rsenv_active"),
+        "override\n",
+    )
+    .unwrap();
+    std::fs::write(project_dir.join("config.yml"), "override\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert
+    assert!(
+        diffs.is_empty(),
+        "foreign-host sentinel must not be diffed, got {:?}",
+        diffs
+    );
+}
+
+#[test]
+fn given_file_named_like_sentinel_inside_swapped_dir_when_diff_then_not_treated_as_sentinel() {
+    // Arrange: a file INSIDE a swapped tree whose name looks like a sentinel must be
+    // compared as content, not enumerated as its own swap unit.
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+    let hostname = get_hostname();
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("appdir")).unwrap();
+    std::fs::write(
+        swap_dir.join(format!("appdir/x@@{}@@rsenv_active", hostname)),
+        "decoy\n",
+    )
+    .unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("appdir")])
+        .unwrap();
+
+    // Act
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert: exactly one swap unit (appdir), and it is clean
+    assert_eq!(diffs.len(), 1, "got {:?}", diffs);
+    assert_eq!(diffs[0].project_path, project_dir.join("appdir"));
+    assert!(
+        diffs[0].changes.is_empty(),
+        "expected clean, got {:?}",
+        diffs[0].changes
+    );
+}
+
+#[test]
+fn given_no_swapped_in_files_when_diff_then_empty() {
+    // Arrange: vault override exists but was never swapped in
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override\n").unwrap();
+    std::fs::write(project_dir.join("config.yml"), "original\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert: a swapped-OUT file has no baseline to diff against
+    assert!(diffs.is_empty(), "got {:?}", diffs);
+}
+
+// ============================================================
+// swap diff - symlinks, type changes, binary content
+// ============================================================
+
+#[test]
+fn given_broken_relative_symlink_in_swapped_dir_when_diff_then_reports_clean() {
+    // Arrange: vault trees routinely carry relative symlinks that only resolve at the
+    // project location, so the sentinel copy is dangling where it sits.
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("appdir")).unwrap();
+    std::os::unix::fs::symlink("../../nowhere", swap_dir.join("appdir/link")).unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("appdir")])
+        .unwrap();
+
+    // Act
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert: catches fs.exists() (false for dangling links) and read_to_string on a symlink
+    assert_eq!(diffs.len(), 1);
+    assert!(
+        diffs[0].changes.is_empty(),
+        "expected clean, got {:?}",
+        diffs[0].changes
+    );
+}
+
+#[test]
+fn given_symlink_target_changed_when_diff_then_reports_modified() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("appdir")).unwrap();
+    std::os::unix::fs::symlink("original-target", swap_dir.join("appdir/link")).unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("appdir")])
+        .unwrap();
+
+    // Act: repoint the symlink in the project
+    std::fs::remove_file(project_dir.join("appdir/link")).unwrap();
+    std::os::unix::fs::symlink("new-target", project_dir.join("appdir/link")).unwrap();
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].changes.len(), 1);
+    assert_eq!(diffs[0].changes[0].kind, SwapChangeKind::Modified);
+    assert_eq!(diffs[0].changes[0].relative_path, PathBuf::from("link"));
+}
+
+#[test]
+fn given_file_replaced_by_directory_when_diff_then_reports_type_changed() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("appdir")).unwrap();
+    std::fs::write(swap_dir.join("appdir/thing"), "i am a file\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("appdir")])
+        .unwrap();
+
+    // Act: replace the file with a directory of the same name
+    std::fs::remove_file(project_dir.join("appdir/thing")).unwrap();
+    std::fs::create_dir(project_dir.join("appdir/thing")).unwrap();
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert
+    assert_eq!(diffs.len(), 1);
+    let thing = diffs[0]
+        .changes
+        .iter()
+        .find(|c| c.relative_path == Path::new("thing"))
+        .expect("expected a change for `thing`");
+    assert_eq!(thing.kind, SwapChangeKind::TypeChanged);
+}
+
+#[test]
+fn given_binary_file_changed_when_diff_then_reports_modified() {
+    // Arrange: real swapped trees carry media and git object files
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("appdir")).unwrap();
+    std::fs::write(swap_dir.join("appdir/blob.bin"), [0xFFu8, 0xFE, 0x00, 0x01]).unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("appdir")])
+        .unwrap();
+
+    // Act: change the binary content
+    std::fs::write(project_dir.join("appdir/blob.bin"), [0x00u8, 0x01, 0x02]).unwrap();
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert: a read_to_string comparator errors on this content instead
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].changes.len(), 1);
+    assert_eq!(diffs[0].changes[0].kind, SwapChangeKind::Modified);
+    assert!(
+        diffs[0].changes[0].is_binary,
+        "non-UTF-8 content must be flagged binary so --patch skips rendering"
+    );
+}
+
+#[test]
+fn given_unchanged_binary_file_when_diff_then_reports_clean() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("appdir")).unwrap();
+    std::fs::write(swap_dir.join("appdir/blob.bin"), [0xFFu8, 0xFE, 0x00, 0x01]).unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("appdir")])
+        .unwrap();
+
+    // Act
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert
+    assert_eq!(diffs.len(), 1);
+    assert!(
+        diffs[0].changes.is_empty(),
+        "expected clean, got {:?}",
+        diffs[0].changes
+    );
+}
+
+#[test]
+fn given_swapped_in_flat_file_when_modified_then_diff_reports_modified() {
+    // Arrange: the single-file case, where the swapped unit is not a directory
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override\n").unwrap();
+    std::fs::write(project_dir.join("config.yml"), "original\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("config.yml")])
+        .unwrap();
+
+    // Act
+    std::fs::write(project_dir.join("config.yml"), "override\nedited\n").unwrap();
+    let diffs = service.diff(&project_dir, &[]).unwrap();
+
+    // Assert: for a flat file the change is the unit itself
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].changes.len(), 1);
+    assert_eq!(diffs[0].changes[0].kind, SwapChangeKind::Modified);
 }

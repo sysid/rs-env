@@ -24,7 +24,8 @@ Rust CLI that unifies hierarchical env-var management, file guarding (symlink-to
 
 ## Gotchas
 - Dotfiles inside the vault are renamed on entry: `.envrc → dot.envrc`, `.gitignore → dot.gitignore`. Code that walks the vault or constructs vault paths must use the renamed form.
-- Swap sentinel filenames embed the current hostname: `<file>.<hostname>.rsenv_active`. Tests that fabricate swap state must compute the same hostname.
+- Swap sentinel filenames embed the current hostname: `<file>@@<hostname>@@rsenv_active` (note the `@@` separators, and that `<file>` is the NEUTRALIZED name, e.g. `dot.claude`). Tests that fabricate swap state must compute the same hostname.
+- A sentinel's *contents* are neutralized; a `*.rsenv_original` backup's contents are NOT. Anything mapping vault paths back to project paths must use `restore_path` and only in that direction — `neutralize_name` is not injective (`.foo` and a literal `dot.foo` both map to `dot.foo`).
 - Encrypted files are content-addressed: `<name>.<sha256-prefix>.enc`. Re-encryption produces a NEW filename; the old one becomes stale and must be removed.
 - The `target/` directory under `rsenv/` is the only build output; nothing is generated at repo root.
 

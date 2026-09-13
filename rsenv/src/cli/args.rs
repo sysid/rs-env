@@ -255,6 +255,21 @@ pub enum SwapCommands {
         vault_base: Option<PathBuf>,
     },
 
+    /// Show what changed in swapped-in files since they were swapped in
+    Diff {
+        /// Entries to diff (if empty, diffs all swapped-in entries in current vault)
+        files: Vec<PathBuf>,
+        /// Show a full unified diff instead of a summary
+        #[arg(short, long)]
+        patch: bool,
+        /// Show absolute paths (relative paths are default)
+        #[arg(long)]
+        absolute: bool,
+        /// Silent mode: exit code only (0=clean, 1=changes, 2=unmanaged)
+        #[arg(short, long)]
+        silent: bool,
+    },
+
     /// Remove files from swap management (deletes vault override + backup, not the project file)
     Delete {
         /// Project paths (as you'd pass to `swap in`/`out`), NOT vault paths.

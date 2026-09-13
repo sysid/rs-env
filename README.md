@@ -78,7 +78,7 @@ Unlike guard, this is reversible — swap in when you start work, swap out when 
   │  │  ◄── moved here      │             │   ◄── backup of official │    │
   │  └──────────────────────┘             │                          │    │
   │                                       │ docker-compose.yml       │    │
-  │                                       │   .<hostname>.rsenv_active    │
+  │                                       │   @@<hostname>@@rsenv_active  │
   │                                       │   ◄── sentinel (who did it)   │
   │                                       └──────────────────────────┘    │
   │                                                                       │
@@ -89,8 +89,9 @@ Unlike guard, this is reversible — swap in when you start work, swap out when 
         (your changes to dev version are PRESERVED)
 ```
 
-**Hostname tracking**: The sentinel `.<hostname>.rsenv_active` records which
-machine swapped the file in, preventing conflicts when sharing vaults.
+**Hostname tracking**: The sentinel `<file>@@<hostname>@@rsenv_active` records which
+machine swapped the file in, preventing conflicts when sharing vaults. It also holds a copy
+of the vault content as of swap-in, which is the baseline `rsenv swap diff` compares against.
 
 **Key commands**:
 - `rsenv swap init <files>` — set up files for swapping (first time)
@@ -98,6 +99,22 @@ machine swapped the file in, preventing conflicts when sharing vaults.
 - `rsenv swap out` — restore originals (no args = all files)
 - `rsenv swap status` — show what's swapped in, by which host
 - `rsenv swap status --silent` — exit code only: 0=clean, 1=dirty, 2=unmanaged
+- `rsenv swap diff` — show what changed in swapped-in files since swap-in
+- `rsenv swap diff --patch` — same, as a full unified diff
+
+**Seeing your changes while swapped in**: while a file is swapped in, its content lives in
+the project and the vault holds only the sentinel, so neither `git diff` shows anything.
+`rsenv swap diff` closes that gap without leaving the project directory:
+
+```bash
+$ rsenv swap diff
+thoughts:
+  M docs/SEARCH.md
+  A research/2026-09-13-ranking.md
+```
+
+Dot-file names are reported as they appear in the project (`.gitignore`), not in their
+neutralized vault form (`dot.gitignore`).
 
 ---
 

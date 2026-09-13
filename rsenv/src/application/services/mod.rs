@@ -13,5 +13,5 @@ mod vault;
 pub use environment::{EnvHierarchy, EnvOutput, EnvironmentService};
 pub use gitignore::{GitignoreDiff, GitignoreService, GitignoreStatus, VaultGitignoreStatus};
 pub use sops::SopsService;
-pub use swap::SwapService;
+pub use swap::{is_binary, SwapChange, SwapChangeKind, SwapEntryDiff, SwapService};
 pub use vault::VaultService;

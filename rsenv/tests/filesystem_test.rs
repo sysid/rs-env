@@ -102,7 +102,10 @@ fn given_directory_with_broken_symlink_when_copy_any_then_preserves_symlink() {
 
     let copied = dst_dir.join("skills");
     let meta = std::fs::symlink_metadata(&copied).unwrap();
-    assert!(meta.file_type().is_symlink(), "entry should remain a symlink");
+    assert!(
+        meta.file_type().is_symlink(),
+        "entry should remain a symlink"
+    );
     assert_eq!(std::fs::read_link(&copied).unwrap(), target);
 }
 
@@ -256,4 +259,59 @@ fn given_path_with_no_parent_when_ensure_parent_then_succeeds() {
 
     // Assert - should succeed (no-op for empty path)
     assert!(result.is_ok());
+}
+
+// ============================================================
+// read_bytes tests
+// ============================================================
+
+#[test]
+fn given_text_file_when_read_bytes_then_returns_exact_bytes() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("text.txt");
+    fs::write(&path, "hello world").unwrap();
+
+    let fs_impl = RealFileSystem;
+
+    // Act
+    let bytes = fs_impl.read_bytes(&path).unwrap();
+
+    // Assert
+    assert_eq!(bytes, b"hello world");
+}
+
+#[test]
+fn given_non_utf8_file_when_read_bytes_then_succeeds_where_read_to_string_fails() {
+    // Arrange - bytes that are NOT valid UTF-8 and contain a NUL.
+    // This is the case swap diff must handle: real vaults carry .mp4 and git index files.
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("binary.bin");
+    let payload: &[u8] = &[0xFF, 0xFE, 0x00, 0x01];
+    fs::write(&path, payload).unwrap();
+
+    let fs_impl = RealFileSystem;
+
+    // Act
+    let bytes = fs_impl.read_bytes(&path).unwrap();
+
+    // Assert - read_bytes round-trips exactly...
+    assert_eq!(bytes, payload);
+    // ...while read_to_string cannot represent this content at all.
+    assert!(fs_impl.read_to_string(&path).is_err());
+}
+
+#[test]
+fn given_missing_file_when_read_bytes_then_returns_error() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("nope.bin");
+
+    let fs_impl = RealFileSystem;
+
+    // Act
+    let result = fs_impl.read_bytes(&path);
+
+    // Assert
+    assert!(result.is_err());
 }

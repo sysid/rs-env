@@ -1596,6 +1596,44 @@ fn handle_hook(command: HookCommands, settings: &Settings) -> rsenv::cli::CliRes
     Ok(())
 }
 
+/// Print the unified diff for one swap change.
+///
+/// Each side is read only when it is about to be rendered, so a large payload never sits in
+/// memory longer than the hunk it produces. Directories and symlinks read as empty, which
+/// renders nothing - the summary line above already carries the fact.
+fn print_patch(change: &rsenv::application::services::SwapChange, label: &str) {
+    use rsenv::application::services::SwapChangeKind;
+    use rsenv::cli::diff_render;
+
+    let read = |p: &std::path::Path| -> Vec<u8> { std::fs::read(p).unwrap_or_default() };
+    let baseline_label = format!("baseline:{}", label);
+
+    let patch = match change.kind {
+        // A file/dir/symlink transition has no meaningful line-level rendering.
+        SwapChangeKind::TypeChanged => return,
+        SwapChangeKind::Added => {
+            diff_render::render_unified(&[], &read(&change.project_path), "/dev/null", label)
+        }
+        SwapChangeKind::Deleted => {
+            diff_render::render_unified(&read(&change.baseline_path), &[], label, "/dev/null")
+        }
+        SwapChangeKind::Modified => {
+            if change.is_binary {
+                diff_render::binary_marker(&baseline_label, label)
+            } else {
+                diff_render::render_unified(
+                    &read(&change.baseline_path),
+                    &read(&change.project_path),
+                    &baseline_label,
+                    label,
+                )
+            }
+        }
+    };
+
+    print!("{}", patch);
+}
+
 fn handle_swap(
     command: SwapCommands,
     project_dir_opt: Option<std::path::PathBuf>,
@@ -1754,11 +1792,7 @@ fn handle_swap(
                                 _ => "unknown",
                             };
                             let marker = format!("in ({})", hostname).green();
-                            output::detail(&format!(
-                                "{} [{}]",
-                                display_path.display(),
-                                marker
-                            ));
+                            output::detail(&format!("{} [{}]", display_path.display(), marker));
                         }
                     }
                 }
@@ -1814,6 +1848,102 @@ fn handle_swap(
                 }
                 Ok(())
             }
+        }
+        SwapCommands::Diff {
+            files,
+            patch,
+            absolute,
+            silent,
+        } => {
+            // Unmanaged is decided before touching swap state, as `status --silent` does.
+            if vault_service_for_check
+                .get(&project_dir)
+                .ok()
+                .flatten()
+                .is_none()
+            {
+                if silent {
+                    std::process::exit(rsenv::exitcode::UNMANAGED);
+                }
+                return Err(rsenv::cli::CliError::Infra(
+                    rsenv::infrastructure::InfraError::Application(
+                        rsenv::application::ApplicationError::VaultNotInitialized(project_dir),
+                    ),
+                ));
+            }
+
+            let diffs = service.diff(&project_dir, &files).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            let has_changes = diffs
+                .iter()
+                .any(|d| d.project_root_missing || !d.changes.is_empty());
+
+            if silent {
+                if has_changes {
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+
+            if diffs.is_empty() {
+                output::info(&"No files swapped in - nothing to diff");
+                return Ok(());
+            }
+
+            let display = |path: &std::path::Path| -> String {
+                if absolute {
+                    path.display().to_string()
+                } else {
+                    path.strip_prefix(&project_dir)
+                        .unwrap_or(path)
+                        .display()
+                        .to_string()
+                }
+            };
+
+            let mut total = 0usize;
+            for entry in &diffs {
+                if entry.project_root_missing {
+                    output::warning(&format!(
+                        "{}: entry missing from project (interrupted swap-in?)",
+                        display(&entry.project_path)
+                    ));
+                    total += 1;
+                    continue;
+                }
+                if entry.changes.is_empty() {
+                    continue;
+                }
+
+                output::header(&format!("{}:", display(&entry.project_path)));
+                for change in &entry.changes {
+                    total += 1;
+                    // For a flat file the entry root IS the change; show its own path.
+                    let label = if change.relative_path.as_os_str().is_empty() {
+                        display(&change.project_path)
+                    } else {
+                        change.relative_path.display().to_string()
+                    };
+                    let marker = match change.kind {
+                        rsenv::application::services::SwapChangeKind::Added => "A".green(),
+                        rsenv::application::services::SwapChangeKind::Deleted => "D".red(),
+                        rsenv::application::services::SwapChangeKind::Modified => "M".yellow(),
+                        rsenv::application::services::SwapChangeKind::TypeChanged => "T".yellow(),
+                    };
+                    println!("  {} {}", marker, label);
+
+                    if patch {
+                        print_patch(change, &label);
+                    }
+                }
+            }
+
+            if total == 0 {
+                output::info(&"No changes since swap-in");
+            }
+            Ok(())
         }
         SwapCommands::Delete { files } => {
             if files.is_empty() {

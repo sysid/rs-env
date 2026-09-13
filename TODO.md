@@ -153,3 +153,64 @@ trains readers to discount `AGENTS.md`, which devalues the rules in it that *are
 load-bearing — the strict one-way error layering, the locked `# rsenv:` v1 wire format, the
 mandatory `--test-threads=1`. Those are followed. These two are not, and the gap should be
 closed from one end or the other.
+
+---
+
+# Swap bugs found while designing `swap diff` (2026-09-13)
+
+Found by reading `swap.rs` closely for the `rsenv swap diff` work. **None is introduced by
+that feature** and none is fixed by it — each deserves its own change so it is not silently
+absorbed. Listed worst-first.
+
+## 1. Directory swapped in by its vault name orphans the project directory
+
+`swap_in` records `SwapFile { project_path: project_file, .. }` (`swap.rs:545`) using the
+path the user passed, *before* `restore_dotfiles` (`swap.rs:542`) renames the root.
+
+For a **directory**, `restore_dotfiles`'s dir branch renames every `dot.*` including the root
+at depth 0. So `rsenv swap in dot.x` moves the content to `dot.x`, renames the root to `.x`,
+but records `dot.x`. A later `swap out dot.x` then finds no project file, **silently loses
+the override** and leaves `.x` orphaned in the project.
+
+Reachable by tab-completing against the vault, which offers the neutralized name.
+
+## 2. `neutralize_dotfiles` can overwrite data
+
+`swap.rs:210` does `fs.rename(".foo", "dot.foo")`. On Unix `rename` **silently replaces** an
+existing destination, so a directory containing both `.foo` and a literal `dot.foo` loses the
+latter on `swap init`/`swap out`. The single-file path guards against this
+(`swap.rs:806`, "vault already has file"); the directory path does not.
+
+## 3. `swap status` mis-reports a file swapped in under its vault name
+
+`status_impl` maps vault→project with `restore_path` unconditionally (`swap.rs:971,997`). For
+a **file** swap that is wrong, because `restore_dotfiles`'s file branch is guarded by
+`is_dotfile(name)`, which is false for `dot.gitignore` — so no rename happens and the project
+file keeps the name `dot.gitignore` while `status` claims `.gitignore`.
+
+`swap diff` works around this by probing the disk in `resolve_project_root`; `status` still
+reports the wrong path. Fixing it centrally would make both correct.
+
+## 4. `@@` in a filename makes a file permanently look swapped-out
+
+`find_any_sentinel` (`swap.rs:160`) and `status_impl` (`swap.rs:952`) both require exactly
+three `@@`-split parts, so a project file named `a@@b` produces a four-part sentinel name that
+is never recognised. `swap diff` deliberately reuses the same predicate
+(`parse_sentinel_name`) so the two at least agree.
+
+## 5. Non-UTF-8 filenames are mangled
+
+`is_dotfile` returns false for non-UTF-8 names (`to_str()` → `None`), so they are neither
+neutralized nor rejected by `find_bare_dotfiles`. `restore_path` then pushes every component
+through `to_string_lossy`, replacing invalid sequences with U+FFFD and producing an unopenable
+path. In `swap diff` that surfaces as one phantom `Deleted` plus one phantom `Added`.
+
+Benign on macOS (APFS rejects invalid UTF-8 filenames), real on Linux. The fix is an
+`OsStr`-preserving variant of `restore_path`; do **not** change the shared one — `status_impl`
+depends on its current behaviour.
+
+## Resolved against decision 1 above
+
+`read_bytes` was added to `FileSystem` (`traits.rs`) for `swap diff`. It is a content
+accessor, not enumeration, so it does not settle the `read_dir` question — the 16 enumeration
+sites still use `walkdir` directly, and `swap diff` follows that precedent.
