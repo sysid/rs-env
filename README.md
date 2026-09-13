@@ -99,8 +99,8 @@ of the vault content as of swap-in, which is the baseline `rsenv swap diff` comp
 - `rsenv swap out` — restore originals (no args = all files)
 - `rsenv swap status` — show what's swapped in, by which host
 - `rsenv swap status --silent` — exit code only: 0=clean, 1=dirty, 2=unmanaged
-- `rsenv swap diff` — show what changed in swapped-in files since swap-in
-- `rsenv swap diff --patch` — same, as a full unified diff
+- `rsenv swap diff` — show what changed in swapped-in files since swap-in, as a patch
+- `rsenv swap diff --stat` — same, summary only (no patch)
 - `rsenv swap commit` — swap out and commit this project's vault data (editor opens prefilled)
 - `rsenv swap commit -a` — same, with a generated commit message
 
@@ -138,11 +138,17 @@ the project and the vault holds only the sentinel, so neither `git diff` shows a
 `rsenv swap diff` closes that gap without leaving the project directory:
 
 ```bash
-$ rsenv swap diff
+$ rsenv swap diff --stat
 thoughts:
   M docs/SEARCH.md
   A research/2026-09-13-ranking.md
 ```
+
+Like `git diff`, the patch is the default view and is piped through your configured pager —
+`swap diff` asks git for it (`git var GIT_PAGER`), so a `core.pager = delta` setup renders
+these diffs exactly as it renders git's. Paging is skipped when output is not a terminal,
+keeping pipes and scripts plain. Patch headers are project-relative, so a viewer can open
+the file they point at.
 
 Dot-file names are reported as they appear in the project (`.gitignore`), not in their
 neutralized vault form (`dot.gitignore`).

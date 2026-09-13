@@ -261,9 +261,15 @@ pub enum SwapCommands {
         /// Selects everything at or below it, like a git pathspec.
         /// If empty, diffs all swapped-in entries in the current vault.
         files: Vec<PathBuf>,
-        /// Show a full unified diff instead of a summary
-        #[arg(short, long)]
+        /// Show the patch (default, like `git diff`; accepted for explicitness)
+        #[arg(short, long, conflicts_with = "stat")]
         patch: bool,
+        /// Show only the summary of changed files, without the patch
+        #[arg(long)]
+        stat: bool,
+        /// Do not pipe the patch through the pager
+        #[arg(long)]
+        no_pager: bool,
         /// Show absolute paths (relative paths are default)
         #[arg(long)]
         absolute: bool,

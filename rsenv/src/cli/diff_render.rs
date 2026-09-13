@@ -2,9 +2,25 @@
 //!
 //! Pure formatting: no filesystem access, so it is unit-testable on its own.
 
+use std::path::Path;
+
 use similar::TextDiff;
 
 use crate::application::services::is_binary;
+
+/// The path a patch header carries: relative to the **project root**, not the swap entry.
+///
+/// Diff viewers resolve header paths against the working directory. A change inside the
+/// swapped `thoughts/` entry is reported as `research/notes.md` relative to that entry;
+/// emitted verbatim, that points at a file which does not exist at the project root, and
+/// delta's file hyperlinks land nowhere. Joining the entry back on fixes it.
+pub fn patch_label(entry: &Path, change: &Path) -> String {
+    if change.as_os_str().is_empty() {
+        entry.display().to_string()
+    } else {
+        entry.join(change).display().to_string()
+    }
+}
 
 /// Number of unchanged context lines around each hunk, matching git's default.
 const CONTEXT_RADIUS: usize = 3;

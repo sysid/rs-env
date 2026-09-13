@@ -1597,42 +1597,95 @@ fn handle_hook(command: HookCommands, settings: &Settings) -> rsenv::cli::CliRes
     Ok(())
 }
 
-/// Print the unified diff for one swap change.
+/// Write the whole `swap diff` report - per-entry summary, and the patch below it.
+///
+/// Everything goes through one writer so the pager receives a single stream.
+fn write_diff_report(
+    out: &mut impl io::Write,
+    diffs: &[rsenv::application::services::SwapEntryDiff],
+    display: &impl Fn(&std::path::Path) -> String,
+    show_patch: bool,
+) -> io::Result<()> {
+    use rsenv::application::services::SwapChangeKind;
+    use rsenv::cli::diff_render::patch_label;
+
+    for entry in diffs.iter().filter(|e| !e.changes.is_empty()) {
+        let entry_label = display(&entry.project_path);
+        writeln!(out, "{}", format!("{}:", entry_label).cyan().bold())?;
+
+        for change in &entry.changes {
+            // For a flat file the entry root IS the change; show its own path.
+            let summary_label = if change.relative_path.as_os_str().is_empty() {
+                display(&change.project_path)
+            } else {
+                change.relative_path.display().to_string()
+            };
+            let marker = match change.kind {
+                SwapChangeKind::Added => "A".green(),
+                SwapChangeKind::Deleted => "D".red(),
+                SwapChangeKind::Modified => "M".yellow(),
+                SwapChangeKind::TypeChanged => "T".yellow(),
+            };
+            writeln!(out, "  {} {}", marker, summary_label)?;
+
+            if show_patch {
+                // The patch header must be project-relative or a viewer cannot open it.
+                let label = patch_label(std::path::Path::new(&entry_label), &change.relative_path);
+                write_patch(out, change, &label)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Write the unified diff for one swap change in git's patch format.
+///
+/// The `diff --git a/X b/X` header and `a/`/`b/` prefixes are what let a diff viewer
+/// (delta, diff-so-fancy) recognise this as a git patch and render it accordingly.
 ///
 /// Each side is read only when it is about to be rendered, so a large payload never sits in
 /// memory longer than the hunk it produces. Directories and symlinks read as empty, which
 /// renders nothing - the summary line above already carries the fact.
-fn print_patch(change: &rsenv::application::services::SwapChange, label: &str) {
+fn write_patch(
+    out: &mut impl io::Write,
+    change: &rsenv::application::services::SwapChange,
+    label: &str,
+) -> io::Result<()> {
     use rsenv::application::services::SwapChangeKind;
     use rsenv::cli::diff_render;
 
     let read = |p: &std::path::Path| -> Vec<u8> { std::fs::read(p).unwrap_or_default() };
-    let baseline_label = format!("baseline:{}", label);
+    let old_label = format!("a/{}", label);
+    let new_label = format!("b/{}", label);
 
     let patch = match change.kind {
         // A file/dir/symlink transition has no meaningful line-level rendering.
-        SwapChangeKind::TypeChanged => return,
+        SwapChangeKind::TypeChanged => return Ok(()),
         SwapChangeKind::Added => {
-            diff_render::render_unified(&[], &read(&change.project_path), "/dev/null", label)
+            diff_render::render_unified(&[], &read(&change.project_path), "/dev/null", &new_label)
         }
         SwapChangeKind::Deleted => {
-            diff_render::render_unified(&read(&change.baseline_path), &[], label, "/dev/null")
+            diff_render::render_unified(&read(&change.baseline_path), &[], &old_label, "/dev/null")
         }
         SwapChangeKind::Modified => {
             if change.is_binary {
-                diff_render::binary_marker(&baseline_label, label)
+                diff_render::binary_marker(&old_label, &new_label)
             } else {
                 diff_render::render_unified(
                     &read(&change.baseline_path),
                     &read(&change.project_path),
-                    &baseline_label,
-                    label,
+                    &old_label,
+                    &new_label,
                 )
             }
         }
     };
 
-    print!("{}", patch);
+    if patch.is_empty() {
+        return Ok(());
+    }
+    writeln!(out, "diff --git a/{} b/{}", label, label)?;
+    write!(out, "{}", patch)
 }
 
 fn handle_swap(
@@ -1856,7 +1909,9 @@ fn handle_swap(
         }
         SwapCommands::Diff {
             files,
-            patch,
+            patch: _,
+            stat,
+            no_pager,
             absolute,
             silent,
         } => {
@@ -1914,46 +1969,32 @@ fn handle_swap(
                 }
             };
 
-            let mut total = 0usize;
-            for entry in &diffs {
-                if entry.project_root_missing {
-                    output::warning(&format!(
-                        "{}: entry missing from project (interrupted swap-in?)",
-                        display(&entry.project_path)
-                    ));
-                    total += 1;
-                    continue;
-                }
-                if entry.changes.is_empty() {
-                    continue;
-                }
-
-                output::header(&format!("{}:", display(&entry.project_path)));
-                for change in &entry.changes {
-                    total += 1;
-                    // For a flat file the entry root IS the change; show its own path.
-                    let label = if change.relative_path.as_os_str().is_empty() {
-                        display(&change.project_path)
-                    } else {
-                        change.relative_path.display().to_string()
-                    };
-                    let marker = match change.kind {
-                        rsenv::application::services::SwapChangeKind::Added => "A".green(),
-                        rsenv::application::services::SwapChangeKind::Deleted => "D".red(),
-                        rsenv::application::services::SwapChangeKind::Modified => "M".yellow(),
-                        rsenv::application::services::SwapChangeKind::TypeChanged => "T".yellow(),
-                    };
-                    println!("  {} {}", marker, label);
-
-                    if patch {
-                        print_patch(change, &label);
-                    }
-                }
-            }
-
-            if total == 0 {
+            if !has_changes {
                 output::info(&"No changes since swap-in");
+                return Ok(());
             }
+
+            // Warnings go to stderr, outside the paged stream, so they stay visible.
+            for entry in diffs.iter().filter(|e| e.project_root_missing) {
+                output::warning(&format!(
+                    "{}: entry missing from project (interrupted swap-in?)",
+                    display(&entry.project_path)
+                ));
+            }
+
+            // The patch is the default view, as in `git diff`; --stat asks for the
+            // summary alone, and only a patch is worth paging.
+            let show_patch = !stat;
+            let mut out = rsenv::cli::pager::Pager::new(show_patch && !no_pager);
+            let rendered = write_diff_report(&mut out, &diffs, &display, show_patch);
+            out.finish();
+
+            rsenv::cli::pager::ignore_broken_pipe(rendered).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
+                    "write diff output",
+                    e,
+                ))
+            })?;
             Ok(())
         }
         SwapCommands::Commit { auto, push } => {
@@ -1971,7 +2012,10 @@ fn handle_swap(
             if outcome.swapped_out.is_empty() {
                 output::info(&"Nothing was swapped in");
             } else {
-                output::info(&format!("Swapped out {} entries:", outcome.swapped_out.len()));
+                output::info(&format!(
+                    "Swapped out {} entries:",
+                    outcome.swapped_out.len()
+                ));
                 for path in &outcome.swapped_out {
                     output::detail(&path.display());
                 }
