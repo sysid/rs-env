@@ -272,6 +272,20 @@ pub enum SwapCommands {
         silent: bool,
     },
 
+    /// Swap out this project's data and commit it to the vault repo
+    ///
+    /// Makes one commit scoped to this project's vault directory, with the project's
+    /// current commit hash in the message as the link back to the project state.
+    /// Leaves the project swapped out.
+    Commit {
+        /// Use a generated commit message instead of opening the editor
+        #[arg(short = 'a', long)]
+        auto: bool,
+        /// Push the vault repo after committing
+        #[arg(long)]
+        push: bool,
+    },
+
     /// Remove files from swap management (deletes vault override + backup, not the project file)
     Delete {
         /// Project paths (as you'd pass to `swap in`/`out`), NOT vault paths.

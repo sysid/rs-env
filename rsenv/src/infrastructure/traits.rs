@@ -5,7 +5,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Output;
+use std::process::{ExitStatus, Output};
 
 /// Filesystem abstraction for testability.
 pub trait FileSystem: Send + Sync {
@@ -90,6 +90,12 @@ pub trait CommandRunner: Send + Sync {
 
     /// Run a command with arguments and capture combined output.
     fn run_with_stdin(&self, cmd: &str, args: &[&str], stdin: &str) -> io::Result<Output>;
+
+    /// Run a command inheriting this process's terminal.
+    ///
+    /// Required for commands that hand the terminal to an editor (`git commit -e`).
+    /// `run()` captures stdout/stderr and therefore cannot express this.
+    fn run_interactive(&self, cmd: &str, args: &[&str]) -> io::Result<ExitStatus>;
 }
 
 /// Item for FZF-style selection.
@@ -325,6 +331,10 @@ impl CommandRunner for RealCommandRunner {
         }
 
         child.wait_with_output()
+    }
+
+    fn run_interactive(&self, cmd: &str, args: &[&str]) -> io::Result<ExitStatus> {
+        std::process::Command::new(cmd).args(args).status()
     }
 }
 

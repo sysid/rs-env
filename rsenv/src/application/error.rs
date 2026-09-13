@@ -20,6 +20,16 @@ pub enum ApplicationError {
     #[error("config error: {message}")]
     Config { message: String },
 
+    #[error("git {command} failed: {stderr}")]
+    GitFailed { command: String, stderr: String },
+
+    #[error(
+        "refusing to commit unencrypted vault secrets:\n  {}\n\
+         Encrypt them (`rsenv sops encrypt`) or add them to the vault repo's .gitignore.",
+        paths.join("\n  ")
+    )]
+    UnencryptedVaultSecrets { paths: Vec<String> },
+
     #[error("operation failed: {context}")]
     OperationFailed {
         context: String,

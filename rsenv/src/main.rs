@@ -13,7 +13,8 @@ use tracing_subscriber::EnvFilter;
 use colored::Colorize;
 use rsenv::application::envrc::update_vars_section;
 use rsenv::application::services::{
-    EnvironmentService, GitignoreService, SopsService, SwapService, VaultService,
+    CommitOptions, EnvironmentService, GitignoreService, ProjectCommit, SopsService, SwapService,
+    VaultCommitService, VaultService,
 };
 use rsenv::cli::args::{
     Cli, Commands, ConfigCommands, EnvCommands, GuardCommands, HookCommands, InitCommands,
@@ -1649,7 +1650,11 @@ fn handle_swap(
     let settings = Arc::new(settings.clone());
     let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
     let vault_service_for_check = vault_service.clone();
-    let service = SwapService::new(fs, vault_service, settings.clone());
+    let service = Arc::new(SwapService::new(
+        fs,
+        vault_service.clone(),
+        settings.clone(),
+    ));
 
     match command {
         SwapCommands::In { files } => {
@@ -1948,6 +1953,65 @@ fn handle_swap(
 
             if total == 0 {
                 output::info(&"No changes since swap-in");
+            }
+            Ok(())
+        }
+        SwapCommands::Commit { auto, push } => {
+            let commit_service = VaultCommitService::new(
+                service.clone(),
+                vault_service,
+                Arc::new(RealCommandRunner),
+            );
+            let opts = CommitOptions { auto, push };
+
+            let outcome = commit_service.commit(&project_dir, &opts).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if outcome.swapped_out.is_empty() {
+                output::info(&"Nothing was swapped in");
+            } else {
+                output::info(&format!("Swapped out {} entries:", outcome.swapped_out.len()));
+                for path in &outcome.swapped_out {
+                    output::detail(&path.display());
+                }
+            }
+
+            match &outcome.commit {
+                Some(sha) => {
+                    output::success(&format!(
+                        "Committed {} to vault ({} files)",
+                        &sha[..7.min(sha.len())],
+                        outcome.staged.len()
+                    ));
+                    for change in &outcome.staged {
+                        output::detail(&format!("{} {}", change.status, change.path.display()));
+                    }
+                    match &outcome.project_commit {
+                        ProjectCommit::Commit { sha, branch, dirty } => output::action(
+                            "Linked to",
+                            &format!(
+                                "{} ({}{})",
+                                &sha[..7.min(sha.len())],
+                                branch,
+                                if *dirty { ", dirty" } else { "" }
+                            ),
+                        ),
+                        ProjectCommit::Unborn { branch } => {
+                            output::warning(&format!("Project has no commits yet on {}", branch))
+                        }
+                        ProjectCommit::NotARepo => {
+                            output::warning(&"Project is not a git repository - no link recorded")
+                        }
+                    }
+                    if outcome.pushed {
+                        output::success(&"Pushed vault repo");
+                    }
+                }
+                None if outcome.staged.is_empty() => {
+                    output::info(&"Vault already up to date - nothing to commit");
+                }
+                None => output::warning(&"Commit aborted - nothing was committed"),
             }
             Ok(())
         }

@@ -9,9 +9,13 @@ mod gitignore;
 mod sops;
 mod swap;
 mod vault;
+mod vault_commit;
 
 pub use environment::{EnvHierarchy, EnvOutput, EnvironmentService};
 pub use gitignore::{GitignoreDiff, GitignoreService, GitignoreStatus, VaultGitignoreStatus};
 pub use sops::SopsService;
 pub use swap::{is_binary, SwapChange, SwapChangeKind, SwapEntryDiff, SwapService};
 pub use vault::VaultService;
+pub use vault_commit::{
+    CommitOptions, CommitOutcome, ProjectCommit, StagedChange, VaultCommitService,
+};

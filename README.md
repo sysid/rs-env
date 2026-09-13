@@ -101,6 +101,37 @@ of the vault content as of swap-in, which is the baseline `rsenv swap diff` comp
 - `rsenv swap status --silent` — exit code only: 0=clean, 1=dirty, 2=unmanaged
 - `rsenv swap diff` — show what changed in swapped-in files since swap-in
 - `rsenv swap diff --patch` — same, as a full unified diff
+- `rsenv swap commit` — swap out and commit this project's vault data (editor opens prefilled)
+- `rsenv swap commit -a` — same, with a generated commit message
+
+**Checkpointing your work into the vault**: while content is swapped in, the live bytes are
+in the project and the vault holds only a frozen sentinel — so that work is in *no* git repo
+until you swap out. `rsenv swap commit` closes that window: it swaps out, then makes one
+commit scoped to this project's vault directory alone, never sweeping in other projects.
+
+```bash
+$ rsenv swap commit -a
+Swapped out 1 entries:
+  /home/you/dev/myproject/thoughts
+✓ Committed b4247db to vault (2 files)
+  M swap/thoughts/notes.md
+  A swap/thoughts/research/2026-09-13-ranking.md
+Linked to: a3bddf6 (main)
+```
+
+The message records the **project's** HEAD commit — the link between a state in the vault and
+the project state it belongs to:
+
+```
+vault(myproject): checkpoint @ a3bddf6
+
+project:        /home/you/dev/myproject
+project-commit: a3bddf6028e11155c9f2bd66776d395a99a3ef83 (main)
+
+ M swap/thoughts/notes.md
+```
+
+Note that `swap commit` leaves the project **swapped out** — run `rsenv swap in` to resume.
 
 **Seeing your changes while swapped in**: while a file is swapped in, its content lives in
 the project and the vault holds only the sentinel, so neither `git diff` shows anything.

@@ -67,19 +67,22 @@ a shortcut; it is the only option available.
 
 Adding `read_dir` to `FileSystem` would unblock all 16 at once.
 
-### 1d. `CommandRunner` cannot express interactive commands
+### 1d. `CommandRunner` cannot express interactive commands — **fixed 2026-09-13**
 
-Not a missing-method problem — a shape problem. `CommandRunner::run` (`traits.rs:83`)
-returns `io::Result<Output>`, which **captures** stdout/stderr. An editor must *inherit*
-the terminal, so it needs `.status()`, which the trait cannot express. Hence:
+Was a shape problem: `CommandRunner::run` returns `io::Result<Output>`, which **captures**
+stdout/stderr, while an editor must *inherit* the terminal. `run_interactive` was added to
+the trait (returns `io::Result<ExitStatus>` via `.status()`) when `swap commit` needed to
+hand the terminal to `git commit -e`.
+
+Two sites still bypass the trait and could now be migrated:
 
 | File | Line | Call |
 |---|---|---|
 | `main.rs` | 374 | `std::process::Command::new(&editor_cmd)` — `$EDITOR -O`, needs TTY |
 | `main.rs` | 447 | `std::process::Command::new("vim")` — `vim -S`, needs TTY |
 
-`CommandRunner` is used in exactly one place: `application/services/sops.rs`. `main.rs`
-bypasses it entirely. These two sites are bypassing it **for a real reason**, not laziness.
+Consumers of `CommandRunner`: `application/services/sops.rs` and
+`application/services/vault_commit.rs`.
 
 ### 1e. Direct `std::fs` in `main.rs` where the trait *would* suffice
 
