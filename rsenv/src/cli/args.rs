@@ -257,7 +257,9 @@ pub enum SwapCommands {
 
     /// Show what changed in swapped-in files since they were swapped in
     Diff {
-        /// Entries to diff (if empty, diffs all swapped-in entries in current vault)
+        /// Paths to diff: a swapped entry, a path inside one, or an ancestor.
+        /// Selects everything at or below it, like a git pathspec.
+        /// If empty, diffs all swapped-in entries in the current vault.
         files: Vec<PathBuf>,
         /// Show a full unified diff instead of a summary
         #[arg(short, long)]

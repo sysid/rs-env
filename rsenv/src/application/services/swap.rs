@@ -1346,7 +1346,15 @@ impl SwapService {
 
             let project_root = self.resolve_project_root(project_dir, &sentinel.vault_relative);
 
-            if !wanted.is_empty() && !wanted.contains(&project_root) {
+            // Path filter follows git pathspec semantics: an argument selects everything at
+            // or below it. It may name a swap unit, a path INSIDE one (`thoughts/notes.md`),
+            // or an ancestor of one (`.`). An entry is in scope when it overlaps a requested
+            // path in either direction; its changes are narrowed further below.
+            if !wanted.is_empty()
+                && !wanted
+                    .iter()
+                    .any(|w| project_root.starts_with(w) || w.starts_with(&project_root))
+            {
                 continue;
             }
 
@@ -1360,7 +1368,15 @@ impl SwapService {
                 continue;
             }
 
-            let changes = self.compare_entry(&sentinel.sentinel_path, &project_root)?;
+            let mut changes = self.compare_entry(&sentinel.sentinel_path, &project_root)?;
+
+            // Narrow to the requested paths. The entry itself stays in the result even when
+            // nothing under it matched, so callers can distinguish "this path is clean" from
+            // "nothing is swapped in".
+            if !wanted.is_empty() {
+                changes.retain(|c| wanted.iter().any(|w| c.project_path.starts_with(w)));
+            }
+
             diffs.push(SwapEntryDiff {
                 project_path: project_root,
                 hostname: sentinel.hostname,

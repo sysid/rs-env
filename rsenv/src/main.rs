@@ -1888,7 +1888,13 @@ fn handle_swap(
             }
 
             if diffs.is_empty() {
-                output::info(&"No files swapped in - nothing to diff");
+                // Distinguish "nothing is swapped in" from "your path matched no swap unit" -
+                // conflating them makes the command look broken.
+                if files.is_empty() {
+                    output::info(&"No files swapped in - nothing to diff");
+                } else {
+                    output::info(&"No swapped-in entry matches the given path(s)");
+                }
                 return Ok(());
             }
 

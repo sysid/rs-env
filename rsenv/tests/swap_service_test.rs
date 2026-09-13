@@ -3135,6 +3135,184 @@ fn given_added_file_in_swapped_dir_when_diff_then_reports_added() {
 }
 
 // ============================================================
+// swap diff - path filtering
+//
+// A path argument follows git pathspec semantics: it selects everything at or below it.
+// It may name a swap unit, a path INSIDE one, or an ancestor of one.
+// ============================================================
+
+#[test]
+fn given_changed_path_inside_swapped_dir_when_diff_then_reports_only_that_file() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("thoughts")).unwrap();
+    std::fs::write(swap_dir.join("thoughts/concepts.md"), "one\n").unwrap();
+    std::fs::write(swap_dir.join("thoughts/other.md"), "two\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("thoughts")])
+        .unwrap();
+
+    // Both files change, but only one is asked for
+    std::fs::write(project_dir.join("thoughts/concepts.md"), "one edited\n").unwrap();
+    std::fs::write(project_dir.join("thoughts/other.md"), "two edited\n").unwrap();
+
+    // Act: filter by a path INSIDE the swapped directory
+    let diffs = service
+        .diff(&project_dir, &[project_dir.join("thoughts/concepts.md")])
+        .unwrap();
+
+    // Assert: the containing entry is found, narrowed to the requested file
+    assert_eq!(diffs.len(), 1, "got {:?}", diffs);
+    assert_eq!(diffs[0].project_path, project_dir.join("thoughts"));
+    assert_eq!(diffs[0].changes.len(), 1, "got {:?}", diffs[0].changes);
+    assert_eq!(
+        diffs[0].changes[0].relative_path,
+        PathBuf::from("concepts.md")
+    );
+}
+
+#[test]
+fn given_unchanged_path_inside_swapped_dir_when_diff_then_reports_entry_with_no_changes() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("thoughts")).unwrap();
+    std::fs::write(swap_dir.join("thoughts/concepts.md"), "one\n").unwrap();
+    std::fs::write(swap_dir.join("thoughts/other.md"), "two\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("thoughts")])
+        .unwrap();
+
+    // A different file changed; the requested one did not
+    std::fs::write(project_dir.join("thoughts/other.md"), "two edited\n").unwrap();
+
+    // Act
+    let diffs = service
+        .diff(&project_dir, &[project_dir.join("thoughts/concepts.md")])
+        .unwrap();
+
+    // Assert: the entry IS reported (so the CLI can say "no changes" rather than
+    // wrongly claiming nothing is swapped in), with the unrelated change filtered out
+    assert_eq!(diffs.len(), 1, "got {:?}", diffs);
+    assert!(
+        diffs[0].changes.is_empty(),
+        "expected clean, got {:?}",
+        diffs[0].changes
+    );
+}
+
+#[test]
+fn given_subdirectory_of_swapped_dir_when_diff_then_reports_changes_below_it() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("thoughts/research")).unwrap();
+    std::fs::write(swap_dir.join("thoughts/research/a.md"), "a\n").unwrap();
+    std::fs::write(swap_dir.join("thoughts/top.md"), "top\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("thoughts")])
+        .unwrap();
+
+    std::fs::write(project_dir.join("thoughts/research/a.md"), "a edited\n").unwrap();
+    std::fs::write(project_dir.join("thoughts/top.md"), "top edited\n").unwrap();
+
+    // Act: filter by a SUBDIRECTORY of the swapped entry
+    let diffs = service
+        .diff(&project_dir, &[project_dir.join("thoughts/research")])
+        .unwrap();
+
+    // Assert: only changes at or below that subdirectory
+    assert_eq!(diffs.len(), 1, "got {:?}", diffs);
+    assert_eq!(diffs[0].changes.len(), 1, "got {:?}", diffs[0].changes);
+    assert_eq!(
+        diffs[0].changes[0].relative_path,
+        PathBuf::from("research/a.md")
+    );
+}
+
+#[test]
+fn given_path_not_under_any_swapped_entry_when_diff_then_empty() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("thoughts")).unwrap();
+    std::fs::write(swap_dir.join("thoughts/concepts.md"), "one\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(&project_dir, &[project_dir.join("thoughts")])
+        .unwrap();
+    std::fs::create_dir_all(project_dir.join("src")).unwrap();
+    std::fs::write(project_dir.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+    // Act
+    let diffs = service
+        .diff(&project_dir, &[project_dir.join("src/main.rs")])
+        .unwrap();
+
+    // Assert
+    assert!(diffs.is_empty(), "got {:?}", diffs);
+}
+
+#[test]
+fn given_project_dir_as_filter_when_diff_then_reports_all_entries() {
+    // Arrange: an ancestor of every swap unit selects them all, like `git diff .`
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("thoughts")).unwrap();
+    std::fs::write(swap_dir.join("thoughts/concepts.md"), "one\n").unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service
+        .swap_in(
+            &project_dir,
+            &[project_dir.join("thoughts"), project_dir.join("config.yml")],
+        )
+        .unwrap();
+
+    // Act
+    let diffs = service
+        .diff(&project_dir, std::slice::from_ref(&project_dir))
+        .unwrap();
+
+    // Assert
+    assert_eq!(diffs.len(), 2, "got {:?}", diffs);
+}
+
+// ============================================================
 // swap diff - the non-injectivity trap
 //
 // neutralize_name is NOT injective: both ".foo" and a literal "dot.foo" map to "dot.foo".
