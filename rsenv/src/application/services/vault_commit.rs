@@ -1,14 +1,13 @@
-//! Vault commit service — `rsenv swap commit`.
+//! Vault commit service — `rsenv vault commit`.
 //!
-//! Swaps this project's data out of the project and into its vault, then makes ONE
-//! commit scoped to that project's vault directory.
+//! Makes ONE commit scoped to this project's vault directory. It does NOT swap anything:
+//! it requires the project to be swapped out already and refuses otherwise.
 //!
 //! # Why this exists
 //!
-//! While content is swapped IN, `swap_in` has *moved* the vault bytes into the project
-//! and left a frozen sentinel copy behind. The live work therefore exists in exactly one
-//! place — the project directory — and in no git repo at all, because the project's own
-//! git ignores those paths. It reaches the vault repo only on swap-out.
+//! `cd ~/.rsenv && git commit` sweeps every vault on the machine into a single commit.
+//! The `-- .` pathspec here keeps the commit to `vaults/<name>-<id>/`, so other projects'
+//! pending changes stay out of it.
 //!
 //! The commit message records the project's HEAD hash. That hash is the join key: given
 //! a commit in the vault repo, it says which project state the content belongs to.
@@ -19,7 +18,8 @@ use std::sync::Arc;
 use tracing::{debug, instrument};
 
 use crate::application::error::{ApplicationError, ApplicationResult};
-use crate::application::services::{SwapService, VaultService};
+use crate::application::services::{SopsService, SwapService, VaultService};
+use crate::config::Settings;
 use crate::infrastructure::traits::CommandRunner;
 
 /// Options for a vault commit.
@@ -29,6 +29,8 @@ pub struct CommitOptions {
     pub auto: bool,
     /// Push the vault repo after a successful commit.
     pub push: bool,
+    /// Skip re-encryption for this run, whatever `sops.encrypt_on_commit` says.
+    pub no_encrypt: bool,
 }
 
 /// A single staged change inside the vault.
@@ -83,10 +85,10 @@ impl ProjectCommit {
 /// Result of a vault commit.
 #[derive(Debug, Clone)]
 pub struct CommitOutcome {
-    /// Project paths that were swapped out
-    pub swapped_out: Vec<PathBuf>,
     /// Changes staged inside the vault
     pub staged: Vec<StagedChange>,
+    /// Files re-encrypted before staging; empty when `sops.encrypt_on_commit` is off
+    pub encrypted: Vec<PathBuf>,
     /// New commit SHA; `None` when there was nothing to commit or the editor aborted
     pub commit: Option<String>,
     /// Whether the vault repo was pushed
@@ -99,7 +101,9 @@ pub struct CommitOutcome {
 pub struct VaultCommitService {
     swap: Arc<SwapService>,
     vault_service: Arc<VaultService>,
+    sops: Arc<SopsService>,
     cmd: Arc<dyn CommandRunner>,
+    settings: Arc<Settings>,
 }
 
 impl VaultCommitService {
@@ -107,16 +111,22 @@ impl VaultCommitService {
     pub fn new(
         swap: Arc<SwapService>,
         vault_service: Arc<VaultService>,
+        sops: Arc<SopsService>,
         cmd: Arc<dyn CommandRunner>,
+        settings: Arc<Settings>,
     ) -> Self {
         Self {
             swap,
             vault_service,
+            sops,
             cmd,
+            settings,
         }
     }
 
-    /// Swap out this project's data and commit it to the vault repo.
+    /// Commit this project's vault data.
+    ///
+    /// Requires the project to be swapped out already — see `require_swapped_out`.
     #[instrument(skip(self))]
     pub fn commit(
         &self,
@@ -129,17 +139,21 @@ impl VaultCommitService {
             .ok_or_else(|| ApplicationError::VaultNotInitialized(project_dir.to_path_buf()))?;
         let vault_path = vault.path.clone();
 
-        // Read the project's git state BEFORE swapping out, so the recorded hash
-        // unambiguously describes the state this content was captured from.
+        // Swapping out is the user's call, not this command's. All it does is refuse to
+        // record a vault that does not yet hold the live bytes.
+        self.require_swapped_out(project_dir)?;
+
         let project_commit = self.probe_project(project_dir);
         debug!("commit: project state {:?}", project_commit);
 
-        let swapped_out: Vec<PathBuf> = self
-            .swap
-            .swap_out_vault(project_dir)?
-            .into_iter()
-            .map(|f| f.project_path)
-            .collect();
+        // Encrypt before staging, so the `.enc` files committed below match the plaintext
+        // they were derived from rather than whatever `.enc` happened to exist.
+        let encrypted = if self.settings.sops.encrypt_on_commit && !opts.no_encrypt {
+            debug!("commit: encrypting {}", vault_path.display());
+            self.sops.encrypt_all(Some(&vault_path))?
+        } else {
+            Vec::new()
+        };
 
         self.git(&vault_path, &["add", "-A", "."])?;
 
@@ -149,7 +163,7 @@ impl VaultCommitService {
         if staged.is_empty() {
             debug!("commit: nothing staged in {}", vault_path.display());
             return Ok(CommitOutcome {
-                swapped_out,
+                encrypted,
                 staged,
                 commit: None,
                 pushed: false,
@@ -174,7 +188,7 @@ impl VaultCommitService {
             // Interactive commit aborted in the editor: not an error.
             _ => {
                 return Ok(CommitOutcome {
-                    swapped_out,
+                    encrypted,
                     staged,
                     commit: None,
                     pushed: false,
@@ -190,12 +204,41 @@ impl VaultCommitService {
         }
 
         Ok(CommitOutcome {
-            swapped_out,
+            encrypted,
             staged,
             commit,
             pushed,
             project_commit,
         })
+    }
+
+    /// Refuse unless everything this host swapped in has been swapped out again.
+    ///
+    /// While a file is swapped in, the vault holds a frozen sentinel and the project holds
+    /// the live bytes, so committing the vault would record stale content. Swapping out is
+    /// left to the user precisely so that their `direnv`-aware wrapper stays in the loop.
+    ///
+    /// Scoped to this host: a foreign-host sentinel is another machine's baseline, which
+    /// `swap_out` refuses to touch, so blocking on it would leave no way forward.
+    fn require_swapped_out(&self, project_dir: &Path) -> ApplicationResult<()> {
+        let still_in: Vec<String> = self
+            .swap
+            .swapped_in_here(project_dir)?
+            .into_iter()
+            .map(|f| {
+                f.project_path
+                    .strip_prefix(project_dir)
+                    .unwrap_or(&f.project_path)
+                    .display()
+                    .to_string()
+            })
+            .collect();
+
+        if still_in.is_empty() {
+            return Ok(());
+        }
+        debug!("commit: refusing, {} entries swapped in", still_in.len());
+        Err(ApplicationError::ProjectSwappedIn { paths: still_in })
     }
 
     // ============================================================

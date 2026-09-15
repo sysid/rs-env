@@ -17,8 +17,8 @@ use rsenv::application::services::{
     VaultCommitService, VaultService,
 };
 use rsenv::cli::args::{
-    Cli, Commands, ConfigCommands, EnvCommands, GuardCommands, HookCommands, InitCommands,
-    SopsCommands, SwapCommands,
+    Cli, Commands, ConfigCommands, EnvCommands, GuardCommands, HookCommands, SopsCommands,
+    SwapCommands, VaultCommands,
 };
 use rsenv::cli::output;
 use rsenv::config::{global_config_dir, global_config_path, vault_config_path, Settings};
@@ -70,13 +70,13 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
     })?;
 
     match cli.command {
-        Some(Commands::Init { command }) => handle_init(command, project_dir, &settings),
         Some(Commands::Config { command }) => handle_config(command, &settings, project_dir),
         Some(Commands::Env { command }) => handle_env(command, project_dir, vault_path),
         Some(Commands::Guard { command }) => handle_guard(command, project_dir, &settings),
         Some(Commands::Hook { command }) => handle_hook(command, &settings),
         Some(Commands::Info { check }) => handle_info(project_dir, &settings, check),
         Some(Commands::Sops { command }) => handle_sops(command, vault_path, &settings),
+        Some(Commands::Vault { command }) => handle_vault(command, project_dir, &settings),
         Some(Commands::Swap { command }) => {
             // Pass cli_project_dir directly so vault-wide commands can distinguish
             // between "not provided" (use settings.vault_base_dir) vs "provided" (override)
@@ -193,7 +193,7 @@ fn handle_env(
         }
         EnvCommands::Init { clear } => {
             let vault_dir = vault_path.ok_or_else(|| {
-                rsenv::cli::CliError::Usage("No vault found. Run 'rsenv init vault' first.".into())
+                rsenv::cli::CliError::Usage("No vault found. Run 'rsenv vault init' first.".into())
             })?;
             let envs_dir = vault_dir.join("envs");
 
@@ -692,32 +692,7 @@ fn handle_config(
     }
 }
 
-fn handle_init(
-    command: InitCommands,
-    project_dir: Option<std::path::PathBuf>,
-    settings: &Settings,
-) -> rsenv::cli::CliResult<()> {
-    match command {
-        InitCommands::Vault { project, absolute } => {
-            let project_dir = project
-                .or(project_dir)
-                .unwrap_or_else(|| std::env::current_dir().unwrap());
-            handle_init_create(project_dir, absolute, settings)
-        }
-        InitCommands::Reset { project } => {
-            let project_dir = project
-                .or(project_dir)
-                .unwrap_or_else(|| std::env::current_dir().unwrap());
-            handle_init_reset(project_dir, settings)
-        }
-        InitCommands::Reconnect { envrc_path } => {
-            let project_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
-            handle_init_reconnect(envrc_path, project_dir, settings)
-        }
-    }
-}
-
-fn handle_init_create(
+fn handle_vault_create(
     project_dir: std::path::PathBuf,
     absolute: bool,
     settings: &Settings,
@@ -747,7 +722,7 @@ fn handle_init_create(
     Ok(())
 }
 
-fn handle_init_reset(
+fn handle_vault_reset(
     project_dir: std::path::PathBuf,
     settings: &Settings,
 ) -> rsenv::cli::CliResult<()> {
@@ -803,7 +778,7 @@ fn handle_init_reset(
     Ok(())
 }
 
-fn handle_init_reconnect(
+fn handle_vault_reconnect(
     envrc_path: std::path::PathBuf,
     project_dir: std::path::PathBuf,
     settings: &Settings,
@@ -1011,7 +986,7 @@ fn handle_info(
         None => {
             output::info(&"Vault:   (not initialized)");
             println!();
-            output::info(&"Run 'rsenv init vault' to create a vault for this project.");
+            output::info(&"Run 'rsenv vault init' to create a vault for this project.");
         }
     }
 
@@ -1032,8 +1007,115 @@ fn resolve_sops_dir(
         Ok(v.to_path_buf())
     } else {
         Err(rsenv::cli::CliError::Usage(
-            "No vault found. Run 'rsenv init' first, or use --dir or --global.".into(),
+            "No vault found. Run 'rsenv vault init' first, or use --dir or --global.".into(),
         ))
+    }
+}
+
+/// `rsenv vault commit` — commit this project's vault data.
+///
+/// Deliberately does NOT swap: it requires the project to be swapped out already, so that
+/// swapping stays an explicit user action (and their direnv reload stays in the loop).
+fn handle_vault(
+    command: VaultCommands,
+    project_dir_opt: Option<std::path::PathBuf>,
+    settings: &Settings,
+) -> rsenv::cli::CliResult<()> {
+    match command {
+        VaultCommands::Init { project, absolute } => {
+            let project_dir = project
+                .or(project_dir_opt)
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+            handle_vault_create(project_dir, absolute, settings)
+        }
+        VaultCommands::Reset { project } => {
+            let project_dir = project
+                .or(project_dir_opt)
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+            handle_vault_reset(project_dir, settings)
+        }
+        VaultCommands::Reconnect { envrc_path } => {
+            let project_dir = project_dir_opt.unwrap_or_else(|| std::env::current_dir().unwrap());
+            handle_vault_reconnect(envrc_path, project_dir, settings)
+        }
+        VaultCommands::Commit {
+            auto,
+            push,
+            no_encrypt,
+        } => {
+            let project_dir = project_dir_opt.unwrap_or_else(|| std::env::current_dir().unwrap());
+
+            let fs = Arc::new(RealFileSystem);
+            let settings = Arc::new(settings.clone());
+            let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+            let swap_service = Arc::new(SwapService::new(
+                fs.clone(),
+                vault_service.clone(),
+                settings.clone(),
+            ));
+            let cmd = Arc::new(RealCommandRunner);
+            let sops = Arc::new(SopsService::new(
+                Arc::new(RealFileSystem),
+                cmd.clone(),
+                settings.clone(),
+            ));
+            let commit_service =
+                VaultCommitService::new(swap_service, vault_service, sops, cmd, settings.clone());
+            let opts = CommitOptions {
+                auto,
+                push,
+                no_encrypt,
+            };
+
+            let outcome = commit_service.commit(&project_dir, &opts).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            if !outcome.encrypted.is_empty() {
+                output::info(&format!("Re-encrypted {} files:", outcome.encrypted.len()));
+                for path in &outcome.encrypted {
+                    output::detail(&path.display());
+                }
+            }
+
+            match &outcome.commit {
+                Some(sha) => {
+                    output::success(&format!(
+                        "Committed {} to vault ({} files)",
+                        &sha[..7.min(sha.len())],
+                        outcome.staged.len()
+                    ));
+                    for change in &outcome.staged {
+                        output::detail(&format!("{} {}", change.status, change.path.display()));
+                    }
+                    match &outcome.project_commit {
+                        ProjectCommit::Commit { sha, branch, dirty } => output::action(
+                            "Linked to",
+                            &format!(
+                                "{} ({}{})",
+                                &sha[..7.min(sha.len())],
+                                branch,
+                                if *dirty { ", dirty" } else { "" }
+                            ),
+                        ),
+                        ProjectCommit::Unborn { branch } => {
+                            output::warning(&format!("Project has no commits yet on {}", branch))
+                        }
+                        ProjectCommit::NotARepo => {
+                            output::warning(&"Project is not a git repository - no link recorded")
+                        }
+                    }
+                    if outcome.pushed {
+                        output::success(&"Pushed vault repo");
+                    }
+                }
+                None if outcome.staged.is_empty() => {
+                    output::info(&"Vault already up to date - nothing to commit");
+                }
+                None => output::warning(&"Commit aborted - nothing was committed"),
+            }
+            Ok(())
+        }
     }
 }
 
@@ -1269,7 +1351,7 @@ fn handle_sops(
                 // Vault only: sync per-vault gitignore
                 let vault_dir = vault_path.clone().ok_or_else(|| {
                     rsenv::cli::CliError::Usage(
-                        "No vault found. Run 'rsenv init' first, or use --global.".into(),
+                        "No vault found. Run 'rsenv vault init' first, or use --global.".into(),
                     )
                 })?;
 
@@ -1353,7 +1435,7 @@ fn handle_sops(
                 // Vault only: show per-vault gitignore status
                 let vault_dir = vault_path.clone().ok_or_else(|| {
                     rsenv::cli::CliError::Usage(
-                        "No vault found. Run 'rsenv init' first, or use --global.".into(),
+                        "No vault found. Run 'rsenv vault init' first, or use --global.".into(),
                     )
                 })?;
 
@@ -1409,7 +1491,7 @@ fn handle_sops(
                 // Vault only: clean per-vault gitignore
                 let vault_dir = vault_path.clone().ok_or_else(|| {
                     rsenv::cli::CliError::Usage(
-                        "No vault found. Run 'rsenv init' first, or use --global.".into(),
+                        "No vault found. Run 'rsenv vault init' first, or use --global.".into(),
                     )
                 })?;
 
@@ -1995,68 +2077,6 @@ fn handle_swap(
                     e,
                 ))
             })?;
-            Ok(())
-        }
-        SwapCommands::Commit { auto, push } => {
-            let commit_service = VaultCommitService::new(
-                service.clone(),
-                vault_service,
-                Arc::new(RealCommandRunner),
-            );
-            let opts = CommitOptions { auto, push };
-
-            let outcome = commit_service.commit(&project_dir, &opts).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })?;
-
-            if outcome.swapped_out.is_empty() {
-                output::info(&"Nothing was swapped in");
-            } else {
-                output::info(&format!(
-                    "Swapped out {} entries:",
-                    outcome.swapped_out.len()
-                ));
-                for path in &outcome.swapped_out {
-                    output::detail(&path.display());
-                }
-            }
-
-            match &outcome.commit {
-                Some(sha) => {
-                    output::success(&format!(
-                        "Committed {} to vault ({} files)",
-                        &sha[..7.min(sha.len())],
-                        outcome.staged.len()
-                    ));
-                    for change in &outcome.staged {
-                        output::detail(&format!("{} {}", change.status, change.path.display()));
-                    }
-                    match &outcome.project_commit {
-                        ProjectCommit::Commit { sha, branch, dirty } => output::action(
-                            "Linked to",
-                            &format!(
-                                "{} ({}{})",
-                                &sha[..7.min(sha.len())],
-                                branch,
-                                if *dirty { ", dirty" } else { "" }
-                            ),
-                        ),
-                        ProjectCommit::Unborn { branch } => {
-                            output::warning(&format!("Project has no commits yet on {}", branch))
-                        }
-                        ProjectCommit::NotARepo => {
-                            output::warning(&"Project is not a git repository - no link recorded")
-                        }
-                    }
-                    if outcome.pushed {
-                        output::success(&"Pushed vault repo");
-                    }
-                }
-                None if outcome.staged.is_empty() => {
-                    output::info(&"Vault already up to date - nothing to commit");
-                }
-                None => output::warning(&"Commit aborted - nothing was committed"),
-            }
             Ok(())
         }
         SwapCommands::Delete { files } => {

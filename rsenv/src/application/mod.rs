@@ -10,8 +10,8 @@ pub mod hash;
 pub mod services;
 
 pub use envrc::{
-    add_swapped_marker, delete_section, parse_rsenv_metadata, remove_swapped_marker,
-    update_dot_envrc, END_SECTION_DELIMITER, RSENV_SWAPPED_MARKER, START_SECTION_DELIMITER,
+    delete_section, parse_rsenv_metadata, update_dot_envrc, END_SECTION_DELIMITER,
+    START_SECTION_DELIMITER,
 };
 pub use error::{ApplicationError, ApplicationResult};
 pub use error_ext::IoResultExt;

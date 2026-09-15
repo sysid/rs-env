@@ -32,6 +32,11 @@ pub struct SopsConfig {
     pub file_extensions_dec: Vec<String>,
     /// Exact filenames to decrypt (usually empty)
     pub file_names_dec: Vec<String>,
+    /// Re-encrypt the vault before `rsenv vault commit` stages it.
+    ///
+    /// On by default: without it, a plaintext edit made while swapped in is committed
+    /// as stale ciphertext, because the commit stages whatever `.enc` happens to exist.
+    pub encrypt_on_commit: bool,
 }
 
 impl Default for SopsConfig {
@@ -43,6 +48,7 @@ impl Default for SopsConfig {
             file_names_enc: vec![],
             file_extensions_dec: vec!["enc".into()],
             file_names_dec: vec![],
+            encrypt_on_commit: true,
         }
     }
 }
@@ -62,6 +68,7 @@ pub struct RawSopsConfig {
     pub file_names_enc: Option<Vec<String>>,
     pub file_extensions_dec: Option<Vec<String>>,
     pub file_names_dec: Option<Vec<String>>,
+    pub encrypt_on_commit: Option<bool>,
 }
 
 /// Raw settings for intermediate parsing.
@@ -131,6 +138,7 @@ impl SopsConfig {
                 .as_ref()
                 .map(|o| Self::merge_array(&self.file_names_dec, o))
                 .unwrap_or_else(|| self.file_names_dec.clone()),
+            encrypt_on_commit: overlay.encrypt_on_commit.unwrap_or(self.encrypt_on_commit),
         }
     }
 
@@ -164,6 +172,7 @@ impl SopsConfig {
                 .file_names_dec
                 .clone()
                 .unwrap_or_else(|| self.file_names_dec.clone()),
+            encrypt_on_commit: global.encrypt_on_commit.unwrap_or(self.encrypt_on_commit),
         }
     }
 }
@@ -366,6 +375,9 @@ impl Settings {
         if let Ok(val) = config.get::<Vec<String>>("sops.file_names_dec") {
             settings.sops.file_names_dec = val;
         }
+        if let Ok(val) = config.get_bool("sops.encrypt_on_commit") {
+            settings.sops.encrypt_on_commit = val;
+        }
 
         Ok(settings)
     }
@@ -397,6 +409,8 @@ impl Settings {
             .set_default("sops.file_names_enc", defaults.sops.file_names_enc.clone())
             .map_err(config_err)?
             .set_default("sops.file_names_dec", defaults.sops.file_names_dec.clone())
+            .map_err(config_err)?
+            .set_default("sops.encrypt_on_commit", defaults.sops.encrypt_on_commit)
             .map_err(config_err)?;
 
         // 2. Global config only (no vault-local, no env vars)
@@ -448,6 +462,8 @@ impl Settings {
             .set_default("sops.file_names_enc", defaults.sops.file_names_enc.clone())
             .map_err(config_err)?
             .set_default("sops.file_names_dec", defaults.sops.file_names_dec.clone())
+            .map_err(config_err)?
+            .set_default("sops.encrypt_on_commit", defaults.sops.encrypt_on_commit)
             .map_err(config_err)?;
 
         // Only vault-local config
@@ -675,6 +691,7 @@ mod tests {
             file_names_enc: vec!["dot_pypirc".to_string()],
             file_extensions_dec: vec!["enc".to_string()],
             file_names_dec: vec![],
+            encrypt_on_commit: true,
         };
 
         let overlay = RawSopsConfig {
@@ -684,6 +701,7 @@ mod tests {
             file_names_enc: Some(vec!["secrets.txt".to_string()]),                   // Union
             file_extensions_dec: None, // Should keep base
             file_names_dec: None,      // Should keep base
+            encrypt_on_commit: None,
         };
 
         let result = base.merge(&overlay);
@@ -719,6 +737,7 @@ mod tests {
             file_names_enc: vec!["dot_pypirc".to_string()],
             file_extensions_dec: vec!["enc".to_string()],
             file_names_dec: vec![],
+            encrypt_on_commit: true,
         };
 
         let global = RawSopsConfig {
@@ -728,6 +747,7 @@ mod tests {
             file_names_enc: Some(vec!["secrets.txt".to_string()]), // REPLACES base
             file_extensions_dec: None,                             // Keeps base
             file_names_dec: None,                                  // Keeps base
+            encrypt_on_commit: None,
         };
 
         let result = base.apply_global(&global);
@@ -763,6 +783,7 @@ mod tests {
             file_names_enc: vec!["dot_pypirc".to_string()],
             file_extensions_dec: vec!["enc".to_string()],
             file_names_dec: vec![],
+            encrypt_on_commit: true,
         };
 
         let global = RawSopsConfig {
@@ -772,6 +793,7 @@ mod tests {
             file_names_enc: None,
             file_extensions_dec: None,
             file_names_dec: None,
+            encrypt_on_commit: None,
         };
 
         let result = base.apply_global(&global);

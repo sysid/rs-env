@@ -24,12 +24,6 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Initialize vault for project
-    Init {
-        #[command(subcommand)]
-        command: InitCommands,
-    },
-
     /// Manage hierarchical env vars
     Env {
         #[command(subcommand)]
@@ -46,6 +40,12 @@ pub enum Commands {
     Swap {
         #[command(subcommand)]
         command: SwapCommands,
+    },
+
+    /// Create, connect and commit the project's vault
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommands,
     },
 
     /// Encrypt/decrypt vault files
@@ -78,30 +78,6 @@ pub enum Commands {
         /// Shell type
         #[arg(value_enum)]
         shell: clap_complete::Shell,
-    },
-}
-
-/// Init subcommands
-#[derive(Subcommand, Debug)]
-pub enum InitCommands {
-    /// Create vault for project
-    Vault {
-        /// Project directory
-        project: Option<PathBuf>,
-        /// Use absolute symlink paths
-        #[arg(long)]
-        absolute: bool,
-    },
-    /// Undo init: restore files, remove .envrc symlink (vault kept)
-    Reset {
-        /// Project directory
-        project: Option<PathBuf>,
-    },
-    /// Reconnect a project to its vault (re-create .envrc symlink)
-    Reconnect {
-        /// Path to dot.envrc file in vault
-        #[arg(value_hint = ValueHint::FilePath)]
-        envrc_path: PathBuf,
     },
 }
 
@@ -278,11 +254,44 @@ pub enum SwapCommands {
         silent: bool,
     },
 
-    /// Swap out this project's data and commit it to the vault repo
+    /// Remove files from swap management (deletes vault override + backup, not the project file)
+    Delete {
+        /// Project paths (as you'd pass to `swap in`/`out`), NOT vault paths.
+        /// Dotfiles are matched automatically (e.g. .github → dot.github).
+        files: Vec<PathBuf>,
+    },
+}
+
+/// Vault subcommands
+#[derive(Subcommand, Debug)]
+pub enum VaultCommands {
+    /// Create vault for project
+    Init {
+        /// Project directory
+        project: Option<PathBuf>,
+        /// Use absolute symlink paths
+        #[arg(long)]
+        absolute: bool,
+    },
+
+    /// Undo init: restore files, remove .envrc symlink (vault kept)
+    Reset {
+        /// Project directory
+        project: Option<PathBuf>,
+    },
+
+    /// Reconnect a project to its vault (re-create .envrc symlink)
+    Reconnect {
+        /// Path to dot.envrc file in vault
+        #[arg(value_hint = ValueHint::FilePath)]
+        envrc_path: PathBuf,
+    },
+
+    /// Commit this project's vault data to the vault repo
     ///
-    /// Makes one commit scoped to this project's vault directory, with the project's
-    /// current commit hash in the message as the link back to the project state.
-    /// Leaves the project swapped out.
+    /// Requires the project to be swapped out (`rsenv swap out`); refuses and names the
+    /// swapped-in paths otherwise. Makes one commit scoped to this project's vault
+    /// directory, stamped with the project's HEAD as the link back to the project state.
     Commit {
         /// Use a generated commit message instead of opening the editor
         #[arg(short = 'a', long)]
@@ -290,13 +299,9 @@ pub enum SwapCommands {
         /// Push the vault repo after committing
         #[arg(long)]
         push: bool,
-    },
-
-    /// Remove files from swap management (deletes vault override + backup, not the project file)
-    Delete {
-        /// Project paths (as you'd pass to `swap in`/`out`), NOT vault paths.
-        /// Dotfiles are matched automatically (e.g. .github → dot.github).
-        files: Vec<PathBuf>,
+        /// Skip re-encryption, overriding sops.encrypt_on_commit
+        #[arg(long)]
+        no_encrypt: bool,
     },
 }
 

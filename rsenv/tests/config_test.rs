@@ -228,3 +228,56 @@ file_names_enc = ["secrets.txt", "credentials.json"]
         "Should have at least 2 file names from vault"
     );
 }
+
+// ============================================================
+// sops.encrypt_on_commit
+// ============================================================
+
+/// `rsenv vault commit` re-encrypts the vault before committing so the `.enc` files
+/// it stages match the plaintext. On by default: committing stale ciphertext is the
+/// failure mode this key exists to prevent.
+#[test]
+fn given_no_config_when_load_then_encrypt_on_commit_is_enabled() {
+    let vault_dir = TempDir::new().unwrap();
+
+    let settings = Settings::load(Some(vault_dir.path())).expect("load settings");
+
+    assert!(
+        settings.sops.encrypt_on_commit,
+        "encrypt_on_commit must default to true"
+    );
+}
+
+#[test]
+fn given_vault_config_disabling_encrypt_on_commit_when_load_then_disabled() {
+    let vault_dir = TempDir::new().unwrap();
+    let vault_config = r#"
+[sops]
+encrypt_on_commit = false
+"#;
+    fs::write(vault_dir.path().join(".rsenv.toml"), vault_config).unwrap();
+
+    let settings = Settings::load(Some(vault_dir.path())).expect("load settings");
+
+    assert!(
+        !settings.sops.encrypt_on_commit,
+        "vault config must be able to turn encrypt_on_commit off"
+    );
+}
+
+#[test]
+fn given_vault_config_without_encrypt_on_commit_when_load_then_keeps_default() {
+    let vault_dir = TempDir::new().unwrap();
+    let vault_config = r#"
+[sops]
+file_extensions_enc = ["yaml"]
+"#;
+    fs::write(vault_dir.path().join(".rsenv.toml"), vault_config).unwrap();
+
+    let settings = Settings::load(Some(vault_dir.path())).expect("load settings");
+
+    assert!(
+        settings.sops.encrypt_on_commit,
+        "an unrelated vault key must not disturb encrypt_on_commit"
+    );
+}

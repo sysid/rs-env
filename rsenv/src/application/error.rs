@@ -30,6 +30,14 @@ pub enum ApplicationError {
     )]
     UnencryptedVaultSecrets { paths: Vec<String> },
 
+    #[error(
+        "refusing to commit while the project is swapped in:\n  {}\n\
+         The vault holds frozen sentinels for these paths, so this commit would record \
+         stale content. Run `rsenv swap out` first.",
+        paths.join("\n  ")
+    )]
+    ProjectSwappedIn { paths: Vec<String> },
+
     #[error("operation failed: {context}")]
     OperationFailed {
         context: String,

@@ -27,6 +27,7 @@ fn test_sops_config() -> SopsConfig {
         file_names_enc: vec!["dot_pypirc".into()],
         file_extensions_dec: vec!["enc".into()],
         file_names_dec: vec![],
+        encrypt_on_commit: true,
     }
 }
 

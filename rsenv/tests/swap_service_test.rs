@@ -779,11 +779,122 @@ fn given_directory_swapped_in_when_status_then_shows_swapped_in() {
 }
 
 // ============================================================
-// RSENV_SWAPPED marker tests
+// dot.envrc stability across swap state
+//
+// dot.envrc is content-addressed (`dot.envrc.<sha256-prefix>.enc`) and SOPS-encrypted.
+// Anything that varies with swap state would flip that hash on every swap in/out,
+// making `sops status` permanently stale and churning the vault repo. Swap state is
+// therefore DERIVED (`rsenv swap status --silent`), never written here.
 // ============================================================
 
 #[test]
-fn given_swap_in_when_successful_then_adds_marker_to_dot_envrc() {
+fn given_swap_in_when_successful_then_dot_envrc_is_untouched() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let project_file = project_dir.join("config.yml");
+    std::fs::write(&project_file, "original: value\n").unwrap();
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override: value\n").unwrap();
+
+    let dot_envrc = vault_path.join("dot.envrc");
+    let before = std::fs::read(&dot_envrc).unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    service
+        .swap_in(&project_dir, &[project_file.clone()])
+        .unwrap();
+
+    // Assert
+    let after = std::fs::read(&dot_envrc).unwrap();
+    assert_eq!(
+        before, after,
+        "swap_in must not modify dot.envrc - its content hash is baked into the .enc filename"
+    );
+}
+
+#[test]
+fn given_full_swap_cycle_when_complete_then_dot_envrc_is_untouched() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let project_file = project_dir.join("config.yml");
+    std::fs::write(&project_file, "original: value\n").unwrap();
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override: value\n").unwrap();
+
+    let dot_envrc = vault_path.join("dot.envrc");
+    let before = std::fs::read(&dot_envrc).unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act - full in/out cycle
+    service
+        .swap_in(&project_dir, &[project_file.clone()])
+        .unwrap();
+    service
+        .swap_out(&project_dir, &[project_file.clone()])
+        .unwrap();
+
+    // Assert
+    let after = std::fs::read(&dot_envrc).unwrap();
+    assert_eq!(
+        before, after,
+        "a swap in/out cycle must leave dot.envrc byte-identical"
+    );
+}
+
+#[test]
+fn given_partial_swap_out_when_files_remain_then_dot_envrc_is_untouched() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let file1 = project_dir.join("config1.yml");
+    let file2 = project_dir.join("config2.yml");
+    std::fs::write(&file1, "original1\n").unwrap();
+    std::fs::write(&file2, "original2\n").unwrap();
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config1.yml"), "override1\n").unwrap();
+    std::fs::write(swap_dir.join("config2.yml"), "override2\n").unwrap();
+
+    let dot_envrc = vault_path.join("dot.envrc");
+    let before = std::fs::read(&dot_envrc).unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    service.swap_in(&project_dir, &[file1.clone()]).unwrap();
+    service.swap_in(&project_dir, &[file2.clone()]).unwrap();
+
+    // Act - swap out only one; the other stays swapped in
+    service.swap_out(&project_dir, &[file1.clone()]).unwrap();
+
+    // Assert
+    let after = std::fs::read(&dot_envrc).unwrap();
+    assert_eq!(
+        before, after,
+        "a partial swap_out must not modify dot.envrc either"
+    );
+}
+
+#[test]
+fn given_swap_cycle_when_complete_then_no_swapped_marker_is_written() {
     // Arrange
     let temp = TempDir::new().unwrap();
     let (project_dir, vault_path, settings) = setup_project(&temp);
@@ -804,137 +915,12 @@ fn given_swap_in_when_successful_then_adds_marker_to_dot_envrc() {
         .swap_in(&project_dir, &[project_file.clone()])
         .unwrap();
 
-    // Assert - dot.envrc should contain marker
-    let dot_envrc = vault_path.join("dot.envrc");
-    let content = std::fs::read_to_string(&dot_envrc).unwrap();
-    assert!(
-        content.contains("export RSENV_SWAPPED=1"),
-        "dot.envrc should contain RSENV_SWAPPED marker after swap_in"
-    );
-}
-
-#[test]
-fn given_swap_out_all_when_successful_then_removes_marker() {
-    // Arrange
-    let temp = TempDir::new().unwrap();
-    let (project_dir, vault_path, settings) = setup_project(&temp);
-
-    let project_file = project_dir.join("config.yml");
-    std::fs::write(&project_file, "original: value\n").unwrap();
-
-    let swap_dir = vault_path.join("swap");
-    std::fs::create_dir_all(&swap_dir).unwrap();
-    std::fs::write(swap_dir.join("config.yml"), "override: value\n").unwrap();
-
-    let fs = Arc::new(RealFileSystem);
-    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
-    let service = SwapService::new(fs, vault_service, settings);
-
-    // Swap in first (adds marker)
-    service
-        .swap_in(&project_dir, &[project_file.clone()])
-        .unwrap();
-
-    // Verify marker exists
-    let dot_envrc = vault_path.join("dot.envrc");
-    let content = std::fs::read_to_string(&dot_envrc).unwrap();
-    assert!(content.contains("export RSENV_SWAPPED=1"));
-
-    // Act - swap out all
-    service
-        .swap_out(&project_dir, &[project_file.clone()])
-        .unwrap();
-
-    // Assert - marker should be removed
-    let content = std::fs::read_to_string(&dot_envrc).unwrap();
+    // Assert - the legacy hardcoded marker must never reappear
+    let content = std::fs::read_to_string(vault_path.join("dot.envrc")).unwrap();
     assert!(
         !content.contains("export RSENV_SWAPPED=1"),
-        "dot.envrc should NOT contain RSENV_SWAPPED marker after all files swapped out"
+        "RSENV_SWAPPED must be derived at direnv load time, never stored in dot.envrc"
     );
-}
-
-#[test]
-fn given_swap_out_partial_when_files_remain_then_keeps_marker() {
-    // Arrange
-    let temp = TempDir::new().unwrap();
-    let (project_dir, vault_path, settings) = setup_project(&temp);
-
-    // Two files
-    let file1 = project_dir.join("config1.yml");
-    let file2 = project_dir.join("config2.yml");
-    std::fs::write(&file1, "original1\n").unwrap();
-    std::fs::write(&file2, "original2\n").unwrap();
-
-    let swap_dir = vault_path.join("swap");
-    std::fs::create_dir_all(&swap_dir).unwrap();
-    std::fs::write(swap_dir.join("config1.yml"), "override1\n").unwrap();
-    std::fs::write(swap_dir.join("config2.yml"), "override2\n").unwrap();
-
-    let fs = Arc::new(RealFileSystem);
-    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
-    let service = SwapService::new(fs, vault_service, settings);
-
-    // Swap in both files
-    service.swap_in(&project_dir, &[file1.clone()]).unwrap();
-    service.swap_in(&project_dir, &[file2.clone()]).unwrap();
-
-    // Act - swap out only file1
-    service.swap_out(&project_dir, &[file1.clone()]).unwrap();
-
-    // Assert - marker should remain (file2 still swapped in)
-    let dot_envrc = vault_path.join("dot.envrc");
-    let content = std::fs::read_to_string(&dot_envrc).unwrap();
-    assert!(
-        content.contains("export RSENV_SWAPPED=1"),
-        "marker should remain when files still swapped in"
-    );
-
-    // Swap out file2
-    service.swap_out(&project_dir, &[file2.clone()]).unwrap();
-
-    // Assert - now marker should be gone
-    let content = std::fs::read_to_string(&dot_envrc).unwrap();
-    assert!(
-        !content.contains("export RSENV_SWAPPED=1"),
-        "marker should be removed when all files swapped out"
-    );
-}
-
-#[test]
-fn given_marker_already_exists_when_swap_in_then_no_duplicate() {
-    // Arrange
-    let temp = TempDir::new().unwrap();
-    let (project_dir, vault_path, settings) = setup_project(&temp);
-
-    // Two files
-    let file1 = project_dir.join("config1.yml");
-    let file2 = project_dir.join("config2.yml");
-    std::fs::write(&file1, "original1\n").unwrap();
-    std::fs::write(&file2, "original2\n").unwrap();
-
-    let swap_dir = vault_path.join("swap");
-    std::fs::create_dir_all(&swap_dir).unwrap();
-    std::fs::write(swap_dir.join("config1.yml"), "override1\n").unwrap();
-    std::fs::write(swap_dir.join("config2.yml"), "override2\n").unwrap();
-
-    let fs = Arc::new(RealFileSystem);
-    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
-    let service = SwapService::new(fs, vault_service, settings);
-
-    // Swap in file1 (adds marker)
-    service.swap_in(&project_dir, &[file1.clone()]).unwrap();
-
-    // Act - swap in file2 (marker already exists)
-    service.swap_in(&project_dir, &[file2.clone()]).unwrap();
-
-    // Assert - should have exactly one marker line
-    let dot_envrc = vault_path.join("dot.envrc");
-    let content = std::fs::read_to_string(&dot_envrc).unwrap();
-    let marker_count = content
-        .lines()
-        .filter(|line| line.trim() == "export RSENV_SWAPPED=1")
-        .count();
-    assert_eq!(marker_count, 1, "should have exactly one marker line");
 }
 
 // ============================================================

@@ -124,7 +124,7 @@ pub fn update_vars_section(
         _ => {
             return Err(ApplicationError::OperationFailed {
                 context: format!(
-                    "no rsenv section found in {}. Run 'rsenv init' first.",
+                    "no rsenv section found in {}. Run 'rsenv vault init' first.",
                     target_file_path.display()
                 ),
                 source: Box::new(std::io::Error::new(
@@ -222,92 +222,6 @@ pub fn update_vars_section(
     fs.write(target_file_path, &new_content)
         .map_err(|e| ApplicationError::OperationFailed {
             context: format!("write .envrc at {}", target_file_path.display()),
-            source: Box::new(e),
-        })?;
-
-    Ok(())
-}
-
-pub const RSENV_SWAPPED_MARKER: &str = "export RSENV_SWAPPED=1";
-
-/// Add RSENV_SWAPPED marker to dot.envrc if not present.
-/// This marker is placed OUTSIDE the rsenv section as a standalone line.
-pub fn add_swapped_marker(
-    fs: &Arc<dyn FileSystem>,
-    dot_envrc_path: &Path,
-) -> ApplicationResult<()> {
-    if !fs.exists(dot_envrc_path) {
-        // Create file with just the marker
-        fs.write(dot_envrc_path, &format!("{}\n", RSENV_SWAPPED_MARKER))
-            .map_err(|e| ApplicationError::OperationFailed {
-                context: format!("create dot.envrc at {}", dot_envrc_path.display()),
-                source: Box::new(e),
-            })?;
-        return Ok(());
-    }
-
-    let content =
-        fs.read_to_string(dot_envrc_path)
-            .map_err(|e| ApplicationError::OperationFailed {
-                context: format!("read dot.envrc at {}", dot_envrc_path.display()),
-                source: Box::new(e),
-            })?;
-
-    // Check if marker already exists
-    if content
-        .lines()
-        .any(|line| line.trim() == RSENV_SWAPPED_MARKER)
-    {
-        return Ok(()); // Idempotent: marker already present
-    }
-
-    // Append marker
-    let new_content = if content.ends_with('\n') || content.is_empty() {
-        format!("{}{}\n", content, RSENV_SWAPPED_MARKER)
-    } else {
-        format!("{}\n{}\n", content, RSENV_SWAPPED_MARKER)
-    };
-
-    fs.write(dot_envrc_path, &new_content)
-        .map_err(|e| ApplicationError::OperationFailed {
-            context: format!("write dot.envrc at {}", dot_envrc_path.display()),
-            source: Box::new(e),
-        })?;
-
-    Ok(())
-}
-
-/// Remove RSENV_SWAPPED marker from dot.envrc if present.
-pub fn remove_swapped_marker(
-    fs: &Arc<dyn FileSystem>,
-    dot_envrc_path: &Path,
-) -> ApplicationResult<()> {
-    if !fs.exists(dot_envrc_path) {
-        return Ok(()); // Nothing to remove
-    }
-
-    let content =
-        fs.read_to_string(dot_envrc_path)
-            .map_err(|e| ApplicationError::OperationFailed {
-                context: format!("read dot.envrc at {}", dot_envrc_path.display()),
-                source: Box::new(e),
-            })?;
-
-    // Filter out marker lines
-    let lines: Vec<&str> = content
-        .lines()
-        .filter(|line| line.trim() != RSENV_SWAPPED_MARKER)
-        .collect();
-
-    let new_content = if lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", lines.join("\n"))
-    };
-
-    fs.write(dot_envrc_path, &new_content)
-        .map_err(|e| ApplicationError::OperationFailed {
-            context: format!("write dot.envrc at {}", dot_envrc_path.display()),
             source: Box::new(e),
         })?;
 

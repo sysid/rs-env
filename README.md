@@ -44,7 +44,7 @@ It is linked to the project via a single `.envrc` symlink — **the only trace o
         ONE symlink
 ```
 
-**How it connects**: `rsenv init vault` creates the vault, moves the `.envrc`
+**How it connects**: `rsenv vault init` creates the vault, moves the `.envrc`
 there (as `dot.envrc`), and creates the symlink.
 
 ---
@@ -101,18 +101,19 @@ of the vault content as of swap-in, which is the baseline `rsenv swap diff` comp
 - `rsenv swap status --silent` — exit code only: 0=clean, 1=dirty, 2=unmanaged
 - `rsenv swap diff` — show what changed in swapped-in files since swap-in, as a patch
 - `rsenv swap diff --stat` — same, summary only (no patch)
-- `rsenv swap commit` — swap out and commit this project's vault data (editor opens prefilled)
-- `rsenv swap commit -a` — same, with a generated commit message
+- `rsenv vault commit` — commit this project's vault data (requires it to be swapped out)
+- `rsenv vault commit -a` — same, with a generated commit message
 
 **Checkpointing your work into the vault**: while content is swapped in, the live bytes are
 in the project and the vault holds only a frozen sentinel — so that work is in *no* git repo
-until you swap out. `rsenv swap commit` closes that window: it swaps out, then makes one
-commit scoped to this project's vault directory alone, never sweeping in other projects.
+until you swap out. `rsenv swap out` closes that window; `rsenv vault commit` then records it
+in one commit scoped to this project's vault directory alone, never sweeping in other
+projects. It refuses while anything is still swapped in, so it can never commit a sentinel in
+place of your work.
 
 ```bash
-$ rsenv swap commit -a
-Swapped out 1 entries:
-  /home/you/dev/myproject/thoughts
+$ rsenv swap out
+$ rsenv vault commit -a
 ✓ Committed b4247db to vault (2 files)
   M swap/thoughts/notes.md
   A swap/thoughts/research/2026-09-13-ranking.md
@@ -131,7 +132,9 @@ project-commit: a3bddf6028e11155c9f2bd66776d395a99a3ef83 (main)
  M swap/thoughts/notes.md
 ```
 
-Note that `swap commit` leaves the project **swapped out** — run `rsenv swap in` to resume.
+`vault commit` never swaps anything itself — swapping stays your explicit action, which is
+also what lets direnv refresh `RSENV_SWAPPED` (a child process cannot change its parent's
+environment).
 
 **Seeing your changes while swapped in**: while a file is swapped in, its content lives in
 the project and the vault holds only the sentinel, so neither `git diff` shows anything.
@@ -280,7 +283,7 @@ stale or unencrypted. Plaintext files are auto-added to `.gitignore`.
   ┌─────────────────────────────────────────────────────────────────────────┐
   │                          rsenv workflow                                 │
   │                                                                         │
-  │  1. rsenv init vault         create vault, link via .envrc symlink      │
+  │  1. rsenv vault init         create vault, link via .envrc symlink      │
   │  2. rsenv env select         pick environment, export variables         │
   │  3. rsenv guard add .env     move secrets to vault (permanent)          │
   │  4. rsenv swap in            swap in dev overrides (temporary)          │
@@ -312,7 +315,7 @@ brew install rsenv
 # Or via Cargo
 cargo install rsenv
 
-rsenv init vault            # Create vault for project
+rsenv vault init            # Create vault for project
 rsenv guard add .env        # Move .env to vault, create symlink
 rsenv env tree              # View environment hierarchy
 rsenv env select            # Interactive environment selection

@@ -616,12 +616,10 @@ impl SwapService {
             });
         }
 
-        // Add RSENV_SWAPPED marker to dot.envrc
-        if !swapped.is_empty() {
-            let dot_envrc = vault.path.join("dot.envrc");
-            crate::application::envrc::add_swapped_marker(&self.fs, &dot_envrc)?;
-        }
-
+        // NOTE: swap state is deliberately NOT written to dot.envrc. That file is
+        // content-addressed (`dot.envrc.<hash>.enc`) and SOPS-encrypted, so a line that
+        // changes with swap state makes every vault permanently stale and rewrites the
+        // ciphertext on each cycle. Consumers derive it: `rsenv swap status --silent`.
         Ok(swapped)
     }
 
@@ -786,19 +784,7 @@ impl SwapService {
             });
         }
 
-        // Remove RSENV_SWAPPED marker if no files remain swapped in
-        if !swapped.is_empty() {
-            let remaining = self.status(project_dir)?;
-            let any_swapped = remaining
-                .iter()
-                .any(|s| matches!(s.state, SwapState::In { .. }));
-
-            if !any_swapped {
-                let dot_envrc = vault.path.join("dot.envrc");
-                crate::application::envrc::remove_swapped_marker(&self.fs, &dot_envrc)?;
-            }
-        }
-
+        // See swap_in: dot.envrc is never touched, so there is no marker to clean up.
         Ok(swapped)
     }
 
@@ -941,6 +927,20 @@ impl SwapService {
         self.validate_metadata(&vault, project_dir);
 
         self.status_impl(&vault.path, project_dir)
+    }
+
+    /// Files swapped in BY THIS HOST.
+    ///
+    /// Foreign-host sentinels are excluded, matching `diff`: they describe another
+    /// machine's baseline, and `swap_out` refuses to touch them. Treating them as ours
+    /// would be a dead end — there is no local action that can clear them.
+    pub fn swapped_in_here(&self, project_dir: &Path) -> ApplicationResult<Vec<SwapFile>> {
+        let here = Self::get_hostname()?;
+        Ok(self
+            .status(project_dir)?
+            .into_iter()
+            .filter(|f| matches!(&f.state, SwapState::In { hostname } if *hostname == here))
+            .collect())
     }
 
     /// Status check without metadata validation warnings (for silent/scripting mode).
