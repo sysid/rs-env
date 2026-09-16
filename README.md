@@ -211,6 +211,7 @@ Store secrets that contain `$`, backticks, or other shell metacharacters in
 - `rsenv env select` — fuzzy-pick an env, write to `.envrc`
 - `rsenv env build <file>` — merge and output variables
 - `rsenv env envrc <file>` — update the vars section of `dot.envrc`
+- `rsenv env init` — recreate the default env files (existing ones swept to `<name>.bkp.<ext>`)
 
 ---
 

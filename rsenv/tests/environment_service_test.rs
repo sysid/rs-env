@@ -827,7 +827,7 @@ fn given_empty_dir_when_init_files_then_content_matches_vault_defaults() {
 }
 
 #[test]
-fn given_existing_env_files_when_init_files_then_backs_up_to_bkp() {
+fn given_existing_env_files_when_init_files_then_backs_up_keeping_extension() {
     // Arrange - a hand-edited local.env
     let temp = TempDir::new().unwrap();
     let envs_dir = temp.path().join("envs");
@@ -838,12 +838,17 @@ fn given_existing_env_files_when_init_files_then_backs_up_to_bkp() {
     // Act
     let (swept, created) = service.init_files(&envs_dir, false).unwrap();
 
-    // Assert - the user's content survives in the .bkp
+    // Assert - the user's content survives, under a name that still ends in .env so the
+    // vault's *.env gitignore and SOPS both keep covering it
     assert_eq!(swept, 1);
     assert_eq!(created, 6);
     assert_eq!(
-        std::fs::read_to_string(envs_dir.join("local.env.bkp")).unwrap(),
+        std::fs::read_to_string(envs_dir.join("local.bkp.env")).unwrap(),
         "export SECRET=mine\n"
+    );
+    assert!(
+        !envs_dir.join("local.env.bkp").exists(),
+        "the .bkp must sit before the extension, not after it"
     );
 
     // Assert - local.env itself was regenerated
@@ -868,11 +873,11 @@ fn given_unrelated_files_when_init_files_then_they_are_backed_up_too() {
     // Assert
     assert_eq!(swept, 2);
     assert_eq!(
-        std::fs::read_to_string(envs_dir.join("custom.env.bkp")).unwrap(),
+        std::fs::read_to_string(envs_dir.join("custom.bkp.env")).unwrap(),
         "export CUSTOM=1\n"
     );
     assert_eq!(
-        std::fs::read_to_string(envs_dir.join("README.md.bkp")).unwrap(),
+        std::fs::read_to_string(envs_dir.join("README.bkp.md")).unwrap(),
         "notes\n"
     );
     assert!(
@@ -894,15 +899,15 @@ fn given_existing_bkp_when_init_files_then_overwritten_and_not_cascaded() {
     // Act - second run sweeps the generated files over the existing .bkp
     let (swept, _) = service.init_files(&envs_dir, false).unwrap();
 
-    // Assert - existing .bkp files are skipped by the sweep, only the 6 defaults move
+    // Assert - existing backups are skipped by the sweep, only the 6 defaults move
     assert_eq!(swept, 6);
 
-    // Assert - .bkp now holds the previous (generated) version; no deeper cascade
-    assert!(std::fs::read_to_string(envs_dir.join("local.env.bkp"))
+    // Assert - the backup now holds the previous (generated) version; no deeper cascade
+    assert!(std::fs::read_to_string(envs_dir.join("local.bkp.env"))
         .unwrap()
         .contains("export RUN_ENV=local"));
     assert!(
-        !envs_dir.join("local.env.bkp.bkp").exists(),
+        !envs_dir.join("local.bkp.bkp.env").exists(),
         "backups must not cascade"
     );
 
@@ -918,7 +923,7 @@ fn given_clear_when_init_files_then_removes_all_including_bkp() {
     std::fs::create_dir_all(&envs_dir).unwrap();
     std::fs::write(envs_dir.join("local.env"), "export SECRET=mine\n").unwrap();
     std::fs::write(envs_dir.join("custom.env"), "export CUSTOM=1\n").unwrap();
-    std::fs::write(envs_dir.join("local.env.bkp"), "old\n").unwrap();
+    std::fs::write(envs_dir.join("local.bkp.env"), "old\n").unwrap();
     let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
 
     // Act
@@ -935,6 +940,80 @@ fn given_clear_when_init_files_then_removes_all_including_bkp() {
         expected,
         "--clear leaves exactly the six defaults"
     );
+}
+
+#[test]
+fn given_extensionless_file_when_init_files_then_bkp_is_appended() {
+    // Arrange - nothing to insert the marker in front of
+    let temp = TempDir::new().unwrap();
+    let envs_dir = temp.path().join("envs");
+    std::fs::create_dir_all(&envs_dir).unwrap();
+    std::fs::write(envs_dir.join("NOTES"), "scratch\n").unwrap();
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+
+    // Act
+    let (swept, _) = service.init_files(&envs_dir, false).unwrap();
+
+    // Assert
+    assert_eq!(swept, 1);
+    assert_eq!(
+        std::fs::read_to_string(envs_dir.join("NOTES.bkp")).unwrap(),
+        "scratch\n"
+    );
+}
+
+#[test]
+fn given_legacy_trailing_bkp_when_init_files_then_left_alone() {
+    // Arrange - a backup written by the old `<name>.env.bkp` scheme
+    let temp = TempDir::new().unwrap();
+    let envs_dir = temp.path().join("envs");
+    std::fs::create_dir_all(&envs_dir).unwrap();
+    std::fs::write(envs_dir.join("local.env.bkp"), "ancient\n").unwrap();
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+
+    // Act
+    let (swept, _) = service.init_files(&envs_dir, false).unwrap();
+
+    // Assert - recognised as a backup, so it is neither swept nor cascaded
+    assert_eq!(swept, 0);
+    assert_eq!(
+        std::fs::read_to_string(envs_dir.join("local.env.bkp")).unwrap(),
+        "ancient\n"
+    );
+    assert!(!envs_dir.join("local.env.bkp.bkp").exists());
+}
+
+#[test]
+fn given_backup_files_when_getting_hierarchy_then_they_are_excluded() {
+    // Arrange - a backup keeps the .env extension, so the hierarchy scanner must skip it
+    // explicitly or it shows up as a duplicate node in `env tree` and `env select`
+    let temp = TempDir::new().unwrap();
+    let envs_dir = temp.path().join("envs");
+    std::fs::create_dir_all(&envs_dir).unwrap();
+    std::fs::write(envs_dir.join("base.env"), "export BASE=value\n").unwrap();
+    std::fs::write(
+        envs_dir.join("local.env"),
+        "# rsenv: base.env\nexport LOCAL=new\n",
+    )
+    .unwrap();
+    std::fs::write(
+        envs_dir.join("local.bkp.env"),
+        "# rsenv: base.env\nexport LOCAL=old\n",
+    )
+    .unwrap();
+    let service = EnvironmentService::new(std::sync::Arc::new(RealFileSystem));
+
+    // Act
+    let hierarchy = service.get_hierarchy(&envs_dir).unwrap();
+
+    // Assert - base.env and local.env only
+    let names: Vec<String> = hierarchy
+        .files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+    assert_eq!(hierarchy.files.len(), 2, "found: {names:?}");
+    assert!(!names.contains(&"local.bkp.env".to_string()));
 }
 
 #[test]

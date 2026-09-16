@@ -159,7 +159,7 @@ pub enum EnvCommands {
         file: PathBuf,
     },
 
-    /// Recreate default env files in the vault (existing files backed up to *.bkp)
+    /// Recreate default env files in the vault (existing files backed up to <name>.bkp.<ext>)
     Init {
         /// Delete existing files instead of backing them up
         #[arg(long)]

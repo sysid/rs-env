@@ -55,6 +55,40 @@ pub(crate) fn default_env_content(env: &str) -> String {
     }
 }
 
+/// Marker `init_files` inserts to mark a swept-aside file.
+const BACKUP_MARKER: &str = "bkp";
+
+/// Name `init_files` sweeps a file aside to: `local.env` -> `local.bkp.env`.
+/// A file with no extension gets the marker appended: `NOTES` -> `NOTES.bkp`.
+///
+/// The marker sits *before* the extension so the backup keeps the extension of the original.
+/// Both the vault's `*.env` gitignore and `sops.file_extensions_enc` key off that extension,
+/// so a trailing `local.env.bkp` would be covered by neither - it would sit in `envs/` as
+/// uncommittable, unencryptable plaintext and wedge `rsenv vault commit`, which refuses any
+/// non-`.enc` file under `envs/`.
+fn backup_name(path: &Path) -> PathBuf {
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    match path.extension() {
+        Some(ext) => {
+            path.with_file_name(format!("{stem}.{BACKUP_MARKER}.{}", ext.to_string_lossy()))
+        }
+        None => path.with_file_name(format!("{stem}.{BACKUP_MARKER}")),
+    }
+}
+
+/// True when `path` already names a backup, so sweeps never cascade.
+///
+/// Covers the current `local.bkp.env` shape, the extension-less `NOTES.bkp` shape, and the
+/// superseded `local.env.bkp` shape - old backups are recognised so a sweep leaves them
+/// alone rather than burying them one level deeper.
+fn is_backup(path: &Path) -> bool {
+    if path.extension().is_some_and(|e| e == BACKUP_MARKER) {
+        return true;
+    }
+    path.file_stem()
+        .is_some_and(|s| s.to_string_lossy().ends_with(&format!(".{BACKUP_MARKER}")))
+}
+
 /// Service for building hierarchical environment variables.
 pub struct EnvironmentService {
     fs: Arc<dyn FileSystem>,
@@ -213,6 +247,14 @@ impl EnvironmentService {
                 continue;
             }
 
+            // `init_files` backups keep the .env extension on purpose, so they are caught by
+            // the vault's `*.env` gitignore and by SOPS. That puts them in front of this scan
+            // too - exclude them, or every `env init` adds a duplicate node to `env tree` and
+            // an extra candidate to `env select`.
+            if is_backup(path) {
+                continue;
+            }
+
             // Parse the file
             let content = match self.fs.read_to_string(path) {
                 Ok(c) => c,
@@ -230,10 +272,10 @@ impl EnvironmentService {
 
     /// Regenerate the default env files in `envs_dir`.
     ///
-    /// Every existing file is swept aside first: renamed to `<name>.bkp`, or deleted when
-    /// `clear` is set. Files already ending in `.bkp` are left alone by the rename path so
-    /// backups never cascade into `.bkp.bkp` - a `.bkp` therefore holds the immediately
-    /// previous version only, and is overwritten by a second call.
+    /// Every existing file is swept aside first: renamed by `backup_name`, or deleted when
+    /// `clear` is set. Files that are already backups are left alone by the rename path so
+    /// backups never cascade - a backup therefore holds the immediately previous version
+    /// only, and is overwritten by a second call.
     ///
     /// Returns `(swept, created)`.
     pub fn init_files(&self, envs_dir: &Path, clear: bool) -> ApplicationResult<(usize, usize)> {
@@ -270,14 +312,11 @@ impl EnvironmentService {
                 continue;
             }
 
-            if path.extension().map(|ext| ext == "bkp").unwrap_or(false) {
+            if is_backup(&path) {
                 continue;
             }
 
-            let backup = path.with_extension(format!(
-                "{}.bkp",
-                path.extension().unwrap_or_default().to_string_lossy()
-            ));
+            let backup = backup_name(&path);
             self.fs
                 .rename(&path, &backup)
                 .map_err(|e| ApplicationError::OperationFailed {
