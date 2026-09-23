@@ -38,6 +38,12 @@ Usage
     ./scripts/fix_swap_guards.py --apply      # rewrite the files
     rsenv sops encrypt --global               # re-encrypt afterwards
 
+Third, it renames one comment. The marker migration appended prose starting with
+`# rsenv:` - the env-hierarchy parent-link prefix - so anything scanning a directory for
+that prefix read the sentence's words as a list of parents. That is what made
+`rsenv env tree-edit <vault>` refuse with "Dependencies form a DAG" on a vault with no
+DAG in it. The comment becomes `# rsenv-note:`, which no parser claims.
+
 Dry run is the default: dot.envrc holds plaintext secrets and is gitignored, so an
 unwanted rewrite has no git safety net. Every rewrite is checked with `bash -n` before it
 is written - a syntax error here breaks every shell that enters the project.
@@ -73,6 +79,14 @@ GUARDS = (
 # Shell function definitions, matched at top level only (`name() {` / `}`).
 FUNCTION_OPEN = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_-]*)\(\)\s*\{\s*$")
 FUNCTION_CLOSE = re.compile(r"^\}\s*$")
+
+# The prose comment the marker migration appended starts with the parent-link prefix, so
+# anything scanning a directory for `# rsenv:` read its words as a list of parents - which
+# is how `env tree-edit` came to report a DAG in a vault that has none. Only this exact
+# comment is renamed; any other `# rsenv:` line in a dot.envrc is reported for review.
+PROSE_DIRECTIVE = re.compile(r"^# rsenv: (?P<prose>RSENV_SWAPPED is DERIVED.*)$")
+ANY_DIRECTIVE = re.compile(r"^\s*# rsenv:")
+SAFE_PROSE_PREFIX = "# rsenv-note:"
 
 # Anything else that branches on the variable - reported, never rewritten blind.
 UNHANDLED = re.compile(r"RSENV_SWAPPED")
@@ -125,8 +139,30 @@ class Outcome:
             self.notes.append(f"rewrote {migrated} guard(s)")
 
         out = self._source_helper_in_functions(out)
+        out = self._rename_prose_directive(out)
         self._report_leftovers(out)
         return "\n".join(out)
+
+    def _rename_prose_directive(self, lines: list[str]) -> list[str]:
+        """Take the parent-link prefix off a line that is only prose.
+
+        `# rsenv: <parent>` is the env-hierarchy wire format. The swap-marker migration
+        appended a comment starting with it, so every word of that sentence looked like a
+        parent - enough to make the tree commands refuse the whole vault.
+        """
+        out = []
+        for i, line in enumerate(lines, start=1):
+            match = PROSE_DIRECTIVE.match(line)
+            if match:
+                out.append(f"{SAFE_PROSE_PREFIX} {match.group('prose')}")
+                self.notes.append(f"line {i}: prose comment un-shadowed from `# rsenv:`")
+                continue
+            if ANY_DIRECTIVE.match(line):
+                self.notes.append(
+                    f"left alone, check by hand: line {i}: {line.strip()}"
+                )
+            out.append(line)
+        return out
 
     def _source_helper_in_functions(self, lines: list[str]) -> list[str]:
         """Source sane_fn.sh inside every function that calls the helper.

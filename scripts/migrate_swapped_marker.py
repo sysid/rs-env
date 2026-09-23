@@ -42,7 +42,9 @@ LEGACY_MARKER = "export RSENV_SWAPPED=1"
 LEGACY_STATE_FILE_FRAGMENT = "swap/.swapped"
 
 DERIVATION = [
-    "# rsenv: RSENV_SWAPPED is DERIVED, never stored here - dot.envrc is content-addressed",
+    # NOT `# rsenv:` - that prefix is the env-hierarchy parent link, and a directory scan
+    # for it read this sentence's words as a parent list (see scripts/fix_swap_guards.py).
+    "# rsenv-note: RSENV_SWAPPED is DERIVED, never stored here - dot.envrc is content-addressed",
     "# and SOPS-encrypted, so a line that changes with swap state churns the ciphertext.",
     "# At EOF on purpose: rsenv must be on PATH, and direnv exports the final environment",
     "# regardless of line order, so consumers like starship see it at every prompt.",
