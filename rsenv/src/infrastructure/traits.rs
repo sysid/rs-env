@@ -356,9 +356,24 @@ impl CommandRunner for RealCommandRunner {
 #[derive(Debug, Default)]
 pub struct SkimSelector;
 
-/// Real editor implementation using $EDITOR, $VISUAL, or vim.
-#[derive(Debug, Default)]
-pub struct EnvironmentEditor;
+/// Real editor implementation, spawning the command it was given.
+///
+/// It deliberately does not consult the environment: `Settings::editor` already
+/// layers the config file over `$VISUAL`/`$EDITOR`, and a second resolution here
+/// would silently outrank a user's `rsenv.toml`.
+#[derive(Debug)]
+pub struct EnvironmentEditor {
+    command: String,
+}
+
+impl EnvironmentEditor {
+    /// Create an editor that spawns `command` (from `Settings::editor`).
+    pub fn new(command: impl Into<String>) -> Self {
+        Self {
+            command: command.into(),
+        }
+    }
+}
 
 impl Selector for SkimSelector {
     fn select_one(
@@ -411,12 +426,7 @@ impl Editor for EnvironmentEditor {
     fn open(&self, path: &Path) -> io::Result<()> {
         use std::process::Command;
 
-        // Determine editor: $VISUAL > $EDITOR > vim
-        let editor = std::env::var("VISUAL")
-            .or_else(|_| std::env::var("EDITOR"))
-            .unwrap_or_else(|_| "vim".to_string());
-
-        let status = Command::new(&editor).arg(path).status()?;
+        let status = Command::new(&self.command).arg(path).status()?;
 
         if status.success() {
             Ok(())

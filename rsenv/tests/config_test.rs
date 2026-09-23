@@ -281,3 +281,76 @@ file_extensions_enc = ["yaml"]
         "an unrelated vault key must not disturb encrypt_on_commit"
     );
 }
+
+// ============================================================
+// Editor resolution
+//
+// One place decides which editor rsenv spawns: Settings. Every command reads
+// settings.editor, so a config file beats the environment and nothing resolves
+// the editor on its own. $VISUAL wins over $EDITOR, per the usual convention
+// that VISUAL names the full-screen editor.
+// ============================================================
+
+/// Serialised by the mandatory `--test-threads=1`; these mutate process env.
+fn with_editor_env<T>(visual: Option<&str>, editor: Option<&str>, body: impl FnOnce() -> T) -> T {
+    let prev_visual = std::env::var("VISUAL").ok();
+    let prev_editor = std::env::var("EDITOR").ok();
+
+    match visual {
+        Some(v) => std::env::set_var("VISUAL", v),
+        None => std::env::remove_var("VISUAL"),
+    }
+    match editor {
+        Some(e) => std::env::set_var("EDITOR", e),
+        None => std::env::remove_var("EDITOR"),
+    }
+
+    let result = body();
+
+    match prev_visual {
+        Some(v) => std::env::set_var("VISUAL", v),
+        None => std::env::remove_var("VISUAL"),
+    }
+    match prev_editor {
+        Some(e) => std::env::set_var("EDITOR", e),
+        None => std::env::remove_var("EDITOR"),
+    }
+
+    result
+}
+
+#[test]
+fn given_visual_and_editor_when_defaulting_then_visual_wins() {
+    let settings = with_editor_env(Some("nvim"), Some("vim"), Settings::default);
+
+    assert_eq!(settings.editor, "nvim");
+}
+
+#[test]
+fn given_only_editor_when_defaulting_then_editor_is_used() {
+    let settings = with_editor_env(None, Some("hx"), Settings::default);
+
+    assert_eq!(settings.editor, "hx");
+}
+
+#[test]
+fn given_neither_when_defaulting_then_falls_back_to_vim() {
+    let settings = with_editor_env(None, None, Settings::default);
+
+    assert_eq!(settings.editor, "vim");
+}
+
+#[test]
+fn given_config_file_when_loaded_then_it_beats_the_environment() {
+    let vault_dir = TempDir::new().unwrap();
+    fs::write(vault_dir.path().join(".rsenv.toml"), "editor = \"nvim\"\n").unwrap();
+
+    let settings = with_editor_env(Some("emacs"), Some("emacs"), || {
+        Settings::load(Some(vault_dir.path())).expect("load settings")
+    });
+
+    assert_eq!(
+        settings.editor, "nvim",
+        "an explicit config must outrank an inherited environment"
+    );
+}

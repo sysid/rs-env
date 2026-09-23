@@ -184,7 +184,7 @@ impl SopsConfig {
 pub struct Settings {
     /// Base directory for rsenv (default: ~/.rsenv)
     pub base_dir: PathBuf,
-    /// Editor command (default: $EDITOR or "vim")
+    /// Editor command every command spawns (default: $VISUAL, else $EDITOR, else "vim")
     pub editor: String,
     /// SOPS encryption settings
     pub sops: SopsConfig,
@@ -192,8 +192,12 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        // Try $EDITOR, fall back to vim
-        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".into());
+        // $VISUAL names the full-screen editor and outranks $EDITOR by convention.
+        // Resolved here and nowhere else: every command reads settings.editor, so a
+        // config file can override it and no caller invents its own fallback.
+        let editor = std::env::var("VISUAL")
+            .or_else(|_| std::env::var("EDITOR"))
+            .unwrap_or_else(|_| "vim".into());
 
         // Default base directory
         let base_dir = dirs_default_base_dir();

@@ -327,7 +327,7 @@ fn handle_env(
             match selected {
                 Some(item) => {
                     // Open in editor
-                    let editor = EnvironmentEditor;
+                    let editor = EnvironmentEditor::new(settings.editor.as_str());
                     let path = std::path::PathBuf::from(&item.value);
                     editor.open(&path).map_err(|e| {
                         rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
@@ -667,7 +667,7 @@ fn handle_config(
             }
 
             // 4. Open in editor
-            let editor = EnvironmentEditor;
+            let editor = EnvironmentEditor::new(settings.editor.as_str());
             editor.open(&config_path).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
                     format!("open editor for {}", config_path.display()),
