@@ -20,6 +20,7 @@ use rsenv::cli::args::{
     Cli, Commands, ConfigCommands, EnvCommands, GuardCommands, HookCommands, SopsCommands,
     SwapCommands, VaultCommands,
 };
+use rsenv::cli::editor::is_vim_family;
 use rsenv::cli::output;
 use rsenv::config::{global_config_dir, global_config_path, vault_config_path, Settings};
 use rsenv::domain::{shell_quote, TreeBuilder, TreeNodeConvert};
@@ -71,7 +72,9 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
 
     match cli.command {
         Some(Commands::Config { command }) => handle_config(command, &settings, project_dir),
-        Some(Commands::Env { command }) => handle_env(command, project_dir, vault_path),
+        Some(Commands::Env { command }) => {
+            handle_env(command, project_dir, vault_path, &settings)
+        }
         Some(Commands::Guard { command }) => handle_guard(command, project_dir, &settings),
         Some(Commands::Hook { command }) => handle_hook(command, &settings),
         Some(Commands::Info { check }) => handle_info(project_dir, &settings, check),
@@ -95,10 +98,28 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
     }
 }
 
+/// The editor for the vim-driven env commands: `settings.editor`, which already
+/// resolves config file over `$EDITOR`.
+///
+/// `edit-leaf` and `tree-edit` pass vim-only flags (`flag`), so anything else would
+/// read the flag as a filename. Refuse with an actionable message instead.
+fn vim_family_editor(settings: &Settings, flag: &str) -> rsenv::cli::CliResult<String> {
+    let editor = settings.editor.clone();
+    if !is_vim_family(&editor) {
+        return Err(rsenv::cli::CliError::Usage(format!(
+            "editor '{editor}' cannot run this command: it is driven with vim's {flag}.\n  \
+             Set a vim-family editor (vim, nvim) in $EDITOR or in rsenv.toml \
+             (see: rsenv config path)."
+        )));
+    }
+    Ok(editor)
+}
+
 fn handle_env(
     command: EnvCommands,
     project_dir: Option<std::path::PathBuf>,
     vault_path: Option<std::path::PathBuf>,
+    settings: &Settings,
 ) -> rsenv::cli::CliResult<()> {
     let fs = Arc::new(RealFileSystem);
     let service = EnvironmentService::new(fs);
@@ -366,7 +387,7 @@ fn handle_env(
             }
 
             // Open all files in editor with -O (vertical split)
-            let editor_cmd = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
+            let editor_cmd = vim_family_editor(settings, "-O")?;
             let file_args: Vec<String> = files
                 .iter()
                 .map(|p| p.to_string_lossy().to_string())
@@ -387,6 +408,10 @@ fn handle_env(
             Ok(())
         }
         EnvCommands::TreeEdit { dir } => {
+            // Resolved up front: refusing after building the tree and a temp file would
+            // leave the user staring at half-done work.
+            let editor_cmd = vim_family_editor(settings, "-S")?;
+
             let dir = dir
                 .or(project_dir)
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
@@ -444,19 +469,19 @@ fn handle_env(
                 ))
             })?;
 
-            // Run vim with -S to source the script
-            let status = std::process::Command::new("vim")
+            // Run the editor with -S to source the script
+            let status = std::process::Command::new(&editor_cmd)
                 .arg("-S")
                 .arg(tmpfile.path())
                 .status()
                 .map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::io(
-                        "run vim".to_string(),
+                        format!("run {editor_cmd}"),
                         e,
                     ))
                 })?;
 
-            output::info(&format!("Vim: {}", status));
+            output::info(&format!("{editor_cmd}: {status}"));
             Ok(())
         }
         EnvCommands::Leaves { dir } => {

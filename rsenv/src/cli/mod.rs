@@ -2,6 +2,7 @@
 
 pub mod args;
 pub mod diff_render;
+pub mod editor;
 pub mod error;
 pub mod output;
 pub mod pager;

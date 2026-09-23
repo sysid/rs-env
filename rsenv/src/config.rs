@@ -2,9 +2,10 @@
 //!
 //! Precedence (lowest to highest):
 //! 1. Compiled defaults
-//! 2. Global config: `$XDG_CONFIG_HOME/rsenv/rsenv.toml`
+//! 2. Global config: platform config dir (`rsenv config path`) - on macOS that is
+//!    `~/Library/Application Support/rsenv/rsenv.toml`, not `~/.config`
 //! 3. Local config: `<vault_dir>/.rsenv.toml` (vault directory, not project)
-//! 4. Environment variables: `RSENV_*` prefix
+//! 4. Environment variables: `RSENV__*` prefix, double underscore (`RSENV__EDITOR`)
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -298,9 +299,9 @@ impl Settings {
     ///
     /// # Precedence (lowest to highest)
     /// 1. Compiled defaults (examples only)
-    /// 2. Global config: `$XDG_CONFIG_HOME/rsenv/rsenv.toml` (arrays REPLACE defaults)
+    /// 2. Global config: platform config dir, `rsenv config path` (arrays REPLACE defaults)
     /// 3. Local config: `<vault_dir>/.rsenv.toml` (arrays UNION with global)
-    /// 4. Environment variables: `RSENV_*` prefix (REPLACES - explicit override)
+    /// 4. Environment variables: `RSENV__*` prefix (REPLACES - explicit override)
     ///
     /// # Array Merge Semantics
     /// - Defaults → Global: REPLACE (global defines the real baseline)
@@ -337,7 +338,11 @@ impl Settings {
         Ok(current)
     }
 
-    /// Apply RSENV_* environment variables as explicit overrides.
+    /// Apply RSENV__* environment variables as explicit overrides.
+    ///
+    /// The separator is a DOUBLE underscore, both as the prefix separator and for
+    /// nesting: `RSENV__EDITOR`, `RSENV__SOPS__GPG_KEY`. A single-underscore
+    /// `RSENV_EDITOR` is silently ignored.
     ///
     /// Env vars replace values (not merge) - they are explicit user overrides.
     fn apply_env_overrides(mut settings: Self) -> Result<Self, ApplicationError> {
@@ -491,9 +496,10 @@ impl Settings {
         r#"# rsenv configuration
 #
 # Locations (by precedence, lowest to highest):
-#   Global: ~/.config/rsenv/rsenv.toml  (defines your baseline)
+#   Global: this file - platform-dependent, print it with `rsenv config path`
+#           (Linux ~/.config/rsenv/, macOS ~/Library/Application Support/rsenv/)
 #   Local:  <vault_dir>/.rsenv.toml     (project-specific additions)
-#   Env:    RSENV_* environment variables (explicit overrides)
+#   Env:    RSENV__* environment variables (explicit overrides, e.g. RSENV__EDITOR)
 #
 # Array Merge Semantics:
 #   Global config REPLACES compiled defaults (defaults are just examples).
