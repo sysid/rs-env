@@ -25,6 +25,17 @@ pub struct EnvOutput {
     pub files: Vec<EnvFile>,
 }
 
+/// An env file whose `# rsenv:` directive names several parents.
+///
+/// Legal for `env build`, which merges a DAG, but not for the tree commands.
+#[derive(Debug, Clone)]
+pub struct MultiParentFile {
+    /// The file carrying the directive
+    pub file: PathBuf,
+    /// The parents it names, as written
+    pub parents: Vec<String>,
+}
+
 /// Hierarchy information for a directory of env files.
 #[derive(Debug, Clone)]
 pub struct EnvHierarchy {
@@ -495,9 +506,16 @@ impl EnvironmentService {
         Ok(())
     }
 
-    /// Check if directory contains DAG structure (files with multiple parents).
-    pub fn is_dag(&self, dir: &Path) -> ApplicationResult<bool> {
-        debug!("is_dag: dir={}", dir.display());
+    /// Env files that declare more than one parent - the shape tree commands cannot render.
+    ///
+    /// Returns every offender rather than a bare yes/no, so the caller can point at the
+    /// exact `# rsenv:` lines to change. An empty result means the hierarchy is a tree.
+    ///
+    /// Only `*.env` files are inspected, matching `TreeBuilder::scan_directory`: a
+    /// directive-shaped line anywhere else - a prose comment in `dot.envrc`, a swapped
+    /// document - is not part of the hierarchy and must not be read as a declaration.
+    pub fn multi_parent_files(&self, dir: &Path) -> ApplicationResult<Vec<MultiParentFile>> {
+        debug!("multi_parent_files: dir={}", dir.display());
         let re = Regex::new(r"# rsenv:\s*(.+)").map_err(|e| ApplicationError::OperationFailed {
             context: "compile regex".to_string(),
             source: Box::new(std::io::Error::new(
@@ -506,29 +524,45 @@ impl EnvironmentService {
             )),
         })?;
 
+        let mut offenders = Vec::new();
+
         for entry in walkdir::WalkDir::new(dir)
             .into_iter()
             .filter_map(|e| e.ok())
         {
-            if entry.file_type().is_file() {
-                if let Ok(content) = self.fs.read_to_string(entry.path()) {
-                    for line in content.lines() {
-                        if let Some(caps) = re.captures(line) {
-                            let parents: Vec<&str> = caps[1].split_whitespace().collect();
-                            if parents.len() > 1 {
-                                debug!(
-                                    "is_dag: found multi-parent file {}",
-                                    entry.path().display()
-                                );
-                                return Ok(true);
-                            }
-                        }
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if entry.path().extension().is_none_or(|ext| ext != "env") {
+                continue;
+            }
+            let Ok(content) = self.fs.read_to_string(entry.path()) else {
+                continue;
+            };
+
+            for line in content.lines() {
+                if let Some(caps) = re.captures(line) {
+                    let parents: Vec<String> = caps[1]
+                        .split_whitespace()
+                        .map(|p| p.to_string())
+                        .collect();
+                    if parents.len() > 1 {
+                        debug!(
+                            "multi_parent_files: {} declares {} parents",
+                            entry.path().display(),
+                            parents.len()
+                        );
+                        offenders.push(MultiParentFile {
+                            file: entry.path().to_path_buf(),
+                            parents,
+                        });
                     }
                 }
             }
         }
-        debug!("is_dag: no DAG structure found");
-        Ok(false)
+
+        offenders.sort_by(|a, b| a.file.cmp(&b.file));
+        Ok(offenders)
     }
 
     /// Link multiple files in a chain: files[0] <- files[1] <- files[2] <- ...

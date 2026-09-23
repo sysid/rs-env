@@ -630,7 +630,7 @@ fn given_file_with_parent_when_unlinking_then_rewrites_directive_exactly() {
 // =============================================================================
 
 #[test]
-fn given_tree_structure_when_checking_dag_then_returns_false() {
+fn given_tree_structure_when_looking_for_multi_parents_then_finds_none() {
     // Arrange - simple tree, no multiple parents
     let temp = TempDir::new().unwrap();
 
@@ -645,20 +645,20 @@ fn given_tree_structure_when_checking_dag_then_returns_false() {
     let service = EnvironmentService::new(fs);
 
     // Act
-    let is_dag = service.is_dag(temp.path()).unwrap();
+    let offenders = service.multi_parent_files(temp.path()).unwrap();
 
     // Assert
-    assert!(!is_dag);
+    assert!(offenders.is_empty());
 }
 
 #[test]
-fn given_dag_structure_when_checking_dag_then_returns_true() {
+fn given_dag_structure_when_looking_for_multi_parents_then_names_file_and_parents() {
     // Arrange - file with multiple parents
     let temp = TempDir::new().unwrap();
 
     create_env_file(&temp, "parent1.env", "export P1=value\n");
     create_env_file(&temp, "parent2.env", "export P2=value\n");
-    create_env_file(
+    let child = create_env_file(
         &temp,
         "child.env",
         "# rsenv: parent1.env parent2.env\nexport CHILD=value\n",
@@ -668,10 +668,65 @@ fn given_dag_structure_when_checking_dag_then_returns_true() {
     let service = EnvironmentService::new(fs);
 
     // Act
-    let is_dag = service.is_dag(temp.path()).unwrap();
+    let offenders = service.multi_parent_files(temp.path()).unwrap();
+
+    // Assert - the user has to be told WHERE the tree premise breaks
+    assert_eq!(offenders.len(), 1);
+    assert_eq!(offenders[0].file, child);
+    assert_eq!(offenders[0].parents, vec!["parent1.env", "parent2.env"]);
+}
+
+#[test]
+fn given_non_env_file_with_rsenv_prose_when_looking_for_multi_parents_then_ignores_it() {
+    // Arrange - a vault: dot.envrc carries a COMMENT that starts like a directive, and
+    // swapped content can too. Only `.env` files take part in the hierarchy, so neither
+    // may be mistaken for a multi-parent declaration.
+    let temp = TempDir::new().unwrap();
+
+    create_env_file(&temp, "root.env", "export ROOT=value\n");
+    create_env_file(
+        &temp,
+        "child.env",
+        "# rsenv: root.env\nexport CHILD=value\n",
+    );
+    create_env_file(
+        &temp,
+        "dot.envrc",
+        "# rsenv: RSENV_SWAPPED is DERIVED, never stored here - dot.envrc is content-addressed\n",
+    );
+    create_env_file(&temp, "notes.md", "# rsenv: parent one and parent two\n");
+
+    let fs = std::sync::Arc::new(RealFileSystem);
+    let service = EnvironmentService::new(fs);
+
+    // Act
+    let offenders = service.multi_parent_files(temp.path()).unwrap();
 
     // Assert
-    assert!(is_dag);
+    assert!(
+        offenders.is_empty(),
+        "prose outside a .env file is not a parent declaration: {offenders:?}"
+    );
+}
+
+#[test]
+fn given_several_dag_files_when_looking_for_multi_parents_then_reports_all_of_them() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+
+    create_env_file(&temp, "base.env", "export BASE=value\n");
+    create_env_file(&temp, "secrets.env", "export SECRET=value\n");
+    create_env_file(&temp, "prod.env", "# rsenv: base.env secrets.env\n");
+    create_env_file(&temp, "stage.env", "# rsenv: base.env secrets.env\n");
+
+    let fs = std::sync::Arc::new(RealFileSystem);
+    let service = EnvironmentService::new(fs);
+
+    // Act
+    let offenders = service.multi_parent_files(temp.path()).unwrap();
+
+    // Assert - one line per offender, so a fix can be made in one pass
+    assert_eq!(offenders.len(), 2);
 }
 
 #[test]

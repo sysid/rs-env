@@ -98,6 +98,45 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
     }
 }
 
+/// Refuse the tree commands on a hierarchy that is not a tree - and say where.
+///
+/// `env tree`, `branches`, `leaves` and `tree-edit` render a parent chain, so a file with
+/// several parents has no place in them. The offending `# rsenv:` lines are the only
+/// thing the user can act on, so name each one instead of stating the conclusion.
+fn require_tree(service: &EnvironmentService, dir: &std::path::Path) -> rsenv::cli::CliResult<()> {
+    const SHOWN: usize = 10;
+
+    let offenders = service.multi_parent_files(dir).map_err(|e| {
+        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+    })?;
+
+    if offenders.is_empty() {
+        return Ok(());
+    }
+
+    let mut message = format!(
+        "tree commands need one parent per file, but {} file(s) under {} declare several:",
+        offenders.len(),
+        dir.display()
+    );
+    for offender in offenders.iter().take(SHOWN) {
+        message.push_str(&format!(
+            "\n  {}: {}",
+            offender.file.display(),
+            offender.parents.join(", ")
+        ));
+    }
+    if offenders.len() > SHOWN {
+        message.push_str(&format!("\n  ... and {} more", offenders.len() - SHOWN));
+    }
+    message.push_str(
+        "\nEdit those `# rsenv:` lines down to a single parent, or use the commands that \
+         handle a DAG: `rsenv env build`, `rsenv env files`.",
+    );
+
+    Err(rsenv::cli::CliError::Usage(message))
+}
+
 /// The editor for the vim-driven env commands: `settings.editor`, which already
 /// resolves config file over `$EDITOR`.
 ///
@@ -170,13 +209,7 @@ fn handle_env(
                 .or(project_dir)
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
 
-            if service.is_dag(&search_dir).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })? {
-                return Err(rsenv::cli::CliError::Usage(
-                    "Dependencies form a DAG, cannot use tree-based commands.".to_string(),
-                ));
-            }
+            require_tree(&service, &search_dir)?;
 
             let mut builder = TreeBuilder::new();
             let trees = builder.build_from_directory(&search_dir).map_err(|e| {
@@ -348,13 +381,7 @@ fn handle_env(
                 .or(project_dir)
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
 
-            if service.is_dag(&dir).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })? {
-                return Err(rsenv::cli::CliError::Usage(
-                    "Dependencies form a DAG, cannot use tree-based commands.".to_string(),
-                ));
-            }
+            require_tree(&service, &dir)?;
 
             let mut builder = TreeBuilder::new();
             let trees = builder.build_from_directory(&dir).map_err(|e| {
@@ -416,13 +443,7 @@ fn handle_env(
                 .or(project_dir)
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
 
-            if service.is_dag(&dir).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })? {
-                return Err(rsenv::cli::CliError::Usage(
-                    "Dependencies form a DAG, cannot use tree-based commands.".to_string(),
-                ));
-            }
+            require_tree(&service, &dir)?;
 
             let mut builder = TreeBuilder::new();
             let trees = builder.build_from_directory(&dir).map_err(|e| {
@@ -489,13 +510,7 @@ fn handle_env(
                 .or(project_dir)
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
 
-            if service.is_dag(&dir).map_err(|e| {
-                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-            })? {
-                return Err(rsenv::cli::CliError::Usage(
-                    "Dependencies form a DAG, cannot use tree-based commands.".to_string(),
-                ));
-            }
+            require_tree(&service, &dir)?;
 
             let mut builder = TreeBuilder::new();
             let trees = builder.build_from_directory(&dir).map_err(|e| {

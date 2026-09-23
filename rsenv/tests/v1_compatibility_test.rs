@@ -241,10 +241,10 @@ fn given_v1_tree_structure_when_checking_dag_then_returns_false() {
     let fs = Arc::new(RealFileSystem);
     let service = EnvironmentService::new(fs);
 
-    let is_dag = service
-        .is_dag(Path::new("tests/resources/environments/tree"))
+    let offenders = service
+        .multi_parent_files(Path::new("tests/resources/environments/tree"))
         .unwrap();
-    assert!(!is_dag, "Tree structure should not be DAG");
+    assert!(offenders.is_empty(), "Tree structure should not be DAG");
 }
 
 #[test]
@@ -252,8 +252,8 @@ fn given_v1_graph_structure_when_checking_dag_then_returns_true() {
     let fs = Arc::new(RealFileSystem);
     let service = EnvironmentService::new(fs);
 
-    let is_dag = service
-        .is_dag(Path::new("tests/resources/environments/graph"))
+    let offenders = service
+        .multi_parent_files(Path::new("tests/resources/environments/graph"))
         .unwrap();
-    assert!(is_dag, "Graph structure should be DAG");
+    assert!(!offenders.is_empty(), "Graph structure should be DAG");
 }
