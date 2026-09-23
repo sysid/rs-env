@@ -21,6 +21,11 @@ pub trait FileSystem: Send + Sync {
     /// Write string content to file.
     fn write(&self, path: &Path, content: &str) -> io::Result<()>;
 
+    /// Set a file's modification time to now, leaving its bytes untouched.
+    ///
+    /// Never creates the file - callers rely on "no file, no side effect".
+    fn bump_mtime(&self, path: &Path) -> io::Result<()>;
+
     /// Check if path exists (follows symlinks).
     fn exists(&self, path: &Path) -> bool;
 
@@ -144,6 +149,15 @@ impl FileSystem for RealFileSystem {
 
     fn write(&self, path: &Path, content: &str) -> io::Result<()> {
         std::fs::write(path, content)
+    }
+
+    fn bump_mtime(&self, path: &Path) -> io::Result<()> {
+        // Opened write-only for the timestamp; without `truncate` the content is safe,
+        // and `open` (not `create`) keeps the "never creates the file" promise.
+        std::fs::File::options()
+            .write(true)
+            .open(path)?
+            .set_times(std::fs::FileTimes::new().set_modified(std::time::SystemTime::now()))
     }
 
     fn exists(&self, path: &Path) -> bool {

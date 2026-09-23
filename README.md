@@ -133,8 +133,12 @@ project-commit: a3bddf6028e11155c9f2bd66776d395a99a3ef83 (main)
 ```
 
 `vault commit` never swaps anything itself — swapping stays your explicit action, which is
-also what lets direnv refresh `RSENV_SWAPPED` (a child process cannot change its parent's
-environment).
+also what refreshes `RSENV_SWAPPED`: a swap cannot write a running shell's environment
+(a child process cannot change its parent's), so instead it bumps the mtime of the vault's
+`dot.envrc`. direnv watches that file through the `.envrc` symlink and re-evaluates at the
+next prompt — in every shell sitting in the project, including the ones `rsenv swap out -g`
+never visited. The file's bytes are untouched, so the content hash, the SOPS ciphertext and
+`direnv allow` are all unaffected.
 
 **Seeing your changes while swapped in**: while a file is swapped in, its content lives in
 the project and the vault holds only the sentinel, so neither `git diff` shows anything.

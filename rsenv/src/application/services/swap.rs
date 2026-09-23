@@ -161,6 +161,31 @@ impl SwapService {
         }
     }
 
+    /// Wake direnv so every shell sitting in the project re-derives `RSENV_SWAPPED`.
+    ///
+    /// A swap run in one shell cannot write another shell's environment, so the state
+    /// consumers see (starship, guard functions) is whatever direnv exported last. direnv
+    /// re-evaluates when a watched file's mtime changes and always watches the project's
+    /// `.envrc` - a symlink to this vault's `dot.envrc`. Bumping the mtime is therefore
+    /// the whole mechanism, and it is safe in both directions that matter: `direnv allow`
+    /// is keyed on sha256(path + content), and SOPS staleness on content alone, so an
+    /// unchanged byte stream keeps both intact.
+    ///
+    /// Best-effort: the swap itself already succeeded, so a failure here warns rather
+    /// than turning a completed swap into an error.
+    fn notify_direnv(&self, vault_path: &Path) {
+        let dot_envrc = vault_path.join("dot.envrc");
+        match self.fs.bump_mtime(&dot_envrc) {
+            Ok(()) => debug!("notify_direnv: bumped mtime of {}", dot_envrc.display()),
+            Err(e) => output::warning(&format!(
+                "Could not refresh direnv for {}: {}.\n  \
+                 RSENV_SWAPPED may be stale in open shells - run: direnv reload",
+                dot_envrc.display(),
+                e
+            )),
+        }
+    }
+
     // ============================================================
     // Helper methods for vault paths
     // ============================================================
@@ -620,6 +645,9 @@ impl SwapService {
         // content-addressed (`dot.envrc.<hash>.enc`) and SOPS-encrypted, so a line that
         // changes with swap state makes every vault permanently stale and rewrites the
         // ciphertext on each cycle. Consumers derive it: `rsenv swap status --silent`.
+        if !swapped.is_empty() {
+            self.notify_direnv(&vault.path);
+        }
         Ok(swapped)
     }
 
@@ -784,7 +812,11 @@ impl SwapService {
             });
         }
 
-        // See swap_in: dot.envrc is never touched, so there is no marker to clean up.
+        // See swap_in: dot.envrc's content is never touched, so there is no marker to
+        // clean up - only its mtime moves, to wake direnv.
+        if !swapped.is_empty() {
+            self.notify_direnv(&vault.path);
+        }
         Ok(swapped)
     }
 

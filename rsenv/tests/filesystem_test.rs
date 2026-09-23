@@ -3,7 +3,8 @@
 //! TDD: These tests are written BEFORE implementation.
 
 use rsenv::infrastructure::traits::{FileSystem, RealFileSystem};
-use std::fs;
+use std::fs::{self, FileTimes};
+use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 // ============================================================
@@ -314,4 +315,49 @@ fn given_missing_file_when_read_bytes_then_returns_error() {
 
     // Assert
     assert!(result.is_err());
+}
+
+// ============================================================
+// bump_mtime tests
+// ============================================================
+
+#[test]
+fn given_existing_file_when_bump_mtime_then_moves_mtime_and_keeps_content() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("dot.envrc");
+    fs::write(&path, "export FOO=1\n").unwrap();
+
+    let past = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_times(FileTimes::new().set_modified(past))
+        .unwrap();
+
+    let fs_impl = RealFileSystem;
+
+    // Act
+    fs_impl.bump_mtime(&path).unwrap();
+
+    // Assert
+    assert!(fs::metadata(&path).unwrap().modified().unwrap() > past);
+    assert_eq!(fs::read_to_string(&path).unwrap(), "export FOO=1\n");
+}
+
+#[test]
+fn given_missing_file_when_bump_mtime_then_returns_error_without_creating_it() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("nope.envrc");
+
+    let fs_impl = RealFileSystem;
+
+    // Act
+    let result = fs_impl.bump_mtime(&path);
+
+    // Assert - callers rely on "no file, no side effect"
+    assert!(result.is_err());
+    assert!(!path.exists());
 }

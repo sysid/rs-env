@@ -7,8 +7,10 @@
 //! - swap_in MOVES vault to project (vault file removed)
 //! - swap_out MOVES modifications back to vault
 
+use std::fs::FileTimes;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use tempfile::TempDir;
 
@@ -920,6 +922,199 @@ fn given_swap_cycle_when_complete_then_no_swapped_marker_is_written() {
     assert!(
         !content.contains("export RSENV_SWAPPED=1"),
         "RSENV_SWAPPED must be derived at direnv load time, never stored in dot.envrc"
+    );
+}
+
+// ============================================================
+// direnv refresh across shells
+//
+// A swap performed in ONE shell must refresh `RSENV_SWAPPED` in every OTHER shell
+// sitting in the project - a child process cannot write its parent's environment, so
+// direnv has to re-evaluate. direnv reloads when a watched file's mtime changes and
+// always watches the project's `.envrc`, which is a symlink to the vault's dot.envrc.
+// Bumping its mtime is therefore the only handle rsenv has; the bytes stay identical
+// (see the section above), so neither the SOPS hash nor `direnv allow` is affected.
+// ============================================================
+
+/// A fixed point in the past, so "was the mtime bumped?" has an unambiguous answer.
+fn backdate(path: &Path) -> SystemTime {
+    let past = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let file = std::fs::File::options().write(true).open(path).unwrap();
+    file.set_times(FileTimes::new().set_modified(past)).unwrap();
+    past
+}
+
+fn mtime(path: &Path) -> SystemTime {
+    std::fs::metadata(path).unwrap().modified().unwrap()
+}
+
+#[test]
+fn given_vault_override_when_swap_in_then_dot_envrc_mtime_is_bumped() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let project_file = project_dir.join("config.yml");
+    std::fs::write(&project_file, "original: value\n").unwrap();
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override: value\n").unwrap();
+
+    let dot_envrc = vault_path.join("dot.envrc");
+    let before = backdate(&dot_envrc);
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    service.swap_in(&project_dir, &[project_file]).unwrap();
+
+    // Assert
+    assert!(
+        mtime(&dot_envrc) > before,
+        "swap_in must bump dot.envrc's mtime so direnv reloads and re-derives RSENV_SWAPPED"
+    );
+}
+
+#[test]
+fn given_swapped_in_file_when_swap_out_then_dot_envrc_mtime_is_bumped() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let project_file = project_dir.join("config.yml");
+    std::fs::write(&project_file, "original: value\n").unwrap();
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override: value\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+    service
+        .swap_in(&project_dir, &[project_file.clone()])
+        .unwrap();
+
+    let dot_envrc = vault_path.join("dot.envrc");
+    let before = backdate(&dot_envrc);
+
+    // Act
+    service.swap_out(&project_dir, &[project_file]).unwrap();
+
+    // Assert
+    assert!(
+        mtime(&dot_envrc) > before,
+        "swap_out must bump dot.envrc's mtime - this is the `swap out -g` staleness bug"
+    );
+}
+
+#[test]
+fn given_nothing_swapped_in_when_swap_out_vault_then_dot_envrc_mtime_is_unchanged() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    let dot_envrc = vault_path.join("dot.envrc");
+    let before = backdate(&dot_envrc);
+
+    // Act
+    let swapped = service.swap_out_vault(&project_dir).unwrap();
+
+    // Assert - a no-op swap must not churn direnv in every shell
+    assert!(swapped.is_empty());
+    assert_eq!(
+        mtime(&dot_envrc),
+        before,
+        "a swap that changes nothing must not trigger a direnv reload"
+    );
+}
+
+#[test]
+fn given_two_vaults_when_swap_out_all_vaults_then_each_dot_envrc_mtime_is_bumped() {
+    // Arrange - two projects, both swapped in, as `rsenv swap out -g` finds them
+    let temp = TempDir::new().unwrap();
+    let settings = Arc::new(test_settings(temp.path().to_path_buf()));
+    let vaults_dir = settings.vaults_dir();
+    std::fs::create_dir_all(&vaults_dir).unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = VaultService::new(fs.clone(), settings.clone());
+
+    let project1 = temp.path().join("project1");
+    std::fs::create_dir_all(&project1).unwrap();
+    let vault1 = vault_service.init(&project1, false).unwrap();
+    std::fs::write(project1.join("config.yml"), "original1\n").unwrap();
+    std::fs::create_dir_all(vault1.path.join("swap")).unwrap();
+    std::fs::write(vault1.path.join("swap/config.yml"), "override1\n").unwrap();
+
+    let project2 = temp.path().join("project2");
+    std::fs::create_dir_all(&project2).unwrap();
+    let vault2 = vault_service.init(&project2, false).unwrap();
+    std::fs::write(project2.join("other.yml"), "original2\n").unwrap();
+    std::fs::create_dir_all(vault2.path.join("swap")).unwrap();
+    std::fs::write(vault2.path.join("swap/other.yml"), "override2\n").unwrap();
+
+    let service = SwapService::new(fs, Arc::new(vault_service), settings);
+    service
+        .swap_in(&project1, &[project1.join("config.yml")])
+        .unwrap();
+    service
+        .swap_in(&project2, &[project2.join("other.yml")])
+        .unwrap();
+
+    let dot_envrc1 = vault1.path.join("dot.envrc");
+    let dot_envrc2 = vault2.path.join("dot.envrc");
+    let before1 = backdate(&dot_envrc1);
+    let before2 = backdate(&dot_envrc2);
+
+    // Act
+    service.swap_out_all_vaults(&vaults_dir).unwrap();
+
+    // Assert - every affected project's shells must learn about it, not just one
+    assert!(mtime(&dot_envrc1) > before1, "project1 was not refreshed");
+    assert!(mtime(&dot_envrc2) > before2, "project2 was not refreshed");
+}
+
+#[test]
+fn given_swap_cycle_when_complete_then_dot_envrc_mtime_moves_but_bytes_do_not() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let project_file = project_dir.join("config.yml");
+    std::fs::write(&project_file, "original: value\n").unwrap();
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override: value\n").unwrap();
+
+    let dot_envrc = vault_path.join("dot.envrc");
+    let bytes_before = std::fs::read(&dot_envrc).unwrap();
+    let mtime_before = backdate(&dot_envrc);
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    service
+        .swap_in(&project_dir, &[project_file.clone()])
+        .unwrap();
+    service.swap_out(&project_dir, &[project_file]).unwrap();
+
+    // Assert - the whole design rests on this pair holding simultaneously
+    assert!(mtime(&dot_envrc) > mtime_before, "direnv would not reload");
+    assert_eq!(
+        bytes_before,
+        std::fs::read(&dot_envrc).unwrap(),
+        "content must stay byte-identical: its hash is baked into the .enc filename"
     );
 }
 
