@@ -2955,7 +2955,7 @@ dependencies = [
 
 [[package]]
 name = "rsenv"
-version = "6.1.0"
+version = "6.2.0-alpha.0"
 dependencies = [
  "chrono",
  "clap",
