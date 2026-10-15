@@ -29,3 +29,17 @@ filename = "VERSION"
 filename = "./rsenv/Cargo.toml"
 search = 'version = "{current_version}"'
 replace = 'version = "{new_version}"'
+
+# Without this the bump commit leaves Cargo.lock stale: `cargo publish` refuses the dirty
+# tree and `cargo build --locked` fails on the tag. The name line keeps the match on rsenv.
+[[tool.bumpversion.files]]
+filename = "./rsenv/Cargo.lock"
+search = """
+name = "rsenv"
+version = "{current_version}"
+"""
+replace = """
+name = "rsenv"
+version = "{new_version}"
+"""
+regex = false

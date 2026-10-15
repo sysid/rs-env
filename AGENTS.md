@@ -9,7 +9,7 @@ Rust CLI that unifies hierarchical env-var management, file guarding (symlink-to
 - Tests (mandatory flag): `cd rsenv && cargo test -- --test-threads=1`. Single test: append the test name before `--`.
 - Verbose tests with logs: `make test-verbose` (sets `RUST_LOG=DEBUG --nocapture`).
 - Lint pipeline (auto-fixes): `make lint` runs `cargo clippy --fix` then `cargo fix --tests`. Use `make check` for a no-codegen compile check.
-- Release: use `make bump-{major,minor,patch,prenum,pre}` or `make release`. These call `bump-my-version`, which rewrites BOTH `VERSION` and `rsenv/Cargo.toml` and creates the tag.
+- Release: use `make bump-{major,minor,patch,prenum,pre}` or `make release`. These call `bump-my-version`, which rewrites `VERSION`, `rsenv/Cargo.toml` and the `rsenv` entry in `rsenv/Cargo.lock` in one commit and creates the tag.
 
 ## Architectural Invariants
 - I/O traits live in `rsenv/src/infrastructure/traits.rs`: `FileSystem`, `CommandRunner`, `Selector`, `Editor`. Services (`application/services/`) are concrete structs that receive them as `Arc<dyn …>` and MUST NOT call `std::fs` / `std::process` for anything the traits cover. Exception: directory enumeration uses `walkdir` directly, because `FileSystem` has no `read_dir`. `main.rs` (CLI layer) is out of scope.
@@ -20,7 +20,7 @@ Rust CLI that unifies hierarchical env-var management, file guarding (symlink-to
 
 ## Strict Antipatterns
 - NEVER run `cargo test` without `--test-threads=1`. Tests mutate real tempdirs and rely on per-test process state; parallel runs flake non-deterministically.
-- NEVER hand-edit `VERSION` or the `version =` line in `rsenv/Cargo.toml`. Use `make bump-*`; the two files MUST stay in sync.
+- NEVER hand-edit `VERSION` or the `version =` line in `rsenv/Cargo.toml`. Use `make bump-*`; the three files MUST stay in sync (`make test` runs `--locked`, so a stale lockfile fails).
 - NEVER commit a plaintext file that lives inside a vault's `guarded/` tree — `rsenv guard add` does NOT gitignore them, and the vault `.gitignore` only covers SOPS name patterns (`*.env`, `*.envrc`, configured file names), so any other guarded name is visible to `git add`.
 
 ## Gotchas

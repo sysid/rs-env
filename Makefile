@@ -20,7 +20,7 @@ BINARY = rsenv
 
 .PHONY: test
 test:  ## Run all tests (single-threaded, required)
-	cd $(pkg_src) && cargo test -- --test-threads=1
+	cd $(pkg_src) && cargo test --locked -- --test-threads=1
 
 .PHONY: test-verbose
 test-verbose:  ## Run tests with debug logging
