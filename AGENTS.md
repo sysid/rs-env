@@ -21,7 +21,7 @@ Rust CLI that unifies hierarchical env-var management, file guarding (symlink-to
 ## Strict Antipatterns
 - NEVER run `cargo test` without `--test-threads=1`. Tests mutate real tempdirs and rely on per-test process state; parallel runs flake non-deterministically.
 - NEVER hand-edit `VERSION` or the `version =` line in `rsenv/Cargo.toml`. Use `make bump-*`; the two files MUST stay in sync.
-- NEVER commit a plaintext file that lives inside a vault's `guarded/` tree — those are auto-added to `.gitignore` by `rsenv guard add` for a reason.
+- NEVER commit a plaintext file that lives inside a vault's `guarded/` tree — `rsenv guard add` does NOT gitignore them, and the vault `.gitignore` only covers SOPS name patterns (`*.env`, `*.envrc`, configured file names), so any other guarded name is visible to `git add`.
 
 ## Gotchas
 - Dotfiles inside the vault are renamed on entry: `.envrc → dot.envrc`, `.gitignore → dot.gitignore`. Code that walks the vault or constructs vault paths must use the renamed form.

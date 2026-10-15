@@ -383,9 +383,10 @@ fn vault_display_name(sentinel_id: &str) -> &str {
 
 /// Refuse to commit plaintext that belongs behind SOPS.
 ///
-/// The vault repo's `.gitignore` covers `envs/` via `*.env`, but `guarded/` relies on
-/// per-file entries written by `rsenv guard add`. A missing or stale entry would leak
-/// plaintext into a pushed repo, so this sits directly on that trust boundary.
+/// The vault repo's `.gitignore` covers `envs/` via `*.env`, but nothing ignores
+/// `guarded/`: `rsenv guard add` writes no entry, and only guarded files matching a SOPS
+/// name pattern are covered. Anything else would leak plaintext into a pushed repo, so
+/// this sits directly on that trust boundary.
 fn reject_plaintext_secrets(staged: &[StagedChange]) -> ApplicationResult<()> {
     let leaks: Vec<String> = staged
         .iter()
