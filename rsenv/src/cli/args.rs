@@ -186,6 +186,19 @@ pub enum GuardCommands {
         /// File to restore
         file: PathBuf,
     },
+
+    /// Delete guarded files for good: vault copy, ciphertexts and project link
+    ///
+    /// The vault holds the only copy, so this cannot be undone except from committed
+    /// vault history. Use `guard restore` to keep the file instead.
+    Delete {
+        /// Project paths of guarded files (the links), NOT vault paths.
+        /// Dotfiles are matched automatically (e.g. .pypirc → dot.pypirc).
+        files: Vec<PathBuf>,
+        /// Do not ask for confirmation
+        #[arg(short, long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -254,11 +267,19 @@ pub enum SwapCommands {
         silent: bool,
     },
 
-    /// Remove files from swap management (deletes vault override + backup, not the project file)
+    /// Remove entries from the vault; the project returns to its swapped-out state
+    ///
+    /// Swapped out: the vault override, its backup and ciphertexts are deleted, the
+    /// project file is untouched. Swapped in on this host: the swapped-in content is
+    /// discarded and the original restored. Swapped in elsewhere, or unknown paths:
+    /// refused, and nothing is deleted.
     Delete {
         /// Project paths (as you'd pass to `swap in`/`out`), NOT vault paths.
         /// Dotfiles are matched automatically (e.g. .github → dot.github).
         files: Vec<PathBuf>,
+        /// Do not ask for confirmation
+        #[arg(short, long)]
+        yes: bool,
     },
 }
 

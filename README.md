@@ -101,6 +101,7 @@ of the vault content as of swap-in, which is the baseline `rsenv swap diff` comp
 - `rsenv swap status --silent` — exit code only: 0=clean, 1=dirty, 2=unmanaged
 - `rsenv swap diff` — show what changed in swapped-in files since swap-in, as a patch
 - `rsenv swap diff --stat` — same, summary only (no patch)
+- `rsenv swap delete <files>` — remove entries from the vault; the project returns to its swapped-out state (asks first, `-y` skips)
 - `rsenv vault commit` — commit this project's vault data (requires it to be swapped out)
 - `rsenv vault commit -a` — same, with a generated commit message
 
@@ -246,6 +247,7 @@ side effects: `.gitignore` → `dot.gitignore`, `.envrc` → `dot.envrc`.
 - `rsenv guard add <file>` — move to vault, create symlink
 - `rsenv guard list` — show all guarded files
 - `rsenv guard restore <file>` — move back to project
+- `rsenv guard delete <file>` — delete for good: vault copy, ciphertexts and project link (asks first, `-y` skips)
 
 ---
 

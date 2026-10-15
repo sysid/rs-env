@@ -4,7 +4,7 @@
 //! have changed since their last encryption.
 
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::application::{ApplicationError, ApplicationResult};
 
@@ -130,9 +130,42 @@ pub fn is_old_enc_format(enc_path: &Path) -> bool {
 /// let result = encrypted_filename(Path::new("secrets.env"), "a1b2c3d4");
 /// assert_eq!(result.file_name().unwrap().to_str().unwrap(), "secrets.env.a1b2c3d4.enc");
 /// ```
-pub fn encrypted_filename(plaintext: &Path, hash: &str) -> std::path::PathBuf {
+pub fn encrypted_filename(plaintext: &Path, hash: &str) -> PathBuf {
     let name = plaintext.file_name().unwrap().to_str().unwrap();
     plaintext.with_file_name(format!("{}.{}.enc", name, hash))
+}
+
+/// Encrypted versions of `plaintext` that sit next to it, sorted.
+///
+/// Matches `{name}.{hash}.enc` and the old `{name}.enc`, and nothing else: a
+/// `{name}.local.{hash}.enc` belongs to a different plaintext. The plaintext itself
+/// need not exist - after `sops clean` only its ciphertext is left.
+///
+/// Uses `walkdir` directly because `FileSystem` has no `read_dir`.
+pub fn encrypted_siblings(plaintext: &Path) -> Vec<PathBuf> {
+    let (Some(parent), Some(name)) = (
+        plaintext.parent(),
+        plaintext.file_name().and_then(|n| n.to_str()),
+    ) else {
+        return Vec::new();
+    };
+
+    let mut found: Vec<PathBuf> = walkdir::WalkDir::new(parent)
+        .min_depth(1)
+        .max_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.into_path())
+        .filter(|path| match parse_encrypted_filename(path) {
+            Some((parsed_name, _)) => parsed_name == name,
+            None => {
+                is_old_enc_format(path)
+                    && path.file_name().and_then(|n| n.to_str()) == Some(&format!("{name}.enc"))
+            }
+        })
+        .collect();
+    found.sort();
+    found
 }
 
 #[cfg(test)]
@@ -198,5 +231,54 @@ mod tests {
         let path = Path::new("/vault/secrets.env");
         let result = encrypted_filename(path, "a1b2c3d4");
         assert_eq!(result, Path::new("/vault/secrets.env.a1b2c3d4.enc"));
+    }
+
+    #[test]
+    fn given_new_and_old_format_ciphertexts_when_encrypted_siblings_then_both_found() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let plaintext = temp.path().join("secrets.env");
+        std::fs::write(&plaintext, "x").unwrap();
+        std::fs::write(temp.path().join("secrets.env.a1b2c3d4.enc"), "c").unwrap();
+        std::fs::write(temp.path().join("secrets.env.enc"), "c").unwrap();
+
+        let found = encrypted_siblings(&plaintext);
+
+        assert_eq!(
+            found,
+            vec![
+                temp.path().join("secrets.env.a1b2c3d4.enc"),
+                temp.path().join("secrets.env.enc"),
+            ]
+        );
+    }
+
+    #[test]
+    fn given_ciphertext_of_longer_name_when_encrypted_siblings_then_not_matched() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let plaintext = temp.path().join("secrets.env");
+        std::fs::write(temp.path().join("secrets.env.local.a1b2c3d4.enc"), "c").unwrap();
+        std::fs::write(temp.path().join("secrets.env.local.enc"), "c").unwrap();
+
+        assert!(encrypted_siblings(&plaintext).is_empty());
+    }
+
+    #[test]
+    fn given_only_ciphertext_left_when_encrypted_siblings_then_found_without_plaintext() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let plaintext = temp.path().join("id_rsa");
+        std::fs::write(temp.path().join("id_rsa.0badcafe.enc"), "c").unwrap();
+
+        assert_eq!(
+            encrypted_siblings(&plaintext),
+            vec![temp.path().join("id_rsa.0badcafe.enc")]
+        );
+    }
+
+    #[test]
+    fn given_missing_parent_dir_when_encrypted_siblings_then_empty() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let plaintext = temp.path().join("nope/secrets.env");
+
+        assert!(encrypted_siblings(&plaintext).is_empty());
     }
 }

@@ -13,5 +13,5 @@ pub use envrc::{
     delete_section, parse_rsenv_metadata, update_dot_envrc, END_SECTION_DELIMITER,
     START_SECTION_DELIMITER,
 };
-pub use error::{ApplicationError, ApplicationResult};
+pub use error::{ApplicationError, ApplicationResult, DeleteProblem};
 pub use error_ext::IoResultExt;

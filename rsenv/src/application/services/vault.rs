@@ -3,17 +3,36 @@
 //! Handles creation and management of vaults - secure storage locations
 //! for project-specific sensitive files and configurations.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tracing::debug;
 
 use crate::application::dotfile::neutralize_path;
+use crate::application::hash::encrypted_siblings;
 use crate::application::services::environment::{default_env_content, DEFAULT_ENVS};
-use crate::application::{ApplicationError, ApplicationResult, IoResultExt};
+use crate::application::{ApplicationError, ApplicationResult, DeleteProblem, IoResultExt};
 use crate::config::Settings;
 use crate::domain::{GuardedFile, Vault};
 use crate::infrastructure::traits::FileSystem;
+
+/// One validated entry of a `guard delete`. Guarded data has no other copy, so the CLI
+/// shows this plan and asks before [`VaultService::apply_guard_delete`] runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuardDeletion {
+    /// Absolute project path (the guard link, which may be gone).
+    pub project_path: PathBuf,
+    /// Project-relative path in PROJECT-side naming, as the user named it.
+    pub relative: PathBuf,
+    /// Vault copy (`guarded/<neutralized>`).
+    pub vault_path: PathBuf,
+    /// Whether the vault copy exists (after `sops clean` only ciphertext may be left).
+    pub has_vault_file: bool,
+    /// Whether the project path is our guard link and gets removed.
+    pub has_link: bool,
+    /// Ciphertexts of the vault copy (`<name>.<hash>.enc`).
+    pub encrypted: Vec<PathBuf>,
+}
 
 /// Vault management service.
 pub struct VaultService {
@@ -710,6 +729,142 @@ export RSENV_VAULT={vault_var}
             })?;
 
         Ok(())
+    }
+
+    /// Validate a `guard delete` and describe what it would remove. Changes nothing.
+    ///
+    /// Unlike `guard restore`, which brings the file back into the project, delete
+    /// leaves no trace: vault copy, its ciphertexts and the project link all go.
+    ///
+    /// The vault path is computed from the project path, never read from the link, so
+    /// an entry whose link was removed or dangles (after `sops clean`) can still be
+    /// deleted. A project path that is not our guard link is never touched.
+    ///
+    /// All-or-nothing: every refused path is collected into one `DeleteRefused`.
+    pub fn plan_guard_delete(
+        &self,
+        project_dir: &Path,
+        files: &[PathBuf],
+    ) -> ApplicationResult<Vec<GuardDeletion>> {
+        let vault = self
+            .get(project_dir)?
+            .ok_or_else(|| ApplicationError::VaultNotInitialized(project_dir.to_path_buf()))?;
+        let guarded_dir = vault.path.join("guarded");
+        debug!(
+            "plan_guard_delete: project_dir={}, files={:?}",
+            project_dir.display(),
+            files
+        );
+
+        let mut plan = Vec::new();
+        let mut problems = Vec::new();
+
+        for file in files {
+            let project_path = if file.is_absolute() {
+                file.clone()
+            } else {
+                project_dir.join(file)
+            };
+            let relative = project_path
+                .strip_prefix(project_dir)
+                .map_err(|_| ApplicationError::OperationFailed {
+                    context: format!(
+                        "file {} is not within project {}",
+                        project_path.display(),
+                        project_dir.display()
+                    ),
+                    source: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "file not in project",
+                    )),
+                })?
+                .to_path_buf();
+
+            let neutralized = neutralize_path(&relative);
+            let vault_path = guarded_dir.join(&neutralized);
+            let has_vault_file = self.fs.exists_or_is_symlink(&vault_path);
+            let encrypted = encrypted_siblings(&vault_path);
+            let vault_side = has_vault_file || !encrypted.is_empty();
+
+            let project_side = self.fs.exists_or_is_symlink(&project_path);
+            // ponytail: suffix match on the link target, because the target may dangle
+            // and so cannot be canonicalized. Ceiling: a link into ANOTHER vault's
+            // `guarded/<same rel>` would pass; compare canonical vault roots if that matters.
+            let has_link = self.fs.is_symlink(&project_path)
+                && self
+                    .fs
+                    .read_link(&project_path)
+                    .is_ok_and(|t| t.ends_with(Path::new("guarded").join(&neutralized)));
+
+            if project_side && !has_link {
+                problems.push(if vault_side {
+                    DeleteProblem::NotGuardLink { path: relative }
+                } else {
+                    DeleteProblem::NotManaged {
+                        path: relative,
+                        list_cmd: "rsenv guard list",
+                    }
+                });
+                continue;
+            }
+            if !vault_side && !has_link {
+                problems.push(DeleteProblem::NotManaged {
+                    path: relative,
+                    list_cmd: "rsenv guard list",
+                });
+                continue;
+            }
+
+            plan.push(GuardDeletion {
+                project_path,
+                relative,
+                vault_path,
+                has_vault_file,
+                has_link,
+                encrypted,
+            });
+        }
+
+        if !problems.is_empty() {
+            return Err(ApplicationError::DeleteRefused { problems });
+        }
+        Ok(plan)
+    }
+
+    /// Carry out a plan from [`Self::plan_guard_delete`]. The link goes first, so an
+    /// interrupted run never leaves a link pointing at nothing it did not already.
+    pub fn apply_guard_delete(&self, plan: &[GuardDeletion]) -> ApplicationResult<()> {
+        for entry in plan {
+            debug!("apply_guard_delete: {}", entry.relative.display());
+            if entry.has_link {
+                self.fs
+                    .remove_file(&entry.project_path)
+                    .with_path_context("remove guard link", &entry.project_path)?;
+            }
+            if entry.has_vault_file {
+                self.fs
+                    .remove_any(&entry.vault_path)
+                    .with_path_context("delete vault file", &entry.vault_path)?;
+            }
+            for enc in &entry.encrypted {
+                self.fs
+                    .remove_file(enc)
+                    .with_path_context("delete encrypted file", enc)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Delete guarded files for good: [`Self::plan_guard_delete`] then
+    /// [`Self::apply_guard_delete`], without asking.
+    pub fn guard_delete(
+        &self,
+        project_dir: &Path,
+        files: &[PathBuf],
+    ) -> ApplicationResult<Vec<GuardDeletion>> {
+        let plan = self.plan_guard_delete(project_dir, files)?;
+        self.apply_guard_delete(&plan)?;
+        Ok(plan)
     }
 
     /// Reset a vault: restore all guarded files and remove .envrc symlink.

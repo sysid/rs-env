@@ -13,7 +13,7 @@ use tracing::debug;
 use walkdir::WalkDir;
 
 use crate::application::hash::{
-    encrypted_filename, file_hash, is_old_enc_format, parse_encrypted_filename,
+    encrypted_filename, encrypted_siblings, file_hash, is_old_enc_format, parse_encrypted_filename,
 };
 use crate::application::{ApplicationError, ApplicationResult};
 use crate::config::Settings;
@@ -333,46 +333,10 @@ impl SopsService {
 
     /// Delete old encrypted versions of a plaintext file.
     fn delete_old_enc_files(&self, plaintext: &Path) -> ApplicationResult<()> {
-        let parent = plaintext.parent().unwrap_or(Path::new("."));
-        let filename = plaintext
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default();
-
-        // Pattern: {filename}.*.enc or {filename}.enc (old format)
-        for entry in std::fs::read_dir(parent).into_iter().flatten() {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            let path = entry.path();
-            let enc_name = match path.file_name().and_then(|n| n.to_str()) {
-                Some(n) => n,
-                None => continue,
-            };
-
-            // Check if this is an encrypted version of our file
-            if enc_name.starts_with(filename) && enc_name.ends_with(".enc") {
-                // Verify it's for this plaintext (not a different file that happens to start similarly)
-                if let Some((parsed_name, _)) = parse_encrypted_filename(&path) {
-                    if parsed_name == filename {
-                        debug!("delete_old_enc_files: removing {}", path.display());
-                        let _ = self.fs.remove_file(&path);
-                    }
-                } else if is_old_enc_format(&path) {
-                    // Old format: {filename}.enc
-                    let old_plaintext = &enc_name[..enc_name.len() - 4];
-                    if old_plaintext == filename {
-                        debug!(
-                            "delete_old_enc_files: removing old format {}",
-                            path.display()
-                        );
-                        let _ = self.fs.remove_file(&path);
-                    }
-                }
-            }
+        for path in encrypted_siblings(plaintext) {
+            debug!("delete_old_enc_files: removing {}", path.display());
+            let _ = self.fs.remove_file(&path);
         }
-
         Ok(())
     }
 

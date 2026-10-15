@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 use rsenv::application::services::{SwapChangeKind, SwapService, VaultService};
+use rsenv::application::{ApplicationError, DeleteProblem};
 use rsenv::config::Settings;
 use rsenv::domain::SwapState;
 use rsenv::infrastructure::traits::RealFileSystem;
@@ -1587,7 +1588,7 @@ fn given_swapped_out_file_when_delete_then_removes_vault_artifacts() {
 }
 
 #[test]
-fn given_swapped_in_file_when_delete_then_fails_with_hostname() {
+fn given_swapped_in_file_when_delete_then_original_restored_and_vault_cleared() {
     // Arrange
     let temp = TempDir::new().unwrap();
     let (project_dir, vault_path, settings) = setup_project(&temp);
@@ -1604,22 +1605,151 @@ fn given_swapped_in_file_when_delete_then_fails_with_hostname() {
     let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
     let service = SwapService::new(fs, vault_service, settings);
 
-    // Swap in first
     service
         .swap_in(&project_dir, &[project_file.clone()])
         .unwrap();
+    std::fs::write(&project_file, "override, edited while swapped in\n").unwrap();
 
     // Act
-    let result = service.delete(&project_dir, &[project_file]);
+    let deleted = service
+        .delete(&project_dir, &[project_file.clone()])
+        .unwrap();
+
+    // Assert: project is back to its pre-swap state, the vault holds nothing for it
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(
+        std::fs::read_to_string(&project_file).unwrap(),
+        "original\n"
+    );
+    assert!(
+        !swap_dir.join("config.yml").exists(),
+        "override must be gone"
+    );
+    assert!(
+        !swap_dir.join("config.yml.rsenv_original").exists(),
+        "backup must have moved back to the project"
+    );
+    assert!(
+        !swap_dir
+            .join(format!("config.yml@@{}@@rsenv_active", hostname))
+            .exists(),
+        "sentinel must be gone"
+    );
+    assert!(service.status(&project_dir).unwrap().is_empty());
+}
+
+#[test]
+fn given_swapped_in_file_without_original_when_delete_then_project_path_absent() {
+    // Arrange: the override was swapped in where the project had no file at all
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let project_file = project_dir.join("local.yml");
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("local.yml"), "override\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+    service
+        .swap_in(&project_dir, &[project_file.clone()])
+        .unwrap();
+    assert!(project_file.exists());
+
+    // Act
+    service
+        .delete(&project_dir, &[project_file.clone()])
+        .unwrap();
 
     // Assert
-    assert!(result.is_err());
-    let err = result.unwrap_err().to_string();
-    assert!(
-        err.contains("swapped in"),
-        "error should mention swapped in"
+    assert!(!project_file.exists(), "nothing existed before swap-in");
+    assert!(service.status(&project_dir).unwrap().is_empty());
+}
+
+#[test]
+fn given_swapped_in_dotfile_dir_when_delete_then_original_restored_under_real_name() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let project_github = project_dir.join(".github");
+    std::fs::create_dir_all(&project_github).unwrap();
+    std::fs::write(project_github.join("ci.yml"), "original ci\n").unwrap();
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(swap_dir.join("dot.github")).unwrap();
+    std::fs::write(swap_dir.join("dot.github/ci.yml"), "override ci\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+    service
+        .swap_in(&project_dir, &[project_github.clone()])
+        .unwrap();
+
+    // Act
+    service
+        .delete(&project_dir, &[project_github.clone()])
+        .unwrap();
+
+    // Assert
+    assert_eq!(
+        std::fs::read_to_string(project_github.join("ci.yml")).unwrap(),
+        "original ci\n"
     );
-    assert!(err.contains(&hostname), "error should mention hostname");
+    let leftovers: Vec<_> = std::fs::read_dir(&swap_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "swap dir should be empty, got {:?}",
+        leftovers
+    );
+}
+
+#[test]
+fn given_swapped_in_entry_when_plan_delete_then_modified_reflects_edits_since_swap_in() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let clean = project_dir.join("clean.yml");
+    let edited = project_dir.join("edited.yml");
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("clean.yml"), "override\n").unwrap();
+    std::fs::write(swap_dir.join("edited.yml"), "override\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+    service
+        .swap_in(&project_dir, &[clean.clone(), edited.clone()])
+        .unwrap();
+    std::fs::write(&edited, "override plus local edit\n").unwrap();
+
+    // Act
+    let plan = service
+        .plan_delete(&project_dir, &[clean.clone(), edited.clone()])
+        .unwrap();
+
+    // Assert: planning changes nothing, and only the edited entry would lose work
+    assert_eq!(plan.len(), 2);
+    assert!(
+        plan[0].swapped_in() && !plan[0].modified,
+        "clean.yml untouched"
+    );
+    assert!(
+        plan[1].swapped_in() && plan[1].modified,
+        "edited.yml has local edits"
+    );
+    assert!(
+        edited.exists() && clean.exists(),
+        "plan must not delete anything"
+    );
 }
 
 #[test]
@@ -1653,27 +1783,27 @@ fn given_swapped_in_by_other_host_when_delete_then_fails_with_that_hostname() {
 }
 
 #[test]
-fn given_multiple_files_one_swapped_in_when_delete_then_no_deletions_occur() {
+fn given_multiple_files_one_swapped_in_elsewhere_when_delete_then_no_deletions_occur() {
     // Arrange
     let temp = TempDir::new().unwrap();
     let (project_dir, vault_path, settings) = setup_project(&temp);
 
     let file1 = project_dir.join("config1.yml");
     let file2 = project_dir.join("config2.yml");
-    std::fs::write(&file1, "original1\n").unwrap();
-    std::fs::write(&file2, "original2\n").unwrap();
 
     let swap_dir = vault_path.join("swap");
     std::fs::create_dir_all(&swap_dir).unwrap();
     std::fs::write(swap_dir.join("config1.yml"), "override1\n").unwrap();
-    std::fs::write(swap_dir.join("config2.yml"), "override2\n").unwrap();
+    // config2 is swapped in on another machine
+    std::fs::write(
+        swap_dir.join("config2.yml@@other-workstation@@rsenv_active"),
+        "override2\n",
+    )
+    .unwrap();
 
     let fs = Arc::new(RealFileSystem);
     let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
     let service = SwapService::new(fs, vault_service, settings);
-
-    // Swap in only file2
-    service.swap_in(&project_dir, &[file2.clone()]).unwrap();
 
     // Act - try to delete both
     let result = service.delete(&project_dir, &[file1.clone(), file2.clone()]);
@@ -1687,29 +1817,127 @@ fn given_multiple_files_one_swapped_in_when_delete_then_no_deletions_occur() {
 }
 
 #[test]
-fn given_nonexistent_vault_file_when_delete_then_succeeds_idempotently() {
+fn given_unmanaged_path_when_delete_then_refused_as_not_managed() {
+    // Regression: deleting a path the vault knows nothing about used to report
+    // "Deleted 1 files", so a typo looked like success.
     // Arrange
     let temp = TempDir::new().unwrap();
     let (project_dir, vault_path, settings) = setup_project(&temp);
 
     let project_file = project_dir.join("config.yml");
-    // Don't create vault file - it doesn't exist
-
-    let swap_dir = vault_path.join("swap");
-    std::fs::create_dir_all(&swap_dir).unwrap();
-    // swap_dir exists but config.yml doesn't
+    std::fs::create_dir_all(vault_path.join("swap")).unwrap();
 
     let fs = Arc::new(RealFileSystem);
     let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
     let service = SwapService::new(fs, vault_service, settings);
 
-    // Act - delete nonexistent file
-    let deleted = service
-        .delete(&project_dir, &[project_file.clone()])
+    // Act
+    let result = service.delete(&project_dir, &[project_file]);
+
+    // Assert
+    match result {
+        Err(ApplicationError::DeleteRefused { problems }) => assert_eq!(
+            problems,
+            vec![DeleteProblem::NotManaged {
+                path: PathBuf::from("config.yml"),
+                list_cmd: "rsenv swap status",
+            }]
+        ),
+        other => panic!("expected DeleteRefused, got {:?}", other),
+    }
+}
+
+#[test]
+fn given_two_typos_and_one_managed_path_when_delete_then_both_typos_reported_and_nothing_deleted() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("config.yml"), "override\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let result = service.delete(
+        &project_dir,
+        &[
+            project_dir.join("confg.yml"),
+            project_dir.join("config.yml"),
+            project_dir.join("config.yaml"),
+        ],
+    );
+
+    // Assert
+    let err = result.unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("confg.yml") && msg.contains("config.yaml"),
+        "{msg}"
+    );
+    assert!(
+        swap_dir.join("config.yml").exists(),
+        "valid entry must survive"
+    );
+}
+
+#[test]
+fn given_swapped_out_file_with_ciphertext_when_delete_then_ciphertext_removed() {
+    // Without this, the next `sops decrypt` resurrects the deleted override.
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("dot.env"), "A=1\n").unwrap();
+    std::fs::write(swap_dir.join("dot.env.a1b2c3d4.enc"), "cipher\n").unwrap();
+    std::fs::write(swap_dir.join("dot.env.local.a1b2c3d4.enc"), "other\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    service
+        .delete(&project_dir, &[project_dir.join(".env")])
         .unwrap();
 
-    // Assert - should succeed (idempotent)
+    // Assert
+    assert!(!swap_dir.join("dot.env").exists());
+    assert!(!swap_dir.join("dot.env.a1b2c3d4.enc").exists());
+    assert!(
+        swap_dir.join("dot.env.local.a1b2c3d4.enc").exists(),
+        "ciphertext of a different plaintext must survive"
+    );
+}
+
+#[test]
+fn given_only_ciphertext_in_vault_when_delete_then_counts_as_managed_and_removed() {
+    // After `sops clean` the override exists only as ciphertext.
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let (project_dir, vault_path, settings) = setup_project(&temp);
+
+    let swap_dir = vault_path.join("swap");
+    std::fs::create_dir_all(&swap_dir).unwrap();
+    std::fs::write(swap_dir.join("app.env.0badcafe.enc"), "cipher\n").unwrap();
+
+    let fs = Arc::new(RealFileSystem);
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
+    let service = SwapService::new(fs, vault_service, settings);
+
+    // Act
+    let deleted = service
+        .delete(&project_dir, &[project_dir.join("app.env")])
+        .unwrap();
+
+    // Assert
     assert_eq!(deleted.len(), 1);
+    assert!(!swap_dir.join("app.env.0badcafe.enc").exists());
 }
 
 #[test]

@@ -33,7 +33,7 @@ Rust CLI that unifies hierarchical env-var management, file guarding (symlink-to
 
 ## Domain glossary
 - **Vault** — sentinel-identified directory outside the project (default `~/.rsenv/vaults/<name>-<id>/`) that holds env files, guarded secrets, and swap state.
-- **Guard** — permanently move a file into the vault and leave a symlink in the project (reversible only via `guard restore`).
+- **Guard** — permanently move a file into the vault and leave a symlink in the project (reversible only via `guard restore`; `guard delete` destroys vault copy and link).
 - **Swap** — temporarily replace a project file with a vault copy; the original is backed up to `vault/swap/<rel>.rsenv_original`.
 - **Stale** (SOPS) — the plaintext's current SHA-256 no longer matches the hash baked into the encrypted filename.
 

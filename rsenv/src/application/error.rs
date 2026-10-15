@@ -38,12 +38,39 @@ pub enum ApplicationError {
     )]
     ProjectSwappedIn { paths: Vec<String> },
 
+    /// A delete named paths it may not touch. Validation is all-or-nothing, so nothing
+    /// was deleted, and every offending path is reported at once.
+    #[error(
+        "nothing was deleted:\n  {}",
+        problems.iter().map(|p| p.to_string()).collect::<Vec<_>>().join("\n  ")
+    )]
+    DeleteRefused { problems: Vec<DeleteProblem> },
+
     #[error("operation failed: {context}")]
     OperationFailed {
         context: String,
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+}
+
+/// Why one path of a delete request was refused.
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+pub enum DeleteProblem {
+    /// Nothing in the vault belongs to this path.
+    #[error("not managed: {path} (see `{list_cmd}`)")]
+    NotManaged {
+        path: PathBuf,
+        list_cmd: &'static str,
+    },
+
+    /// Swapped in on another machine, whose project we cannot restore from here.
+    #[error("{path}: swapped in by host '{hostname}', swap it out there first")]
+    SwappedInElsewhere { path: PathBuf, hostname: String },
+
+    /// The vault has an entry, but the project path is not the link pointing to it.
+    #[error("{path}: not a guarded link (regular file or foreign symlink), refusing to touch it")]
+    NotGuardLink { path: PathBuf },
 }
 
 /// Result type for application layer operations.

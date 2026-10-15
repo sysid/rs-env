@@ -784,19 +784,7 @@ fn handle_vault_reset(
     if let Some(ref path) = vault_path {
         output::detail(&format!("- Leave vault directory at {}", path.display()));
     }
-    output::prompt(&"Continue? [y/N]");
-    std::io::Write::flush(&mut std::io::stdout()).ok();
-
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input).map_err(|e| {
-        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Io {
-            context: "read confirmation".to_string(),
-            source: e,
-        })
-    })?;
-
-    if !input.trim().eq_ignore_ascii_case("y") {
-        output::info(&"Aborted.");
+    if !confirm_or_abort()? {
         return Ok(());
     }
 
@@ -901,7 +889,110 @@ fn handle_guard(
             output::action("Restored", &file.display());
             Ok(())
         }
+        GuardCommands::Delete { files, yes } => {
+            if files.is_empty() {
+                return Err(rsenv::cli::CliError::Usage("no files specified".into()));
+            }
+            let project_dir = match project_dir {
+                Some(dir) => dir,
+                None => std::env::current_dir().map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Io {
+                        context: "determine current directory".to_string(),
+                        source: e,
+                    })
+                })?,
+            };
+
+            let plan = service
+                .plan_guard_delete(&project_dir, &files)
+                .map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+
+            if !yes {
+                output::header("Will delete from vault:");
+                for entry in &plan {
+                    output::detail(&describe_guard_deletion(entry));
+                }
+                output::detail(
+                    &"⚠ the vault holds the only copy (recoverable only from committed vault history)"
+                        .yellow(),
+                );
+                if !confirm_or_abort()? {
+                    return Ok(());
+                }
+            }
+
+            service.apply_guard_delete(&plan).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            output::info(&format!("Deleted {} guarded files:", plan.len()));
+            for entry in &plan {
+                output::detail(&entry.relative.display());
+            }
+            Ok(())
+        }
     }
+}
+
+/// One plan line for `swap delete`, e.g. `cfg.yml  out  override, 1 encrypted`.
+fn describe_swap_deletion(entry: &rsenv::application::services::SwapDeletion) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if entry.swapped_in() {
+        parts.push("swapped-in content discarded".into());
+        parts.push(if entry.backup_path.is_some() {
+            "original restored".into()
+        } else {
+            "no original, path removed".into()
+        });
+    } else {
+        if entry.has_override {
+            parts.push("override".into());
+        }
+        if entry.backup_path.is_some() {
+            parts.push("stale backup".into());
+        }
+    }
+    if !entry.encrypted.is_empty() {
+        parts.push(format!("{} encrypted", entry.encrypted.len()));
+    }
+    let state = if entry.swapped_in() { "in " } else { "out" };
+    format!(
+        "{}  {}  {}",
+        entry.relative.display(),
+        state,
+        parts.join(", ")
+    )
+}
+
+/// One plan line for `guard delete`, e.g. `id_rsa  vault file, 1 encrypted, project link`.
+fn describe_guard_deletion(entry: &rsenv::application::services::GuardDeletion) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if entry.has_vault_file {
+        parts.push("vault file".into());
+    }
+    if !entry.encrypted.is_empty() {
+        parts.push(format!("{} encrypted", entry.encrypted.len()));
+    }
+    if entry.has_link {
+        parts.push("project link".into());
+    }
+    format!("{}  {}", entry.relative.display(), parts.join(", "))
+}
+
+/// Shared `[y/N]` gate of destructive commands; prints `Aborted.` on anything but `y`.
+fn confirm_or_abort() -> rsenv::cli::CliResult<bool> {
+    let confirmed = output::confirm("Continue? [y/N]").map_err(|e| {
+        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Io {
+            context: "read confirmation".to_string(),
+            source: e,
+        })
+    })?;
+    if !confirmed {
+        output::info(&"Aborted.");
+    }
+    Ok(confirmed)
 }
 
 fn handle_info(
@@ -2119,18 +2210,47 @@ fn handle_swap(
             })?;
             Ok(())
         }
-        SwapCommands::Delete { files } => {
+        SwapCommands::Delete { files, yes } => {
             if files.is_empty() {
                 return Err(rsenv::cli::CliError::Usage("no files specified".into()));
             }
 
-            let deleted = service.delete(&project_dir, &files).map_err(|e| {
+            let plan = service.plan_delete(&project_dir, &files).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
 
-            output::info(&format!("Deleted {} files from swap:", deleted.len()));
-            for file in &deleted {
-                output::detail(&file.project_path.display());
+            if !yes {
+                output::header("Will delete from vault:");
+                for entry in &plan {
+                    output::detail(&describe_swap_deletion(entry));
+                    if entry.modified {
+                        output::detail(
+                            &"      ⚠ modified since swap-in — those edits are lost".yellow(),
+                        );
+                    }
+                }
+                if !confirm_or_abort()? {
+                    return Ok(());
+                }
+            }
+
+            service.apply_delete(&project_dir, &plan).map_err(|e| {
+                rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+            })?;
+
+            output::info(&format!("Deleted {} entries from vault:", plan.len()));
+            for entry in &plan {
+                match (entry.swapped_in(), entry.backup_path.is_some()) {
+                    (true, true) => output::detail(&format!(
+                        "{}  (original restored)",
+                        entry.relative.display()
+                    )),
+                    (true, false) => output::detail(&format!(
+                        "{}  (swapped-in content removed, there was no original)",
+                        entry.relative.display()
+                    )),
+                    (false, _) => output::detail(&entry.relative.display()),
+                }
             }
             Ok(())
         }

@@ -33,9 +33,10 @@ use walkdir::WalkDir;
 use crate::application::dotfile::{
     is_dotfile, neutralize_name, neutralize_path, restore_name, restore_path,
 };
+use crate::application::hash::encrypted_siblings;
 use crate::application::parse_rsenv_metadata;
 use crate::application::services::VaultService;
-use crate::application::{ApplicationError, ApplicationResult, IoResultExt};
+use crate::application::{ApplicationError, ApplicationResult, DeleteProblem, IoResultExt};
 use crate::cli::output;
 use crate::config::Settings;
 use crate::domain::{expand_env_vars, SwapFile, SwapState, Vault, VaultSwapStatus};
@@ -82,6 +83,34 @@ pub struct SwapEntryDiff {
     /// The swapped entry is missing from the project entirely - an interrupted swap-in,
     /// or a manual deletion. Reported as one fact rather than N deletions.
     pub project_root_missing: bool,
+}
+
+/// One validated entry of a `swap delete`: everything `apply_delete` needs, so the CLI
+/// can show the plan and ask before anything changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwapDeletion {
+    /// Absolute project path.
+    pub project_path: PathBuf,
+    /// Project-relative path in PROJECT-side naming, as the user named it.
+    pub relative: PathBuf,
+    /// Vault override path (`swap/<neutralized>`). Absent while swapped in.
+    pub vault_path: PathBuf,
+    /// Whether the override itself exists in the vault.
+    pub has_override: bool,
+    /// Backup of the project original, when present.
+    pub backup_path: Option<PathBuf>,
+    /// Sentinel of a swap-in on THIS host. Other hosts are refused during planning.
+    pub sentinel_path: Option<PathBuf>,
+    /// Ciphertexts of the override (`<name>.<hash>.enc`).
+    pub encrypted: Vec<PathBuf>,
+    /// Swapped in and edited since: those edits never reached the vault and are lost.
+    pub modified: bool,
+}
+
+impl SwapDeletion {
+    pub fn swapped_in(&self) -> bool {
+        self.sentinel_path.is_some()
+    }
 }
 
 /// A sentinel found in a vault's `swap/` directory.
@@ -1692,21 +1721,24 @@ impl SwapService {
         Ok(results)
     }
 
-    /// Delete swap files from vault (remove override and backup).
+    /// Validate a `swap delete` and describe what it would remove. Changes nothing.
     ///
-    /// Removes files from swap management entirely. This deletes:
-    /// - The vault override file: `vault/swap/<rel_path>`
-    /// - The backup file if present: `vault/swap/<rel_path>.rsenv_original`
+    /// After the delete, the entry is no longer swap-managed and the project is in its
+    /// swapped-out state:
     ///
-    /// # Safety
-    /// - Fails if ANY targeted file is swapped in (has sentinel)
-    /// - All-or-nothing: if any file is swapped in, no deletions occur
-    /// - Project files are NOT deleted, only vault artifacts
-    pub fn delete(
+    /// | state            | vault loses                          | project ends as   |
+    /// |------------------|--------------------------------------|-------------------|
+    /// | out              | override, ciphertexts, stray backup  | untouched         |
+    /// | in (this host)   | sentinel, ciphertexts; backup moves  | original restored |
+    /// | in (other host)  | refused                              | untouched         |
+    /// | not managed      | refused                              | untouched         |
+    ///
+    /// All-or-nothing: every refused path is collected into one `DeleteRefused`.
+    pub fn plan_delete(
         &self,
         project_dir: &Path,
         files: &[PathBuf],
-    ) -> ApplicationResult<Vec<SwapFile>> {
+    ) -> ApplicationResult<Vec<SwapDeletion>> {
         let vault = self
             .vault_service
             .get(project_dir)?
@@ -1715,29 +1747,30 @@ impl SwapService {
         // Validate metadata - warn if out of sync
         self.validate_metadata(&vault, project_dir);
 
+        let hostname = Self::get_hostname()?;
         let swap_dir = vault.path.join("swap");
         debug!(
-            "delete: project_dir={}, files={:?}",
+            "plan_delete: project_dir={}, files={:?}",
             project_dir.display(),
             files
         );
 
-        // PHASE 1: Validate ALL files first (all-or-nothing safety)
-        let mut to_delete: Vec<(PathBuf, PathBuf, PathBuf)> = Vec::new(); // (project_file, vault_file, relative)
+        let mut plan = Vec::new();
+        let mut problems = Vec::new();
 
         for file in files {
-            let project_file = if file.is_absolute() {
-                file.clone()
+            let project_path = if file.is_absolute() {
+                sanitize_path(file)
             } else {
-                project_dir.join(file)
+                sanitize_path(&project_dir.join(file))
             };
 
-            let relative = project_file
+            let relative = project_path
                 .strip_prefix(project_dir)
                 .map_err(|_| ApplicationError::OperationFailed {
                     context: format!(
                         "file {} is not within project {}",
-                        project_file.display(),
+                        project_path.display(),
                         project_dir.display()
                     ),
                     source: Box::new(std::io::Error::new(
@@ -1747,57 +1780,132 @@ impl SwapService {
                 })?
                 .to_path_buf();
 
-            // Check if swapped in (fail if any sentinel exists)
-            if let Some((_, hostname)) = self.find_any_sentinel(&swap_dir, &relative) {
-                return Err(ApplicationError::OperationFailed {
-                    context: format!(
-                        "cannot delete {}: swapped in by host '{}', swap out first",
-                        project_file.display(),
-                        hostname
-                    ),
-                    source: Box::new(std::io::Error::new(
-                        std::io::ErrorKind::PermissionDenied,
-                        "file is swapped in",
-                    )),
-                });
-            }
+            let sentinel_path = match self.find_any_sentinel(&swap_dir, &relative) {
+                Some((_, host)) if host != hostname => {
+                    problems.push(DeleteProblem::SwappedInElsewhere {
+                        path: relative,
+                        hostname: host,
+                    });
+                    continue;
+                }
+                Some((path, _)) => Some(path),
+                None => None,
+            };
 
             // Vault stores neutralized dotfiles (e.g. .github → dot.github),
             // matching swap in/out/init. Without this the override is never found.
-            let neutralized_relative = neutralize_path(&relative);
-            let vault_file = swap_dir.join(&neutralized_relative);
-            to_delete.push((project_file, vault_file, relative));
-        }
+            let vault_path = swap_dir.join(neutralize_path(&relative));
+            let has_override = self.fs.exists_or_is_symlink(&vault_path);
+            let backup_path = Some(Self::get_backup_path(&swap_dir, &relative))
+                .filter(|p| self.fs.exists_or_is_symlink(p));
+            let encrypted = encrypted_siblings(&vault_path);
 
-        // PHASE 2: Delete vault artifacts (only if all validations passed)
-        let mut deleted = Vec::new();
-
-        for (project_file, vault_file, relative) in to_delete {
-            // Delete vault override file (if exists - idempotent)
-            if self.fs.exists(&vault_file) {
-                debug!("delete: removing vault file {}", vault_file.display());
-                self.fs
-                    .remove_any(&vault_file)
-                    .with_path_context("delete vault file", &vault_file)?;
+            if sentinel_path.is_none()
+                && !has_override
+                && backup_path.is_none()
+                && encrypted.is_empty()
+            {
+                problems.push(DeleteProblem::NotManaged {
+                    path: relative,
+                    list_cmd: "rsenv swap status",
+                });
+                continue;
             }
 
-            // Delete backup file (if exists - idempotent)
-            let backup_path = Self::get_backup_path(&swap_dir, &relative);
-            if self.fs.exists(&backup_path) {
-                debug!("delete: removing backup {}", backup_path.display());
-                self.fs
-                    .remove_any(&backup_path)
-                    .with_path_context("delete backup", &backup_path)?;
-            }
+            let modified = match &sentinel_path {
+                Some(sentinel) if self.fs.exists_or_is_symlink(&project_path) => {
+                    !self.compare_entry(sentinel, &project_path)?.is_empty()
+                }
+                _ => false,
+            };
 
-            deleted.push(SwapFile {
-                project_path: project_file,
-                vault_path: vault_file,
-                state: SwapState::Out,
+            plan.push(SwapDeletion {
+                project_path,
+                relative,
+                vault_path,
+                has_override,
+                backup_path,
+                sentinel_path,
+                encrypted,
+                modified,
             });
         }
 
-        Ok(deleted)
+        if !problems.is_empty() {
+            return Err(ApplicationError::DeleteRefused { problems });
+        }
+        Ok(plan)
+    }
+
+    /// Carry out a plan from [`Self::plan_delete`].
+    ///
+    /// For a swapped-in entry the project content is removed BEFORE the backup is moved
+    /// back. That needs no temp copy and loses nothing on failure: the original stays in
+    /// the backup until it lands, and the sentinel goes last, so a failed run is still
+    /// "swapped in" and re-running the delete completes it.
+    pub fn apply_delete(&self, project_dir: &Path, plan: &[SwapDeletion]) -> ApplicationResult<()> {
+        for entry in plan {
+            debug!("apply_delete: {}", entry.relative.display());
+
+            if let Some(sentinel) = &entry.sentinel_path {
+                if self.fs.exists_or_is_symlink(&entry.project_path) {
+                    self.fs
+                        .remove_any(&entry.project_path)
+                        .with_path_context("discard swapped-in content", &entry.project_path)?;
+                }
+                if let Some(backup) = &entry.backup_path {
+                    self.fs
+                        .move_path(backup, &entry.project_path)
+                        .map_err(|e| ApplicationError::OperationFailed {
+                            context: format!(
+                                "restore {} from {}",
+                                entry.project_path.display(),
+                                backup.display()
+                            ),
+                            source: Box::new(e),
+                        })?;
+                }
+                self.fs
+                    .remove_any(sentinel)
+                    .with_path_context("remove sentinel", sentinel)?;
+            } else if let Some(backup) = &entry.backup_path {
+                // Swapped out yet a backup exists: left over from an interrupted swap.
+                self.fs
+                    .remove_any(backup)
+                    .with_path_context("delete backup", backup)?;
+            }
+
+            if self.fs.exists_or_is_symlink(&entry.vault_path) {
+                self.fs
+                    .remove_any(&entry.vault_path)
+                    .with_path_context("delete vault file", &entry.vault_path)?;
+            }
+            for enc in &entry.encrypted {
+                self.fs
+                    .remove_file(enc)
+                    .with_path_context("delete encrypted file", enc)?;
+            }
+        }
+
+        // A swapped-in entry just changed state; same direnv refresh as swap_in/swap_out.
+        if plan.iter().any(SwapDeletion::swapped_in) {
+            if let Some(vault) = self.vault_service.get(project_dir)? {
+                self.notify_direnv(&vault.path);
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove entries from swap management: [`Self::plan_delete`] then
+    /// [`Self::apply_delete`], without asking.
+    pub fn delete(
+        &self,
+        project_dir: &Path,
+        files: &[PathBuf],
+    ) -> ApplicationResult<Vec<SwapDeletion>> {
+        let plan = self.plan_delete(project_dir, files)?;
+        self.apply_delete(project_dir, &plan)?;
+        Ok(plan)
     }
 
     /// Get the current swap state of a file by checking vault for sentinel.

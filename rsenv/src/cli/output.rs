@@ -65,3 +65,34 @@ pub fn prompt(msg: &(impl std::fmt::Display + ?Sized)) {
     print!("{} ", msg.to_string().cyan());
     std::io::stdout().flush().ok();
 }
+
+/// Ask a yes/no question. Only `y`/`Y` confirms, so Enter, anything else, or EOF
+/// (non-interactive stdin) aborts - the safe default for destructive commands.
+pub fn confirm(msg: &(impl std::fmt::Display + ?Sized)) -> std::io::Result<bool> {
+    prompt(msg);
+    confirm_from(&mut std::io::stdin().lock())
+}
+
+fn confirm_from(input: &mut impl std::io::BufRead) -> std::io::Result<bool> {
+    let mut answer = String::new();
+    input.read_line(&mut answer)?;
+    Ok(answer.trim().eq_ignore_ascii_case("y"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn given_y_in_any_case_when_confirm_then_true() {
+        assert!(confirm_from(&mut "y\n".as_bytes()).unwrap());
+        assert!(confirm_from(&mut " Y \n".as_bytes()).unwrap());
+    }
+
+    #[test]
+    fn given_enter_other_answer_or_eof_when_confirm_then_false() {
+        assert!(!confirm_from(&mut "\n".as_bytes()).unwrap());
+        assert!(!confirm_from(&mut "yes\n".as_bytes()).unwrap());
+        assert!(!confirm_from(&mut "".as_bytes()).unwrap());
+    }
+}

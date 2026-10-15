@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 
 use rsenv::application::services::VaultService;
+use rsenv::application::{ApplicationError, DeleteProblem};
 use rsenv::config::Settings;
 use rsenv::infrastructure::traits::RealFileSystem;
 
@@ -458,6 +459,212 @@ fn given_non_symlink_when_unguard_then_returns_error() {
 
     // Assert
     assert!(result.is_err());
+}
+
+// ============================================================
+// guard_delete() tests
+// ============================================================
+
+#[test]
+fn given_guarded_file_with_ciphertext_when_guard_delete_then_vault_copy_ciphertext_and_link_removed(
+) {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let secret = project_dir.join("deploy_token");
+    std::fs::write(&secret, "private key\n").unwrap();
+
+    let settings = Arc::new(test_settings(temp.path().to_path_buf()));
+    let service = VaultService::new(Arc::new(RealFileSystem), settings);
+    let vault = service.init(&project_dir, false).unwrap();
+    let guarded = service.guard(&secret, false).unwrap();
+    let enc = vault.path.join("guarded/deploy_token.a1b2c3d4.enc");
+    std::fs::write(&enc, "cipher\n").unwrap();
+
+    // Act
+    let deleted = service
+        .guard_delete(&project_dir, &[secret.clone()])
+        .unwrap();
+
+    // Assert: no trace left on either side
+    assert_eq!(deleted.len(), 1);
+    assert!(!guarded.vault_path.exists(), "vault copy must be gone");
+    assert!(!enc.exists(), "ciphertext must be gone");
+    assert!(
+        std::fs::symlink_metadata(&secret).is_err(),
+        "project symlink must be gone"
+    );
+}
+
+#[test]
+fn given_guarded_file_whose_link_was_removed_when_guard_delete_then_vault_copy_removed() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let secret = project_dir.join("config.yml");
+    std::fs::write(&secret, "secret\n").unwrap();
+
+    let settings = Arc::new(test_settings(temp.path().to_path_buf()));
+    let service = VaultService::new(Arc::new(RealFileSystem), settings);
+    service.init(&project_dir, false).unwrap();
+    let guarded = service.guard(&secret, false).unwrap();
+    std::fs::remove_file(&secret).unwrap();
+
+    // Act
+    service
+        .guard_delete(&project_dir, &[secret.clone()])
+        .unwrap();
+
+    // Assert
+    assert!(!guarded.vault_path.exists());
+}
+
+#[test]
+fn given_only_ciphertext_behind_dangling_link_when_guard_delete_then_both_removed() {
+    // After `sops clean` the plaintext is gone and the project link dangles.
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let secret = project_dir.join("app.env");
+    std::fs::write(&secret, "A=1\n").unwrap();
+
+    let settings = Arc::new(test_settings(temp.path().to_path_buf()));
+    let service = VaultService::new(Arc::new(RealFileSystem), settings);
+    let vault = service.init(&project_dir, false).unwrap();
+    let guarded = service.guard(&secret, false).unwrap();
+    let enc = vault.path.join("guarded/app.env.0badcafe.enc");
+    std::fs::write(&enc, "cipher\n").unwrap();
+    std::fs::remove_file(&guarded.vault_path).unwrap();
+
+    // Act
+    service
+        .guard_delete(&project_dir, &[secret.clone()])
+        .unwrap();
+
+    // Assert
+    assert!(!enc.exists());
+    assert!(std::fs::symlink_metadata(&secret).is_err());
+}
+
+#[test]
+fn given_guarded_dotfile_when_guard_delete_then_neutralized_vault_copy_removed() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let pypirc = project_dir.join(".pypirc");
+    std::fs::write(&pypirc, "token\n").unwrap();
+
+    let settings = Arc::new(test_settings(temp.path().to_path_buf()));
+    let service = VaultService::new(Arc::new(RealFileSystem), settings);
+    let vault = service.init(&project_dir, false).unwrap();
+    service.guard(&pypirc, false).unwrap();
+    assert!(vault.path.join("guarded/dot.pypirc").exists());
+
+    // Act
+    service
+        .guard_delete(&project_dir, &[pypirc.clone()])
+        .unwrap();
+
+    // Assert
+    assert!(!vault.path.join("guarded/dot.pypirc").exists());
+    assert!(std::fs::symlink_metadata(&pypirc).is_err());
+}
+
+#[test]
+fn given_unguarded_regular_file_when_guard_delete_then_refused_as_not_managed() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let plain = project_dir.join("notes.md");
+    std::fs::write(&plain, "keep me\n").unwrap();
+
+    let settings = Arc::new(test_settings(temp.path().to_path_buf()));
+    let service = VaultService::new(Arc::new(RealFileSystem), settings);
+    service.init(&project_dir, false).unwrap();
+
+    // Act
+    let result = service.guard_delete(&project_dir, &[plain.clone()]);
+
+    // Assert
+    match result {
+        Err(ApplicationError::DeleteRefused { problems }) => assert_eq!(
+            problems,
+            vec![DeleteProblem::NotManaged {
+                path: PathBuf::from("notes.md"),
+                list_cmd: "rsenv guard list",
+            }]
+        ),
+        other => panic!("expected DeleteRefused, got {:?}", other),
+    }
+    assert_eq!(std::fs::read_to_string(&plain).unwrap(), "keep me\n");
+}
+
+#[test]
+fn given_regular_file_shadowing_vault_entry_when_guard_delete_then_refused_and_both_kept() {
+    // The project file is not the guard link, so it may hold different, live data.
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let secret = project_dir.join("config.yml");
+    std::fs::write(&secret, "secret\n").unwrap();
+
+    let settings = Arc::new(test_settings(temp.path().to_path_buf()));
+    let service = VaultService::new(Arc::new(RealFileSystem), settings);
+    service.init(&project_dir, false).unwrap();
+    let guarded = service.guard(&secret, false).unwrap();
+    std::fs::remove_file(&secret).unwrap();
+    std::fs::write(&secret, "new local file\n").unwrap();
+
+    // Act
+    let result = service.guard_delete(&project_dir, &[secret.clone()]);
+
+    // Assert
+    match result {
+        Err(ApplicationError::DeleteRefused { problems }) => assert_eq!(
+            problems,
+            vec![DeleteProblem::NotGuardLink {
+                path: PathBuf::from("config.yml"),
+            }]
+        ),
+        other => panic!("expected DeleteRefused, got {:?}", other),
+    }
+    assert!(guarded.vault_path.exists());
+    assert_eq!(
+        std::fs::read_to_string(&secret).unwrap(),
+        "new local file\n"
+    );
+}
+
+#[test]
+fn given_one_guarded_and_one_unmanaged_path_when_guard_delete_then_nothing_deleted() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let secret = project_dir.join("config.yml");
+    std::fs::write(&secret, "secret\n").unwrap();
+
+    let settings = Arc::new(test_settings(temp.path().to_path_buf()));
+    let service = VaultService::new(Arc::new(RealFileSystem), settings);
+    service.init(&project_dir, false).unwrap();
+    let guarded = service.guard(&secret, false).unwrap();
+
+    // Act
+    let result = service.guard_delete(
+        &project_dir,
+        &[secret.clone(), project_dir.join("typo.yml")],
+    );
+
+    // Assert
+    assert!(result.is_err());
+    assert!(guarded.vault_path.exists(), "all-or-nothing");
+    assert!(secret.is_symlink());
 }
 
 // ============================================================
