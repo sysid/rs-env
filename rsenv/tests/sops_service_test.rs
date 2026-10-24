@@ -531,3 +531,199 @@ fn given_old_format_enc_without_plaintext_when_status_then_orphaned() {
 // gitignore tests - moved to gitignore_service_test.rs
 // ============================================================
 // NOTE: These tests have been migrated to the dedicated GitignoreService test file.
+
+// ============================================================
+// decrypt_all() tests: never overwrite a plaintext that differs
+// ============================================================
+
+/// Stands in for the `sops` binary: "decrypts" by writing a marker into the
+/// `--output` file, or fails like sops does for inputs containing `fail_marker`.
+struct FakeSops {
+    fail_marker: Option<&'static str>,
+}
+
+impl rsenv::infrastructure::traits::CommandRunner for FakeSops {
+    fn run(&self, _cmd: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
+        use std::os::unix::process::ExitStatusExt;
+        let input = *args.last().unwrap();
+        if self.fail_marker.is_some_and(|m| input.contains(m)) {
+            return Ok(std::process::Output {
+                status: std::process::ExitStatus::from_raw(1 << 8),
+                stdout: vec![],
+                stderr: b"Failed to get the data key".to_vec(),
+            });
+        }
+        let output = args[args.iter().position(|a| *a == "--output").unwrap() + 1];
+        std::fs::write(output, format!("decrypted from {input}"))?;
+        Ok(std::process::Output {
+            status: std::process::ExitStatus::from_raw(0),
+            stdout: vec![],
+            stderr: vec![],
+        })
+    }
+
+    fn run_with_stdin(
+        &self,
+        _cmd: &str,
+        _args: &[&str],
+        _stdin: &str,
+    ) -> std::io::Result<std::process::Output> {
+        unimplemented!("not used by decrypt")
+    }
+
+    fn run_interactive(
+        &self,
+        _cmd: &str,
+        _args: &[&str],
+    ) -> std::io::Result<std::process::ExitStatus> {
+        unimplemented!("not used by decrypt")
+    }
+}
+
+fn decrypt_service(dir: &std::path::Path, fail_marker: Option<&'static str>) -> SopsService {
+    let settings = Arc::new(test_settings(dir.to_path_buf(), test_sops_config()));
+    SopsService::new(
+        Arc::new(RealFileSystem),
+        Arc::new(FakeSops { fail_marker }),
+        settings,
+    )
+}
+
+/// Ciphertext name rsenv would give `content` stored as `name`.
+fn enc_name(name: &str, content: &str) -> String {
+    format!(
+        "{name}.{}.enc",
+        rsenv::application::hash::content_hash(content.as_bytes())
+    )
+}
+
+#[test]
+fn given_missing_plaintext_when_decrypt_all_then_decrypted() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::write(dir.join(enc_name("app.env", "KEY=1")), "ciphertext").unwrap();
+    let service = decrypt_service(dir, None);
+
+    // Act
+    let report = service.decrypt_all(Some(dir), false).unwrap();
+
+    // Assert
+    assert_eq!(report.decrypted, vec![dir.join("app.env")]);
+    assert!(report.kept.is_empty() && report.up_to_date.is_empty() && report.failed.is_empty());
+    assert!(dir.join("app.env").exists());
+}
+
+#[test]
+fn given_plaintext_matching_ciphertext_hash_when_decrypt_all_then_left_untouched() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::write(dir.join("app.env"), "KEY=1").unwrap();
+    std::fs::write(dir.join(enc_name("app.env", "KEY=1")), "ciphertext").unwrap();
+    let service = decrypt_service(dir, None);
+
+    // Act
+    let report = service.decrypt_all(Some(dir), false).unwrap();
+
+    // Assert
+    assert_eq!(report.up_to_date, vec![dir.join("app.env")]);
+    assert!(report.decrypted.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("app.env")).unwrap(),
+        "KEY=1"
+    );
+}
+
+/// The plaintext was edited after the last encrypt: decrypting would silently
+/// revert the edit to the older ciphertext.
+#[test]
+fn given_plaintext_edited_since_encrypt_when_decrypt_all_then_kept_and_reported() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::write(dir.join("app.env"), "KEY=edited").unwrap();
+    let enc = dir.join(enc_name("app.env", "KEY=1"));
+    std::fs::write(&enc, "ciphertext").unwrap();
+    let service = decrypt_service(dir, None);
+
+    // Act
+    let report = service.decrypt_all(Some(dir), false).unwrap();
+
+    // Assert
+    assert_eq!(report.kept, vec![enc]);
+    assert!(report.decrypted.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("app.env")).unwrap(),
+        "KEY=edited"
+    );
+}
+
+/// An old-format `X.enc` carries no hash, so an existing plaintext cannot be
+/// shown to be identical: keep it.
+#[test]
+fn given_old_format_enc_with_existing_plaintext_when_decrypt_all_then_kept() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::write(dir.join("app.env"), "KEY=1").unwrap();
+    std::fs::write(dir.join("app.env.enc"), "ciphertext").unwrap();
+    let service = decrypt_service(dir, None);
+
+    // Act
+    let report = service.decrypt_all(Some(dir), false).unwrap();
+
+    // Assert
+    assert_eq!(report.kept, vec![dir.join("app.env.enc")]);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("app.env")).unwrap(),
+        "KEY=1"
+    );
+}
+
+#[test]
+fn given_force_when_decrypt_all_then_differing_plaintext_overwritten() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::write(dir.join("app.env"), "KEY=edited").unwrap();
+    std::fs::write(dir.join(enc_name("app.env", "KEY=1")), "ciphertext").unwrap();
+    let service = decrypt_service(dir, None);
+
+    // Act
+    let report = service.decrypt_all(Some(dir), true).unwrap();
+
+    // Assert
+    assert_eq!(report.decrypted, vec![dir.join("app.env")]);
+    assert!(report.kept.is_empty());
+    assert_ne!(
+        std::fs::read_to_string(dir.join("app.env")).unwrap(),
+        "KEY=edited"
+    );
+}
+
+/// One broken ciphertext must not stop the run: the others are decrypted and the
+/// failure is reported with sops' message.
+#[test]
+fn given_one_sops_failure_when_decrypt_all_then_others_decrypted_and_failure_reported() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    let broken = dir.join(enc_name("broken.env", "X=1"));
+    std::fs::write(&broken, "ciphertext").unwrap();
+    std::fs::write(dir.join(enc_name("good.env", "Y=1")), "ciphertext").unwrap();
+    let service = decrypt_service(dir, Some("broken"));
+
+    // Act
+    let report = service.decrypt_all(Some(dir), false).unwrap();
+
+    // Assert
+    assert_eq!(report.decrypted, vec![dir.join("good.env")]);
+    assert_eq!(report.failed.len(), 1);
+    assert_eq!(report.failed[0].0, broken);
+    assert!(
+        report.failed[0].1.contains("Failed to get the data key"),
+        "{}",
+        report.failed[0].1
+    );
+}

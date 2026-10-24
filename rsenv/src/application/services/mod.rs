@@ -13,7 +13,7 @@ mod vault_commit;
 
 pub use environment::{EnvHierarchy, EnvOutput, EnvironmentService, MultiParentFile};
 pub use gitignore::{GitignoreDiff, GitignoreService, GitignoreStatus, VaultGitignoreStatus};
-pub use sops::SopsService;
+pub use sops::{DecryptOutcome, DecryptReport, SopsService};
 pub use swap::{is_binary, SwapChange, SwapChangeKind, SwapDeletion, SwapEntryDiff, SwapService};
 pub use vault::{GuardDeletion, VaultService};
 pub use vault_commit::{

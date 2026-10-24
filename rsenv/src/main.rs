@@ -13,8 +13,8 @@ use tracing_subscriber::EnvFilter;
 use colored::Colorize;
 use rsenv::application::envrc::update_vars_section;
 use rsenv::application::services::{
-    CommitOptions, EnvironmentService, GitignoreService, ProjectCommit, SopsService, SwapService,
-    VaultCommitService, VaultService,
+    CommitOptions, DecryptOutcome, EnvironmentService, GitignoreService, ProjectCommit,
+    SopsService, SwapService, VaultCommitService, VaultService,
 };
 use rsenv::cli::args::{
     Cli, Commands, ConfigCommands, EnvCommands, GuardCommands, HookCommands, SopsCommands,
@@ -1303,31 +1303,77 @@ fn handle_sops(
             dir,
             global,
             vault_base,
+            force,
         } => {
             if let Some(file_path) = file {
                 // File-level: decrypt single file
                 output::header(&format!("Decrypting: {}", file_path.display()));
-                let result = service.decrypt_file(&file_path).map_err(|e| {
+                let outcome = service.decrypt(&file_path, force).map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
                 })?;
-                output::success(&format!("Created: {}", result.display()));
+                match outcome {
+                    DecryptOutcome::Decrypted(path) => {
+                        output::success(&format!("Created: {}", path.display()))
+                    }
+                    DecryptOutcome::UpToDate(path) => {
+                        output::info(&format!("Already up to date: {}", path.display()))
+                    }
+                    DecryptOutcome::Kept { plaintext } => {
+                        return Err(rsenv::cli::CliError::Usage(format!(
+                            "{} exists and differs from {}; not overwritten (use --force)",
+                            plaintext.display(),
+                            file_path.display()
+                        )));
+                    }
+                }
             } else {
                 // Directory/vault/global level
                 let vault_base_dir = vault_base.unwrap_or_else(|| settings.vaults_dir());
                 let base_dir =
                     resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
                 output::header(&format!("Decrypting in: {}", base_dir.display()));
-                let decrypted = service.decrypt_all(Some(&base_dir)).map_err(|e| {
+                let report = service.decrypt_all(Some(&base_dir), force).map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
                 })?;
 
-                if decrypted.is_empty() {
+                if report.decrypted.is_empty() && report.kept.is_empty() && report.failed.is_empty()
+                {
                     output::info(&"No files to decrypt");
-                } else {
-                    output::info(&format!("Decrypted {} files:", decrypted.len()));
-                    for path in &decrypted {
+                }
+                if !report.decrypted.is_empty() {
+                    output::info(&format!("Decrypted {} files:", report.decrypted.len()));
+                    for path in &report.decrypted {
                         output::detail(&path.display());
                     }
+                }
+                if !report.up_to_date.is_empty() {
+                    output::info(&format!(
+                        "Already up to date: {} files",
+                        report.up_to_date.len()
+                    ));
+                }
+                // Listed last so they are what the user sees when the run ends.
+                if !report.kept.is_empty() {
+                    // stdout like the list below: `warning` goes to stderr and would split them.
+                    output::info(&format!(
+                        "Not decrypted, existing plaintext differs ({}; use --force to overwrite):",
+                        report.kept.len()
+                    ));
+                    for path in &report.kept {
+                        output::detail(&path.display());
+                    }
+                }
+                if !report.failed.is_empty() {
+                    output::failure(&format!("Failed ({}):", report.failed.len()));
+                    for (path, message) in &report.failed {
+                        output::detail(&format!("{}: {}", path.display(), message));
+                    }
+                    return Err(rsenv::cli::CliError::Infra(
+                        rsenv::infrastructure::InfraError::Sops {
+                            message: format!("{} files failed to decrypt", report.failed.len()),
+                            exit_code: None,
+                        },
+                    ));
                 }
             }
             Ok(())

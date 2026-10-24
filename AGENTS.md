@@ -13,7 +13,7 @@ Rust CLI that unifies hierarchical env-var management, file guarding (symlink-to
 
 ## Architectural Invariants
 - I/O traits live in `rsenv/src/infrastructure/traits.rs`: `FileSystem`, `CommandRunner`, `Selector`, `Editor`. Services (`application/services/`) are concrete structs that receive them as `Arc<dyn …>` and MUST NOT call `std::fs` / `std::process` for anything the traits cover. Exception: directory enumeration uses `walkdir` directly, because `FileSystem` has no `read_dir`. `main.rs` (CLI layer) is out of scope.
-- Tests exercise `FileSystem` against a real `TempDir` with `RealFileSystem`; there is no mock filesystem, by choice. Only `Selector` and `Editor` are mocked (`tests/selector_test.rs`, `tests/editor_test.rs`).
+- Tests exercise `FileSystem` against a real `TempDir` with `RealFileSystem`; there is no mock filesystem, by choice. Only `Selector` and `Editor` are mocked (`tests/selector_test.rs`, `tests/editor_test.rs`), plus a test-local `FakeSops` `CommandRunner` in `tests/sops_service_test.rs`, because real sops needs a key the test environment does not have.
 - Error layering is strict and one-way: `DomainError → ApplicationError → InfraError → CliError`. NEVER let a lower layer depend on a higher one.
 - Services are constructed in the `main.rs` command handlers, which inject their dependencies. NEVER introduce globals, `lazy_static` services, or hand-rolled singletons.
 - The `# rsenv: parent.env` directive at the top of env files is the v1 wire format. It is locked for backward compatibility — do NOT change its syntax or parsing semantics.

@@ -358,6 +358,10 @@ pub enum SopsCommands {
         /// Override vaults directory (requires --global)
         #[arg(long, requires = "global")]
         vault_base: Option<PathBuf>,
+        /// Overwrite existing plaintext that differs from its ciphertext
+        /// (by default such files are kept and listed)
+        #[arg(long)]
+        force: bool,
     },
 
     /// Delete unencrypted originals

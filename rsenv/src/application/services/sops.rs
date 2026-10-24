@@ -21,6 +21,32 @@ use crate::domain::{SopsStatus, StaleFile};
 use crate::infrastructure::traits::{CommandRunner, FileSystem};
 use crate::infrastructure::InfraError;
 
+/// Outcome of a directory-wide decrypt. The run never stops at one file: every
+/// `.enc` ends up in exactly one list.
+#[derive(Debug, Default)]
+pub struct DecryptReport {
+    /// Plaintext written (it was missing, or `force` was set).
+    pub decrypted: Vec<PathBuf>,
+    /// Plaintext already identical to the ciphertext (hash match); not touched.
+    pub up_to_date: Vec<PathBuf>,
+    /// Ciphertexts NOT decrypted because their plaintext exists and differs, or
+    /// cannot be verified (old `X.enc` format). Decrypting would overwrite it.
+    pub kept: Vec<PathBuf>,
+    /// Ciphertexts sops failed on, with the error message.
+    pub failed: Vec<(PathBuf, String)>,
+}
+
+/// What decrypting one ciphertext did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DecryptOutcome {
+    Decrypted(PathBuf),
+    UpToDate(PathBuf),
+    /// Existing plaintext differs (or is unverifiable) and was left alone.
+    Kept {
+        plaintext: PathBuf,
+    },
+}
+
 /// SOPS encryption/decryption service.
 pub struct SopsService {
     fs: Arc<dyn FileSystem>,
@@ -352,28 +378,7 @@ impl SopsService {
     pub fn decrypt_file(&self, input: &Path) -> ApplicationResult<PathBuf> {
         debug!("decrypt_file: input={}", input.display());
 
-        let input_str = input.to_string_lossy();
-        if !input_str.ends_with(".enc") {
-            return Err(ApplicationError::OperationFailed {
-                context: format!("file does not have .enc extension: {}", input.display()),
-                source: Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "expected .enc file",
-                )),
-            });
-        }
-
-        // Determine output path based on format
-        let output = if let Some((plaintext_name, _hash)) = parse_encrypted_filename(input) {
-            // New format: {name}.{hash}.enc -> {name}
-            input
-                .parent()
-                .unwrap_or(Path::new("."))
-                .join(plaintext_name)
-        } else {
-            // Old format: {name}.enc -> {name}
-            PathBuf::from(&input_str[..input_str.len() - 4])
-        };
+        let output = Self::plaintext_path(input)?;
 
         let is_dotenv = Self::is_dotenv_file(&output);
         let mut args: Vec<&str> = vec!["-d"];
@@ -453,21 +458,76 @@ impl SopsService {
         Ok(outputs)
     }
 
+    /// Plaintext path a ciphertext decrypts to.
+    ///
+    /// New format `{name}.{hash}.enc` -> `{name}`; old format `{name}.enc` -> `{name}`.
+    fn plaintext_path(input: &Path) -> ApplicationResult<PathBuf> {
+        let input_str = input.to_string_lossy();
+        let Some(without_enc) = input_str.strip_suffix(".enc") else {
+            return Err(ApplicationError::OperationFailed {
+                context: format!("file does not have .enc extension: {}", input.display()),
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "expected .enc file",
+                )),
+            });
+        };
+        Ok(match parse_encrypted_filename(input) {
+            Some((plaintext_name, _hash)) => input
+                .parent()
+                .unwrap_or(Path::new("."))
+                .join(plaintext_name),
+            None => PathBuf::from(without_enc),
+        })
+    }
+
+    /// Decrypt one ciphertext without clobbering a plaintext that differs from it.
+    ///
+    /// An existing plaintext is only overwritten with `force`: it may hold edits made
+    /// since the last encrypt, which decrypting would silently revert. Identity is
+    /// proven by the hash in the ciphertext name; an old-format `X.enc` has none, so
+    /// its existing plaintext is kept as well.
+    pub fn decrypt(&self, input: &Path, force: bool) -> ApplicationResult<DecryptOutcome> {
+        let plaintext = Self::plaintext_path(input)?;
+        if self.fs.exists(&plaintext) {
+            let matches = match parse_encrypted_filename(input) {
+                Some((_, enc_hash)) => file_hash(&plaintext)? == enc_hash,
+                None => false,
+            };
+            if matches {
+                debug!("decrypt: up to date: {}", plaintext.display());
+                return Ok(DecryptOutcome::UpToDate(plaintext));
+            }
+            if !force {
+                debug!(
+                    "decrypt: keeping differing plaintext: {}",
+                    plaintext.display()
+                );
+                return Ok(DecryptOutcome::Kept { plaintext });
+            }
+        }
+        self.decrypt_file(input).map(DecryptOutcome::Decrypted)
+    }
+
     /// Decrypt all .enc files in a directory.
     ///
-    /// Uses parallel execution with rayon.
+    /// Uses parallel execution with rayon. Never stops at a failing file: every
+    /// ciphertext is reported in exactly one list of the returned report.
     ///
     /// # Arguments
     /// * `base_dir` - Directory to process (defaults to vault if None)
-    ///
-    /// # Returns
-    /// Vec of decrypted output file paths
-    pub fn decrypt_all(&self, base_dir: Option<&Path>) -> ApplicationResult<Vec<PathBuf>> {
+    /// * `force` - Overwrite existing plaintext that differs from its ciphertext
+    pub fn decrypt_all(
+        &self,
+        base_dir: Option<&Path>,
+        force: bool,
+    ) -> ApplicationResult<DecryptReport> {
         debug!(
-            "decrypt_all: base_dir={}",
+            "decrypt_all: base_dir={}, force={}",
             base_dir
                 .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "default".into())
+                .unwrap_or_else(|| "default".into()),
+            force
         );
         let dir = base_dir
             .map(PathBuf::from)
@@ -475,20 +535,33 @@ impl SopsService {
 
         let files = self.collect_files(&dir, &self.settings.sops.file_extensions_dec, &[])?;
 
-        // Parallel decryption
-        let results: Vec<ApplicationResult<PathBuf>> = files
+        let outcomes: Vec<(PathBuf, ApplicationResult<DecryptOutcome>)> = files
             .par_iter()
-            .map(|path| self.decrypt_file(path))
+            .map(|path| (path.clone(), self.decrypt(path, force)))
             .collect();
 
-        // Collect successes, propagate first error
-        let mut outputs = Vec::new();
-        for result in results {
-            outputs.push(result?);
+        let mut report = DecryptReport::default();
+        for (enc, outcome) in outcomes {
+            match outcome {
+                Ok(DecryptOutcome::Decrypted(p)) => report.decrypted.push(p),
+                Ok(DecryptOutcome::UpToDate(p)) => report.up_to_date.push(p),
+                Ok(DecryptOutcome::Kept { .. }) => report.kept.push(enc),
+                Err(e) => report.failed.push((enc, e.to_string())),
+            }
         }
+        report.decrypted.sort();
+        report.up_to_date.sort();
+        report.kept.sort();
+        report.failed.sort();
 
-        debug!("decrypt_all: decrypted {} files", outputs.len());
-        Ok(outputs)
+        debug!(
+            "decrypt_all: decrypted={}, up_to_date={}, kept={}, failed={}",
+            report.decrypted.len(),
+            report.up_to_date.len(),
+            report.kept.len(),
+            report.failed.len()
+        );
+        Ok(report)
     }
 
     /// Delete plaintext files that have current (hash-matching) encrypted versions.
