@@ -349,13 +349,15 @@ impl Settings {
     /// `RSENV_EDITOR` is silently ignored.
     ///
     /// Env vars replace values (not merge) - they are explicit user overrides.
+    /// List settings are comma-separated (`RSENV__SOPS__FILE_NAMES_ENC=a,b`);
+    /// an empty value clears the list.
     fn apply_env_overrides(mut settings: Self) -> Result<Self, ApplicationError> {
-        // Use config crate just for env var parsing
-        let builder = Config::builder().add_source(
-            Environment::with_prefix("RSENV")
-                .separator("__")
-                .list_separator(","),
-        );
+        // Use config crate just for env var parsing. Values stay plain strings and
+        // lists are split by `env_list`: the crate's own list support needs
+        // `try_parsing`, which also coerces numeric/bool-looking values (e.g. an
+        // all-digit key id would turn into a float).
+        let builder =
+            Config::builder().add_source(Environment::with_prefix("RSENV").separator("__"));
 
         let config = builder.build().map_err(config_err)?;
 
@@ -372,16 +374,16 @@ impl Settings {
         if let Ok(val) = config.get_string("sops.age_key") {
             settings.sops.age_key = Some(val);
         }
-        if let Ok(val) = config.get::<Vec<String>>("sops.file_extensions_enc") {
+        if let Some(val) = env_list(&config, "sops.file_extensions_enc") {
             settings.sops.file_extensions_enc = val;
         }
-        if let Ok(val) = config.get::<Vec<String>>("sops.file_names_enc") {
+        if let Some(val) = env_list(&config, "sops.file_names_enc") {
             settings.sops.file_names_enc = val;
         }
-        if let Ok(val) = config.get::<Vec<String>>("sops.file_extensions_dec") {
+        if let Some(val) = env_list(&config, "sops.file_extensions_dec") {
             settings.sops.file_extensions_dec = val;
         }
-        if let Ok(val) = config.get::<Vec<String>>("sops.file_names_dec") {
+        if let Some(val) = env_list(&config, "sops.file_names_dec") {
             settings.sops.file_names_dec = val;
         }
         if let Ok(val) = config.get_bool("sops.encrypt_on_commit") {
@@ -541,6 +543,17 @@ fn config_err(e: ConfigError) -> ApplicationError {
     ApplicationError::Config {
         message: e.to_string(),
     }
+}
+
+/// Read a comma-separated env override as a list: items are trimmed, empty items dropped.
+fn env_list(config: &Config, key: &str) -> Option<Vec<String>> {
+    config.get_string(key).ok().map(|raw| {
+        raw.split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(String::from)
+            .collect()
+    })
 }
 
 #[cfg(test)]

@@ -354,3 +354,102 @@ fn given_config_file_when_loaded_then_it_beats_the_environment() {
         "an explicit config must outrank an inherited environment"
     );
 }
+
+// ============================================================
+// RSENV__* environment overrides
+// ============================================================
+
+/// Sets the given env vars for the duration of `body`, then restores them.
+/// Serialised by the mandatory `--test-threads=1`; these mutate process env.
+fn with_env<T>(vars: &[(&str, &str)], body: impl FnOnce() -> T) -> T {
+    let previous: Vec<(String, Option<String>)> = vars
+        .iter()
+        .map(|(k, _)| (k.to_string(), std::env::var(k).ok()))
+        .collect();
+    for (k, v) in vars {
+        std::env::set_var(k, v);
+    }
+    let result = body();
+    for (k, prev) in previous {
+        match prev {
+            Some(v) => std::env::set_var(&k, v),
+            None => std::env::remove_var(&k),
+        }
+    }
+    result
+}
+
+#[test]
+fn given_comma_separated_file_names_env_when_load_then_replaces_list() {
+    let settings = with_env(
+        &[("RSENV__SOPS__FILE_NAMES_ENC", "restic.pw,kube_config")],
+        || Settings::load(None).expect("load settings"),
+    );
+
+    assert_eq!(
+        settings.sops.file_names_enc,
+        vec!["restic.pw".to_string(), "kube_config".to_string()]
+    );
+}
+
+#[test]
+fn given_single_value_extensions_env_when_load_then_list_of_one() {
+    let settings = with_env(&[("RSENV__SOPS__FILE_EXTENSIONS_ENC", "yaml")], || {
+        Settings::load(None).expect("load settings")
+    });
+
+    assert_eq!(settings.sops.file_extensions_enc, vec!["yaml".to_string()]);
+}
+
+#[test]
+fn given_decrypt_list_envs_when_load_then_both_replaced() {
+    let settings = with_env(
+        &[
+            ("RSENV__SOPS__FILE_EXTENSIONS_DEC", "enc,sops"),
+            ("RSENV__SOPS__FILE_NAMES_DEC", "secret.bin"),
+        ],
+        || Settings::load(None).expect("load settings"),
+    );
+
+    assert_eq!(
+        settings.sops.file_extensions_dec,
+        vec!["enc".to_string(), "sops".to_string()]
+    );
+    assert_eq!(settings.sops.file_names_dec, vec!["secret.bin".to_string()]);
+}
+
+/// Enabling list parsing must not turn scalar settings into lists:
+/// a comma inside a scalar value is part of the value, not a separator.
+#[test]
+fn given_scalar_env_with_comma_alongside_list_env_when_load_then_scalar_kept_verbatim() {
+    let settings = with_env(
+        &[
+            ("RSENV__EDITOR", "code --wait,--new-window"),
+            ("RSENV__SOPS__GPG_KEY", "ABC123"),
+            ("RSENV__SOPS__FILE_NAMES_ENC", "restic.pw"),
+        ],
+        || Settings::load(None).expect("load settings"),
+    );
+
+    assert_eq!(settings.editor, "code --wait,--new-window");
+    assert_eq!(settings.sops.gpg_key.as_deref(), Some("ABC123"));
+    assert_eq!(settings.sops.file_names_enc, vec!["restic.pw".to_string()]);
+}
+
+/// An empty value is an explicit "no patterns", and whitespace around items is ignored.
+#[test]
+fn given_empty_and_padded_list_envs_when_load_then_empty_and_trimmed() {
+    let settings = with_env(
+        &[
+            ("RSENV__SOPS__FILE_NAMES_ENC", ""),
+            ("RSENV__SOPS__FILE_EXTENSIONS_ENC", " env , envrc "),
+        ],
+        || Settings::load(None).expect("load settings"),
+    );
+
+    assert!(settings.sops.file_names_enc.is_empty());
+    assert_eq!(
+        settings.sops.file_extensions_enc,
+        vec!["env".to_string(), "envrc".to_string()]
+    );
+}
