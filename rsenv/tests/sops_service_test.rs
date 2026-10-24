@@ -727,3 +727,49 @@ fn given_one_sops_failure_when_decrypt_all_then_others_decrypted_and_failure_rep
         report.failed[0].1
     );
 }
+
+// ============================================================
+// encrypt_file(): old ciphertext survives a failed re-encryption
+// ============================================================
+
+/// The old ciphertext is the only encrypted copy until the new one exists: deleting
+/// it before sops runs leaves nothing if sops then fails.
+#[test]
+fn given_sops_fails_when_encrypt_changed_plaintext_then_old_ciphertext_kept() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::write(dir.join("app.env"), "KEY=changed").unwrap();
+    let old_enc = dir.join(enc_name("app.env", "KEY=1"));
+    std::fs::write(&old_enc, "old ciphertext").unwrap();
+    let service = decrypt_service(dir, Some("app.env"));
+
+    // Act
+    let result = service.encrypt_file(&dir.join("app.env"));
+
+    // Assert
+    assert!(result.is_err(), "sops failure must be reported");
+    assert!(
+        old_enc.exists(),
+        "old ciphertext must survive a failed encrypt"
+    );
+}
+
+#[test]
+fn given_changed_plaintext_when_encrypt_then_new_ciphertext_written_and_old_removed() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::write(dir.join("app.env"), "KEY=changed").unwrap();
+    let old_enc = dir.join(enc_name("app.env", "KEY=1"));
+    std::fs::write(&old_enc, "old ciphertext").unwrap();
+    let service = decrypt_service(dir, None);
+
+    // Act
+    let new_enc = service.encrypt_file(&dir.join("app.env")).unwrap();
+
+    // Assert
+    assert_eq!(new_enc, dir.join(enc_name("app.env", "KEY=changed")));
+    assert!(new_enc.exists());
+    assert!(!old_enc.exists(), "stale ciphertext removed after success");
+}

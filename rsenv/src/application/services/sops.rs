@@ -284,7 +284,7 @@ impl SopsService {
     ///
     /// Output file will be `{input}.{hash8}.enc`.
     /// If a file with the same hash already exists, returns it without re-encrypting.
-    /// Deletes any stale encrypted versions.
+    /// Deletes stale encrypted versions only after the new one was written.
     ///
     /// # Arguments
     /// * `input` - Path to plaintext file
@@ -303,9 +303,6 @@ impl SopsService {
             debug!("encrypt_file: already up-to-date: {}", output.display());
             return Ok(output);
         }
-
-        // Delete any stale encrypted versions
-        self.delete_old_enc_files(input)?;
 
         let key = self
             .settings
@@ -353,15 +350,26 @@ impl SopsService {
             });
         }
 
+        // Only now: until the new ciphertext exists, the old one is the sole encrypted copy.
+        self.delete_old_enc_files(input, &output)?;
+
         debug!("encrypt_file: output={}", output.display());
         Ok(output)
     }
 
-    /// Delete old encrypted versions of a plaintext file.
-    fn delete_old_enc_files(&self, plaintext: &Path) -> ApplicationResult<()> {
+    /// Delete old encrypted versions of a plaintext file, keeping `current`.
+    fn delete_old_enc_files(&self, plaintext: &Path, current: &Path) -> ApplicationResult<()> {
         for path in encrypted_siblings(plaintext) {
+            if path == current {
+                continue;
+            }
             debug!("delete_old_enc_files: removing {}", path.display());
-            let _ = self.fs.remove_file(&path);
+            self.fs
+                .remove_file(&path)
+                .map_err(|e| ApplicationError::OperationFailed {
+                    context: format!("remove stale ciphertext: {}", path.display()),
+                    source: Box::new(e),
+                })?;
         }
         Ok(())
     }
