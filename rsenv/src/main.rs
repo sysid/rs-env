@@ -21,6 +21,7 @@ use rsenv::cli::args::{
     SwapCommands, VaultCommands,
 };
 use rsenv::cli::editor::is_vim_family;
+use rsenv::cli::hook::{pre_commit_hook, HookScope};
 use rsenv::cli::output;
 use rsenv::config::{global_config_dir, global_config_path, vault_config_path, Settings};
 use rsenv::domain::{shell_quote, TreeBuilder, TreeNodeConvert};
@@ -1714,26 +1715,6 @@ fn handle_sops(
     }
 }
 
-/// Pre-commit hook template for global vault checking.
-const PRE_COMMIT_HOOK: &str = r#"#!/bin/bash
-# rsenv pre-commit hook - prevents committing with stale/unencrypted files
-# Installed by: rsenv hook install
-
-if ! command -v rsenv &> /dev/null; then
-    echo "Warning: rsenv not found in PATH, skipping encryption check"
-    exit 0
-fi
-
-if ! rsenv sops status --global --check 2>/dev/null; then
-    echo ""
-    echo "ERROR: Unencrypted or stale files in vault(s)."
-    echo "       Run 'rsenv sops encrypt --global' to update encryption."
-    echo "       Use 'rsenv sops status --global' to see details."
-    echo ""
-    exit 1
-fi
-"#;
-
 /// Show a pending gitignore change and ask before applying it.
 ///
 /// Returns false when there is nothing to do or the user declined.
@@ -1799,6 +1780,12 @@ fn handle_hook(command: HookCommands, settings: &Settings) -> rsenv::cli::CliRes
 
     // Default: base_dir (e.g., ~/.rsenv where .git typically lives)
     let target_dir = dir_override.unwrap_or_else(|| settings.base_dir.clone());
+    // Any repo other than the base dir is checked as itself, not as the vault store.
+    let scope = if target_dir == settings.base_dir {
+        HookScope::Vaults
+    } else {
+        HookScope::Dir
+    };
 
     // Verify target directory exists
     if !target_dir.exists() {
@@ -1839,7 +1826,7 @@ fn handle_hook(command: HookCommands, settings: &Settings) -> rsenv::cli::CliRes
             })?;
 
             // Write hook file
-            std::fs::write(&hook_path, PRE_COMMIT_HOOK).map_err(|e| {
+            std::fs::write(&hook_path, pre_commit_hook(scope)).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
                     rsenv::application::ApplicationError::OperationFailed {
                         context: format!("write hook: {}", hook_path.display()),

@@ -4,6 +4,7 @@ pub mod args;
 pub mod diff_render;
 pub mod editor;
 pub mod error;
+pub mod hook;
 pub mod output;
 pub mod pager;
 
