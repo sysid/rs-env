@@ -400,24 +400,33 @@ pub enum SopsCommands {
         #[arg(short, long)]
         yes: bool,
         /// Sync global gitignore only (not per-vault)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "dir")]
         global: bool,
+        /// Sync DIR/.gitignore with all global patterns (a repo outside the base dir)
+        #[arg(short, long)]
+        dir: Option<PathBuf>,
     },
 
     /// Show gitignore sync status (current vault only, use --global for global)
     #[command(name = "gitignore-status")]
     GitignoreStatus {
         /// Show global gitignore status only
-        #[arg(long)]
+        #[arg(long, conflicts_with = "dir")]
         global: bool,
+        /// Show status of DIR/.gitignore against all global patterns
+        #[arg(short, long)]
+        dir: Option<PathBuf>,
     },
 
     /// Remove rsenv-managed section from .gitignore (current vault only, use --global for global)
     #[command(name = "gitignore-clean")]
     GitignoreClean {
         /// Clean global gitignore only
-        #[arg(long)]
+        #[arg(long, conflicts_with = "dir")]
         global: bool,
+        /// Clean DIR/.gitignore
+        #[arg(short, long)]
+        dir: Option<PathBuf>,
     },
 }
 

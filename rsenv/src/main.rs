@@ -13,8 +13,8 @@ use tracing_subscriber::EnvFilter;
 use colored::Colorize;
 use rsenv::application::envrc::update_vars_section;
 use rsenv::application::services::{
-    CommitOptions, DecryptOutcome, EnvironmentService, GitignoreService, ProjectCommit,
-    SopsService, SwapService, VaultCommitService, VaultService,
+    CommitOptions, DecryptOutcome, EnvironmentService, GitignoreDiff, GitignoreService,
+    ProjectCommit, SopsService, SwapService, VaultCommitService, VaultService,
 };
 use rsenv::cli::args::{
     Cli, Commands, ConfigCommands, EnvCommands, GuardCommands, HookCommands, SopsCommands,
@@ -1279,10 +1279,46 @@ fn handle_sops(
                 output::success(&format!("Created: {}", result.display()));
             } else {
                 // Directory/vault/global level
+                let plain_dir = dir.is_some();
                 let vault_base_dir = vault_base.unwrap_or_else(|| settings.vaults_dir());
                 let base_dir =
                     resolve_sops_dir(dir, global, vault_path.as_deref(), &vault_base_dir)?;
                 output::header(&format!("Encrypting in: {}", base_dir.display()));
+
+                // A plain directory is its own repo: once the user opted in (rsenv section
+                // present), protect new patterns BEFORE encrypting, so a new secret is
+                // gitignored even if its encryption fails.
+                if plain_dir {
+                    let global_settings = Settings::load_global_only().map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                            e,
+                        ))
+                    })?;
+                    let gitignore_service =
+                        GitignoreService::new(Arc::new(RealFileSystem), global_settings);
+                    let opted_in =
+                        gitignore_service
+                            .has_managed_section(&base_dir)
+                            .map_err(|e| {
+                                rsenv::cli::CliError::Infra(
+                                    rsenv::infrastructure::InfraError::Application(e),
+                                )
+                            })?;
+                    if opted_in {
+                        let diff = gitignore_service.sync_dir(&base_dir).map_err(|e| {
+                            rsenv::cli::CliError::Infra(
+                                rsenv::infrastructure::InfraError::Application(e),
+                            )
+                        })?;
+                        if !diff.in_sync {
+                            output::action(
+                                "Updated",
+                                &gitignore_service.dir_gitignore_path(&base_dir).display(),
+                            );
+                        }
+                    }
+                }
+
                 let encrypted = service.encrypt_all(Some(&base_dir)).map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
                 })?;
@@ -1477,61 +1513,54 @@ fn handle_sops(
 
             Ok(())
         }
-        SopsCommands::GitignoreSync { yes, global } => {
+        SopsCommands::GitignoreSync { yes, global, dir } => {
             let global_settings = Settings::load_global_only().map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
             let fs = Arc::new(RealFileSystem);
             let gitignore_service = GitignoreService::new(fs, global_settings);
 
-            if global {
+            if let Some(dir) = dir {
+                // Plain directory: its own repo, so it gets all global patterns
+                let diff = gitignore_service.status_dir(&dir).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+                let path = gitignore_service.dir_gitignore_path(&dir);
+                if confirm_gitignore_update("Directory gitignore", &path, &diff, yes) {
+                    gitignore_service.sync_dir(&dir).map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                            e,
+                        ))
+                    })?;
+                    output::success(&format!("Directory gitignore updated: {}", path.display()));
+                }
+            } else if global {
                 // Global only: sync global gitignore
                 let status = gitignore_service.status(None).map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
                 })?;
-
-                if status.global_diff.in_sync {
-                    output::success("Global gitignore is in sync with config");
-                    return Ok(());
+                if confirm_gitignore_update(
+                    "Global gitignore",
+                    &status.global_path,
+                    &status.global_diff,
+                    yes,
+                ) {
+                    gitignore_service.sync_global().map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                            e,
+                        ))
+                    })?;
+                    output::success(&format!(
+                        "Global gitignore updated: {}",
+                        status.global_path.display()
+                    ));
                 }
-
-                output::info(&format!(
-                    "Global gitignore ({}):",
-                    status.global_path.display()
-                ));
-                for pattern in &status.global_diff.to_add {
-                    output::diff_add(pattern);
-                }
-                for pattern in &status.global_diff.to_remove {
-                    output::diff_remove(pattern);
-                }
-
-                if !yes {
-                    println!();
-                    output::prompt(&"Update global gitignore? [Y/n]");
-                    use std::io::Write;
-                    std::io::stdout().flush().unwrap();
-                    let mut input = String::new();
-                    std::io::stdin().read_line(&mut input).unwrap();
-                    let input = input.trim().to_lowercase();
-                    if !input.is_empty() && input != "y" && input != "yes" {
-                        output::info(&"Aborted");
-                        return Ok(());
-                    }
-                }
-
-                gitignore_service.sync_global().map_err(|e| {
-                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-                })?;
-                output::success(&format!(
-                    "Global gitignore updated: {}",
-                    status.global_path.display()
-                ));
             } else {
                 // Vault only: sync per-vault gitignore
                 let vault_dir = vault_path.clone().ok_or_else(|| {
                     rsenv::cli::CliError::Usage(
-                        "No vault found. Run 'rsenv vault init' first, or use --global.".into(),
+                        "No vault found. Run 'rsenv vault init' first, or use --global or --dir."
+                            .into(),
                     )
                 })?;
 
@@ -1543,55 +1572,45 @@ fn handle_sops(
                     rsenv::cli::CliError::Usage("No vault-local gitignore config found.".into())
                 })?;
 
-                if vault_status.diff.in_sync {
-                    output::success("Per-vault gitignore is in sync with config");
-                    return Ok(());
+                if confirm_gitignore_update(
+                    "Per-vault gitignore",
+                    &vault_status.path,
+                    &vault_status.diff,
+                    yes,
+                ) {
+                    gitignore_service.sync_vault(&vault_dir).map_err(|e| {
+                        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(
+                            e,
+                        ))
+                    })?;
+                    output::success(&format!(
+                        "Per-vault gitignore updated: {}",
+                        vault_status.path.display()
+                    ));
                 }
-
-                output::info(&format!(
-                    "Per-vault gitignore ({}):",
-                    vault_status.path.display()
-                ));
-                for pattern in &vault_status.diff.to_add {
-                    output::diff_add(pattern);
-                }
-                for pattern in &vault_status.diff.to_remove {
-                    output::diff_remove(pattern);
-                }
-
-                if !yes {
-                    println!();
-                    output::prompt(&"Update per-vault gitignore? [Y/n]");
-                    use std::io::Write;
-                    std::io::stdout().flush().unwrap();
-                    let mut input = String::new();
-                    std::io::stdin().read_line(&mut input).unwrap();
-                    let input = input.trim().to_lowercase();
-                    if !input.is_empty() && input != "y" && input != "yes" {
-                        output::info(&"Aborted");
-                        return Ok(());
-                    }
-                }
-
-                gitignore_service.sync_vault(&vault_dir).map_err(|e| {
-                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-                })?;
-                output::success(&format!(
-                    "Per-vault gitignore updated: {}",
-                    vault_status.path.display()
-                ));
             }
 
             Ok(())
         }
-        SopsCommands::GitignoreStatus { global } => {
+        SopsCommands::GitignoreStatus { global, dir } => {
             let global_settings = Settings::load_global_only().map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
             let fs = Arc::new(RealFileSystem);
             let gitignore_service = GitignoreService::new(fs, global_settings);
 
-            if global {
+            if let Some(dir) = dir {
+                let diff = gitignore_service.status_dir(&dir).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+                output::header("Directory Gitignore Status:");
+                println!();
+                print_gitignore_status(
+                    &gitignore_service.dir_gitignore_path(&dir),
+                    &diff,
+                    "In sync with global config",
+                );
+            } else if global {
                 // Global only: show global gitignore status
                 let status = gitignore_service.status(None).map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
@@ -1599,23 +1618,17 @@ fn handle_sops(
 
                 output::header("Global Gitignore Status:");
                 println!();
-                output::info(&format!("Path: {}", status.global_path.display()));
-                if status.global_diff.in_sync {
-                    output::success_detail("In sync with config");
-                } else {
-                    output::failure("Out of sync:");
-                    for pattern in &status.global_diff.to_add {
-                        println!("    {} {} (missing)", "+".green(), pattern);
-                    }
-                    for pattern in &status.global_diff.to_remove {
-                        println!("    {} {} (extra)", "-".red(), pattern);
-                    }
-                }
+                print_gitignore_status(
+                    &status.global_path,
+                    &status.global_diff,
+                    "In sync with config",
+                );
             } else {
                 // Vault only: show per-vault gitignore status
                 let vault_dir = vault_path.clone().ok_or_else(|| {
                     rsenv::cli::CliError::Usage(
-                        "No vault found. Run 'rsenv vault init' first, or use --global.".into(),
+                        "No vault found. Run 'rsenv vault init' first, or use --global or --dir."
+                            .into(),
                     )
                 })?;
 
@@ -1627,18 +1640,11 @@ fn handle_sops(
                 println!();
 
                 if let Some(vault_status) = &status.vault {
-                    output::info(&format!("Path: {}", vault_status.path.display()));
-                    if vault_status.diff.in_sync {
-                        output::success_detail("In sync with vault-local config");
-                    } else {
-                        output::failure("Out of sync:");
-                        for pattern in &vault_status.diff.to_add {
-                            println!("    {} {} (missing)", "+".green(), pattern);
-                        }
-                        for pattern in &vault_status.diff.to_remove {
-                            println!("    {} {} (extra)", "-".red(), pattern);
-                        }
-                    }
+                    print_gitignore_status(
+                        &vault_status.path,
+                        &vault_status.diff,
+                        "In sync with vault-local config",
+                    );
                 } else {
                     output::info(&"No vault-local gitignore config found");
                 }
@@ -1646,14 +1652,27 @@ fn handle_sops(
 
             Ok(())
         }
-        SopsCommands::GitignoreClean { global } => {
+        SopsCommands::GitignoreClean { global, dir } => {
             let global_settings = Settings::load_global_only().map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
             let fs = Arc::new(RealFileSystem);
             let gitignore_service = GitignoreService::new(fs, global_settings);
 
-            if global {
+            if let Some(dir) = dir {
+                let cleaned = gitignore_service.clean_dir(&dir).map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?;
+
+                if cleaned {
+                    output::success(&format!(
+                        "Removed rsenv-managed section from directory gitignore: {}",
+                        gitignore_service.dir_gitignore_path(&dir).display()
+                    ));
+                } else {
+                    output::info(&"Directory gitignore: no managed section to remove");
+                }
+            } else if global {
                 // Global only: clean global gitignore
                 let cleaned = gitignore_service.clean_global().map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
@@ -1671,7 +1690,8 @@ fn handle_sops(
                 // Vault only: clean per-vault gitignore
                 let vault_dir = vault_path.clone().ok_or_else(|| {
                     rsenv::cli::CliError::Usage(
-                        "No vault found. Run 'rsenv vault init' first, or use --global.".into(),
+                        "No vault found. Run 'rsenv vault init' first, or use --global or --dir."
+                            .into(),
                     )
                 })?;
 
@@ -1713,6 +1733,61 @@ if ! rsenv sops status --global --check 2>/dev/null; then
     exit 1
 fi
 "#;
+
+/// Show a pending gitignore change and ask before applying it.
+///
+/// Returns false when there is nothing to do or the user declined.
+fn confirm_gitignore_update(
+    label: &str,
+    path: &std::path::Path,
+    diff: &GitignoreDiff,
+    yes: bool,
+) -> bool {
+    if diff.in_sync {
+        output::success(&format!("{label} is in sync with config"));
+        return false;
+    }
+
+    output::info(&format!("{label} ({}):", path.display()));
+    for pattern in &diff.to_add {
+        output::diff_add(pattern);
+    }
+    for pattern in &diff.to_remove {
+        output::diff_remove(pattern);
+    }
+
+    if yes {
+        return true;
+    }
+    println!();
+    output::prompt(&format!("Update {}? [Y/n]", label.to_lowercase()));
+    use std::io::Write;
+    std::io::stdout().flush().unwrap();
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).unwrap();
+    let input = input.trim().to_lowercase();
+    if !input.is_empty() && input != "y" && input != "yes" {
+        output::info(&"Aborted");
+        return false;
+    }
+    true
+}
+
+/// Print one gitignore's path and how its managed section differs from the config.
+fn print_gitignore_status(path: &std::path::Path, diff: &GitignoreDiff, in_sync_msg: &str) {
+    output::info(&format!("Path: {}", path.display()));
+    if diff.in_sync {
+        output::success_detail(in_sync_msg);
+    } else {
+        output::failure("Out of sync:");
+        for pattern in &diff.to_add {
+            println!("    {} {} (missing)", "+".green(), pattern);
+        }
+        for pattern in &diff.to_remove {
+            println!("    {} {} (extra)", "-".red(), pattern);
+        }
+    }
+}
 
 fn handle_hook(command: HookCommands, settings: &Settings) -> rsenv::cli::CliResult<()> {
     // Extract dir override from command and determine target directory

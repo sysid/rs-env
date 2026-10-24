@@ -346,57 +346,95 @@ impl GitignoreService {
 
     /// Sync global gitignore.
     pub fn sync_global(&self) -> ApplicationResult<GitignoreDiff> {
-        debug!(
-            "sync_global: path={}",
-            self.global_gitignore_path().display()
-        );
-        let global_path = self.global_gitignore_path();
-        let patterns = self.global_patterns();
-        let current = self.current_patterns(&global_path)?;
-        let diff = Self::compute_diff(&patterns, &current);
-
-        if !diff.in_sync {
-            debug!(
-                "sync_global: updating, to_add={}, to_remove={}",
-                diff.to_add.len(),
-                diff.to_remove.len()
-            );
-            self.update_gitignore_file(&global_path, &patterns, "global config")?;
-        } else {
-            debug!("sync_global: already in sync");
-        }
-
-        Ok(diff)
+        self.sync_file(
+            &self.global_gitignore_path(),
+            &self.global_patterns(),
+            "global config",
+        )
     }
 
     /// Sync per-vault gitignore (only if vault has local config).
     pub fn sync_vault(&self, vault_dir: &Path) -> ApplicationResult<Option<GitignoreDiff>> {
         debug!("sync_vault: vault_dir={}", vault_dir.display());
-        if let Some(patterns) = self.vault_patterns(vault_dir)? {
-            let vault_path = self.vault_gitignore_path(vault_dir);
-            let current = self.current_patterns(&vault_path)?;
-            let diff = Self::compute_diff(&patterns, &current);
-
-            if !diff.in_sync {
-                debug!(
-                    "sync_vault: updating, to_add={}, to_remove={}",
-                    diff.to_add.len(),
-                    diff.to_remove.len()
-                );
-                self.update_gitignore_file(
-                    &vault_path,
-                    &patterns,
-                    "vault-local config only; global patterns come from the rsenv base-dir .gitignore",
-                )?;
-            } else {
-                debug!("sync_vault: already in sync");
-            }
-
-            Ok(Some(diff))
-        } else {
+        let Some(patterns) = self.vault_patterns(vault_dir)? else {
             debug!("sync_vault: no local config, skipping");
-            Ok(None)
+            return Ok(None);
+        };
+        self.sync_file(
+            &self.vault_gitignore_path(vault_dir),
+            &patterns,
+            "vault-local config only; global patterns come from the rsenv base-dir .gitignore",
+        )
+        .map(Some)
+    }
+
+    /// Get the `.gitignore` path of a plain directory (`--dir`).
+    pub fn dir_gitignore_path(&self, dir: &Path) -> PathBuf {
+        dir.join(".gitignore")
+    }
+
+    /// Diff a plain directory's `.gitignore` against ALL global patterns.
+    ///
+    /// Such a directory (e.g. a secrets store) is its own git repo outside
+    /// `<base_dir>`, so no parent `.gitignore` covers it: it needs the full set.
+    pub fn status_dir(&self, dir: &Path) -> ApplicationResult<GitignoreDiff> {
+        let path = self.dir_gitignore_path(dir);
+        let current = self.current_patterns(&path)?;
+        Ok(Self::compute_diff(&self.global_patterns(), &current))
+    }
+
+    /// Sync a plain directory's `.gitignore` with ALL global patterns.
+    pub fn sync_dir(&self, dir: &Path) -> ApplicationResult<GitignoreDiff> {
+        self.sync_file(
+            &self.dir_gitignore_path(dir),
+            &self.global_patterns(),
+            "global config (directory outside the rsenv base dir)",
+        )
+    }
+
+    /// Remove the managed section from a plain directory's `.gitignore`.
+    pub fn clean_dir(&self, dir: &Path) -> ApplicationResult<bool> {
+        self.clean_gitignore_file(&self.dir_gitignore_path(dir))
+    }
+
+    /// Whether a plain directory's `.gitignore` already has an rsenv-managed section,
+    /// i.e. the user opted in to rsenv managing it.
+    pub fn has_managed_section(&self, dir: &Path) -> ApplicationResult<bool> {
+        let path = self.dir_gitignore_path(dir);
+        if !self.fs.exists(&path) {
+            return Ok(false);
         }
+        let content =
+            self.fs
+                .read_to_string(&path)
+                .map_err(|e| ApplicationError::OperationFailed {
+                    context: format!("read .gitignore: {}", path.display()),
+                    source: Box::new(e),
+                })?;
+        Ok(content.lines().any(|line| line.trim() == START_MARKER))
+    }
+
+    /// Rewrite the managed section of `path` if it differs from `patterns`.
+    fn sync_file(
+        &self,
+        path: &Path,
+        patterns: &BTreeSet<String>,
+        source_label: &str,
+    ) -> ApplicationResult<GitignoreDiff> {
+        let current = self.current_patterns(path)?;
+        let diff = Self::compute_diff(patterns, &current);
+        if diff.in_sync {
+            debug!("sync_file: already in sync: {}", path.display());
+        } else {
+            debug!(
+                "sync_file: updating {}, to_add={}, to_remove={}",
+                path.display(),
+                diff.to_add.len(),
+                diff.to_remove.len()
+            );
+            self.update_gitignore_file(path, patterns, source_label)?;
+        }
+        Ok(diff)
     }
 
     /// Sync both global and per-vault gitignore.

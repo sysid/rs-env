@@ -737,3 +737,151 @@ fn given_patterns_are_sorted_when_sync_then_output_is_deterministic() {
     assert_eq!(*pattern_lines[1], "*.envrc");
     assert_eq!(*pattern_lines[2], "dot_pypirc");
 }
+
+// ============================================================
+// Plain-directory gitignore (`--dir`): a separate repo outside base_dir,
+// so it needs ALL global patterns - no parent .gitignore covers it.
+// ============================================================
+
+#[test]
+fn given_plain_dir_when_sync_dir_then_writes_all_global_patterns() {
+    // Arrange
+    let base = TempDir::new().unwrap();
+    let store = TempDir::new().unwrap();
+    let settings = test_settings(base.path().to_path_buf(), test_sops_config());
+    let service = GitignoreService::new(Arc::new(RealFileSystem), settings);
+
+    // Act
+    let diff = service.sync_dir(store.path()).unwrap();
+
+    // Assert
+    assert!(!diff.in_sync, "was out of sync before");
+    let content = std::fs::read_to_string(store.path().join(".gitignore")).unwrap();
+    for pattern in ["*.env", "*.envrc", "dot_pypirc"] {
+        assert!(
+            content.lines().any(|l| l == pattern),
+            "{pattern} missing:\n{content}"
+        );
+    }
+    assert!(
+        !base.path().join(".gitignore").exists(),
+        "base-dir .gitignore untouched"
+    );
+}
+
+/// Hand-written rules and foreign generated sections (e.g. confguard's) stay as they are.
+#[test]
+fn given_dir_gitignore_with_foreign_lines_when_sync_dir_then_foreign_lines_kept() {
+    // Arrange
+    let base = TempDir::new().unwrap();
+    let store = TempDir::new().unwrap();
+    let foreign = "# over-rule global gitignore\n!.run\n\
+        # ---------------------------------- confguard-start -----------------------------------\n\
+        restic.pw  # sops-managed 2026-10-20 14:31:31\n\
+        # ---------------------------------- confguard-end -----------------------------------\n";
+    std::fs::write(store.path().join(".gitignore"), foreign).unwrap();
+    let settings = test_settings(base.path().to_path_buf(), test_sops_config());
+    let service = GitignoreService::new(Arc::new(RealFileSystem), settings);
+
+    // Act
+    service.sync_dir(store.path()).unwrap();
+
+    // Assert
+    let content = std::fs::read_to_string(store.path().join(".gitignore")).unwrap();
+    assert!(
+        content.starts_with(foreign.trim_end()),
+        "foreign content kept in place:\n{content}"
+    );
+    assert!(content.contains("# rsenv-managed start"), "{content}");
+}
+
+#[test]
+fn given_synced_dir_when_sync_dir_again_then_in_sync_and_file_unchanged() {
+    // Arrange
+    let base = TempDir::new().unwrap();
+    let store = TempDir::new().unwrap();
+    let settings = test_settings(base.path().to_path_buf(), test_sops_config());
+    let service = GitignoreService::new(Arc::new(RealFileSystem), settings);
+    service.sync_dir(store.path()).unwrap();
+    let first = std::fs::read_to_string(store.path().join(".gitignore")).unwrap();
+
+    // Act
+    let diff = service.sync_dir(store.path()).unwrap();
+
+    // Assert
+    assert!(diff.in_sync);
+    let second = std::fs::read_to_string(store.path().join(".gitignore")).unwrap();
+    assert_eq!(first, second, "no rewrite (timestamp would churn)");
+}
+
+#[test]
+fn given_dir_with_stale_section_when_status_dir_then_reports_diff_without_writing() {
+    // Arrange
+    let base = TempDir::new().unwrap();
+    let store = TempDir::new().unwrap();
+    let stale = "# rsenv-managed start\n*.env\nold_name\n# rsenv-managed end\n";
+    std::fs::write(store.path().join(".gitignore"), stale).unwrap();
+    let settings = test_settings(base.path().to_path_buf(), test_sops_config());
+    let service = GitignoreService::new(Arc::new(RealFileSystem), settings);
+
+    // Act
+    let diff = service.status_dir(store.path()).unwrap();
+
+    // Assert
+    assert!(!diff.in_sync);
+    assert_eq!(
+        diff.to_add,
+        vec!["*.envrc".to_string(), "dot_pypirc".to_string()]
+    );
+    assert_eq!(diff.to_remove, vec!["old_name".to_string()]);
+    assert_eq!(
+        std::fs::read_to_string(store.path().join(".gitignore")).unwrap(),
+        stale
+    );
+}
+
+#[test]
+fn given_dir_with_managed_section_when_clean_dir_then_only_section_removed() {
+    // Arrange
+    let base = TempDir::new().unwrap();
+    let store = TempDir::new().unwrap();
+    std::fs::write(
+        store.path().join(".gitignore"),
+        "!.run\n# rsenv-managed start\n*.env\n# rsenv-managed end\n",
+    )
+    .unwrap();
+    let settings = test_settings(base.path().to_path_buf(), test_sops_config());
+    let service = GitignoreService::new(Arc::new(RealFileSystem), settings);
+
+    // Act
+    let cleaned = service.clean_dir(store.path()).unwrap();
+
+    // Assert
+    assert!(cleaned);
+    assert_eq!(
+        std::fs::read_to_string(store.path().join(".gitignore")).unwrap(),
+        "!.run"
+    );
+}
+
+#[test]
+fn given_dir_gitignore_when_has_managed_section_then_true_only_with_rsenv_markers() {
+    // Arrange
+    let base = TempDir::new().unwrap();
+    let with = TempDir::new().unwrap();
+    let without = TempDir::new().unwrap();
+    let missing = TempDir::new().unwrap();
+    std::fs::write(
+        with.path().join(".gitignore"),
+        "# rsenv-managed start\n*.env\n# rsenv-managed end\n",
+    )
+    .unwrap();
+    std::fs::write(without.path().join(".gitignore"), "*.log\n").unwrap();
+    let settings = test_settings(base.path().to_path_buf(), test_sops_config());
+    let service = GitignoreService::new(Arc::new(RealFileSystem), settings);
+
+    // Act / Assert
+    assert!(service.has_managed_section(with.path()).unwrap());
+    assert!(!service.has_managed_section(without.path()).unwrap());
+    assert!(!service.has_managed_section(missing.path()).unwrap());
+}
