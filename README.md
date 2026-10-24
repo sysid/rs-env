@@ -2,9 +2,10 @@
 
 
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
-[![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org/)
 
-> This is a complete rewrite of V1 with 100% functional compatibility and new features.
+# Zero-Trace Secure Developer Environments
+
+[Crate of the week 512](https://this-week-in-rust.org/blog/2023/09/13/this-week-in-rust-512)
 
 ## Why?
 
@@ -12,7 +13,7 @@
 - I need a personal workspace, which is attached to the project, but does not become part of its
   official repository (e.g. patched docker-compose.yml, bespoke Java test classes, etc.)
 - My environment configurations are not DRY, they share variables, often follow even a hierarchy
-  (globlal -> company -> region -> stage)
+  (global -> company -> region -> stage)
 
 
 ---
@@ -280,7 +281,8 @@ rsenv uses content-addressed filenames to detect staleness.
 ```
 
 A pre-commit hook (`rsenv hook install`) blocks commits when files are
-stale or unencrypted. Plaintext files are auto-added to `.gitignore`.
+stale or unencrypted. `rsenv sops gitignore-sync` keeps plaintext out of git; `--dir`
+does the same for a secrets repo outside the vaults.
 
 ---
 
