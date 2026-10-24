@@ -64,9 +64,9 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
         .as_deref()
         .and_then(|p| VaultService::discover_vault_path(fs.as_ref(), p).ok())
         .flatten();
-    // Use vault if found, else project dir for local config lookup
-    let config_dir = vault_path.clone().or(project_dir.clone());
-    let settings = Settings::load(config_dir.as_deref()).map_err(|e| {
+    // Local config is vault config: a .rsenv.toml in a plain working directory is
+    // never read, so results do not depend on the directory rsenv is run from.
+    let settings = Settings::load(vault_path.as_deref()).map_err(|e| {
         rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
     })?;
 
@@ -577,7 +577,6 @@ fn handle_config(
                     ));
                 }
             } else {
-                // Smart fallback: try vault first, then project directory
                 let current_dir = project_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
 
                 let fs = Arc::new(RealFileSystem);
@@ -588,8 +587,12 @@ fn handle_config(
                         ))
                     })?;
 
-                // Use vault if initialized, otherwise use project directory directly
-                let target_dir = vault_path.unwrap_or_else(|| current_dir.clone());
+                // Local config only exists in a vault; a .rsenv.toml anywhere else is never read.
+                let target_dir = vault_path.ok_or_else(|| {
+                    rsenv::cli::CliError::Usage(
+                        "No vault found. Run 'rsenv vault init' first, or use --global.".into(),
+                    )
+                })?;
                 let path = vault_config_path(&target_dir);
 
                 if path.exists() {

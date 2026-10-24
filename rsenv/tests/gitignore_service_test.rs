@@ -394,6 +394,126 @@ file_names_enc = ["secrets.txt"]
     assert!(content.contains("secrets.txt"));
 }
 
+/// The vault tier holds only what the vault file itself lists: arrays the vault
+/// does not set are inherited through the parent `.gitignore`, not copied from
+/// compiled defaults.
+#[test]
+fn given_vault_config_setting_only_file_names_when_vault_patterns_then_no_default_extensions() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_dir = temp.path().join("vault");
+    std::fs::create_dir_all(&vault_dir).unwrap();
+    std::fs::write(
+        vault_dir.join(".rsenv.toml"),
+        "[sops]\nfile_names_enc = [\"xxx\"]\n",
+    )
+    .unwrap();
+
+    let settings = test_settings(temp.path().to_path_buf(), test_sops_config());
+    let service = GitignoreService::new(Arc::new(RealFileSystem), settings);
+
+    // Act
+    let patterns = service.vault_patterns(&vault_dir).unwrap().unwrap();
+
+    // Assert
+    let expected: std::collections::BTreeSet<String> = ["xxx".to_string()].into();
+    assert_eq!(
+        patterns, expected,
+        "no *.env / *.envrc from compiled defaults"
+    );
+}
+
+/// `!x` in the vault config removes an inherited item. The parent `.gitignore`
+/// still ignores it, so the vault must un-ignore it explicitly with git's `!`.
+#[test]
+fn given_vault_negations_when_vault_patterns_then_git_unignore_lines() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_dir = temp.path().join("vault");
+    std::fs::create_dir_all(&vault_dir).unwrap();
+    std::fs::write(
+        vault_dir.join(".rsenv.toml"),
+        r#"
+[sops]
+file_extensions_enc = ["yaml", "!env"]
+file_names_enc = ["!dot_pypirc"]
+"#,
+    )
+    .unwrap();
+
+    let settings = test_settings(temp.path().to_path_buf(), test_sops_config());
+    let service = GitignoreService::new(Arc::new(RealFileSystem), settings);
+
+    // Act
+    let patterns = service.vault_patterns(&vault_dir).unwrap().unwrap();
+
+    // Assert
+    let expected: std::collections::BTreeSet<String> = [
+        "*.yaml".to_string(),
+        "!*.env".to_string(),
+        "!dot_pypirc".to_string(),
+    ]
+    .into();
+    assert_eq!(patterns, expected);
+}
+
+#[test]
+fn given_vault_negation_when_sync_vault_then_gitignore_unignores_instead_of_literal() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_dir = temp.path().join("vault");
+    std::fs::create_dir_all(&vault_dir).unwrap();
+    std::fs::write(
+        vault_dir.join(".rsenv.toml"),
+        "[sops]\nfile_extensions_enc = [\"!env\"]\n",
+    )
+    .unwrap();
+
+    let settings = test_settings(temp.path().to_path_buf(), test_sops_config());
+    let service = GitignoreService::new(Arc::new(RealFileSystem), settings);
+
+    // Act
+    service.sync_vault(&vault_dir).unwrap();
+
+    // Assert
+    let content = std::fs::read_to_string(vault_dir.join(".gitignore")).unwrap();
+    assert!(
+        content.lines().any(|l| l == "!*.env"),
+        "content:\n{content}"
+    );
+    assert!(!content.contains("*.!env"), "content:\n{content}");
+}
+
+/// A reader of the vault `.gitignore` must learn that it is only the vault's
+/// additions and that the rest lives in the parent `.gitignore`.
+#[test]
+fn given_vault_config_when_sync_vault_then_header_points_to_parent_gitignore() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let vault_dir = temp.path().join("vault");
+    std::fs::create_dir_all(&vault_dir).unwrap();
+    std::fs::write(
+        vault_dir.join(".rsenv.toml"),
+        "[sops]\nfile_names_enc = [\"xxx\"]\n",
+    )
+    .unwrap();
+
+    let settings = test_settings(temp.path().to_path_buf(), test_sops_config());
+    let service = GitignoreService::new(Arc::new(RealFileSystem), settings);
+
+    // Act
+    service.sync_vault(&vault_dir).unwrap();
+
+    // Assert
+    let content = std::fs::read_to_string(vault_dir.join(".gitignore")).unwrap();
+    assert!(
+        content.contains(
+            "# Source: vault-local config only; global patterns come from the rsenv base-dir .gitignore"
+        ),
+        "content:\n{content}"
+    );
+}
+
 // ============================================================
 // sync_all tests
 // ============================================================

@@ -21,7 +21,11 @@ Rust CLI that unifies hierarchical env-var management, file guarding (symlink-to
 ## Strict Antipatterns
 - NEVER run `cargo test` without `--test-threads=1`. Tests mutate real tempdirs and rely on per-test process state; parallel runs flake non-deterministically.
 - NEVER hand-edit `VERSION` or the `version =` line in `rsenv/Cargo.toml`. Use `make bump-*`; the three files MUST stay in sync (`make test` runs `--locked`, so a stale lockfile fails).
-- NEVER commit a plaintext file that lives inside a vault's `guarded/` tree — `rsenv guard add` does NOT gitignore them, and the vault `.gitignore` only covers SOPS name patterns (`*.env`, `*.envrc`, configured file names), so any other guarded name is visible to `git add`.
+- NEVER commit a plaintext file that lives inside a vault's `guarded/` tree — `rsenv guard add` does NOT gitignore them, and the gitignores only cover SOPS name patterns (`*.env`, `*.envrc`, configured file names), so any other guarded name is visible to `git add`.
+
+## Gitignore tiers
+- `<base_dir>/.gitignore` holds the global SOPS patterns; `<vault>/.gitignore` holds ONLY the vault `.rsenv.toml`'s own items (no defaults, no global copies), and git stacks the two. Vault `!x` MUST become a git un-ignore `!*.x`: omitting it would not lift the parent rule. Keep tier 2 a pure function of the vault file, so a global config change never fans out to every vault.
+- Local config is read ONLY from a discovered vault, never from the cwd: `sops --dir X` must not change behaviour depending on where it runs.
 
 ## Gotchas
 - Dotfiles inside the vault are renamed on entry: `.envrc → dot.envrc`, `.gitignore → dot.gitignore`. Code that walks the vault or constructs vault paths must use the renamed form.

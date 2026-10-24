@@ -3,6 +3,9 @@
 //! Two-tier gitignore system:
 //! - Tier 1: Global gitignore at `<base_dir>/.gitignore`
 //! - Tier 2: Per-vault gitignore at `<vault>/.gitignore` (only if vault has local config)
+//!
+//! Tier 2 lists only the vault file's own items; git stacks it on tier 1 because
+//! vaults live below `<base_dir>`. `!x` in the vault config becomes a git un-ignore.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -11,7 +14,7 @@ use std::sync::Arc;
 use tracing::debug;
 
 use crate::application::{ApplicationError, ApplicationResult};
-use crate::config::{vault_config_path, Settings, SopsConfig};
+use crate::config::{vault_config_path, RawSettings, Settings, SopsConfig};
 use crate::infrastructure::traits::FileSystem;
 
 const START_MARKER: &str = "# rsenv-managed start";
@@ -87,6 +90,11 @@ impl GitignoreService {
 
     /// Get patterns that should be in per-vault gitignore.
     ///
+    /// Only what the vault file itself lists: everything else is inherited through
+    /// the global `.gitignore` above it, so this file never goes stale when the
+    /// global config changes. A negated item `!x` becomes a git un-ignore (`!*.x`),
+    /// because leaving it out would not lift the parent's ignore rule.
+    ///
     /// Returns None if vault has no local config.
     pub fn vault_patterns(&self, vault_dir: &Path) -> ApplicationResult<Option<BTreeSet<String>>> {
         let local_config_path = vault_config_path(vault_dir);
@@ -94,8 +102,24 @@ impl GitignoreService {
             return Ok(None);
         }
 
-        let vault_settings = Settings::load_vault_only(vault_dir)?;
-        Ok(vault_settings.map(|s| Self::patterns_from_config(&s.sops)))
+        let content = self.fs.read_to_string(&local_config_path).map_err(|e| {
+            ApplicationError::OperationFailed {
+                context: format!("read vault config: {}", local_config_path.display()),
+                source: Box::new(e),
+            }
+        })?;
+        let raw = RawSettings::from_toml(&content, &local_config_path)?;
+
+        let mut patterns = BTreeSet::new();
+        for ext in raw.sops.file_extensions_enc.iter().flatten() {
+            patterns.insert(match ext.strip_prefix('!') {
+                Some(removed) => format!("!*.{}", removed),
+                None => format!("*.{}", ext),
+            });
+        }
+        // A name keeps its `!` as-is: `!name` already is git's un-ignore syntax.
+        patterns.extend(raw.sops.file_names_enc.iter().flatten().cloned());
+        Ok(Some(patterns))
     }
 
     /// Extract patterns currently in a gitignore's managed section.
@@ -359,7 +383,11 @@ impl GitignoreService {
                     diff.to_add.len(),
                     diff.to_remove.len()
                 );
-                self.update_gitignore_file(&vault_path, &patterns, "vault-local config")?;
+                self.update_gitignore_file(
+                    &vault_path,
+                    &patterns,
+                    "vault-local config only; global patterns come from the rsenv base-dir .gitignore",
+                )?;
             } else {
                 debug!("sync_vault: already in sync");
             }

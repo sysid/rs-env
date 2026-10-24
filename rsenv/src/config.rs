@@ -237,9 +237,16 @@ fn load_raw_settings(path: &Path) -> Result<RawSettings, ApplicationError> {
     let content = std::fs::read_to_string(path).map_err(|e| ApplicationError::Config {
         message: format!("read {}: {}", path.display(), e),
     })?;
-    toml::from_str(&content).map_err(|e| ApplicationError::Config {
-        message: format!("parse {}: {}", path.display(), e),
-    })
+    RawSettings::from_toml(&content, path)
+}
+
+impl RawSettings {
+    /// Parse config file content; `path` is only used in the error message.
+    pub fn from_toml(content: &str, path: &Path) -> Result<Self, ApplicationError> {
+        toml::from_str(content).map_err(|e| ApplicationError::Config {
+            message: format!("parse {}: {}", path.display(), e),
+        })
+    }
 }
 
 impl Settings {
@@ -439,55 +446,6 @@ impl Settings {
         settings.expand_paths();
 
         Ok(settings)
-    }
-
-    /// Load ONLY vault-local config if it exists.
-    ///
-    /// Returns None if no vault-local config file exists.
-    /// Used to determine which patterns belong in the per-vault .gitignore.
-    pub fn load_vault_only(vault_dir: &Path) -> Result<Option<Self>, ApplicationError> {
-        let local_path = vault_config_path(vault_dir);
-        if !local_path.exists() {
-            return Ok(None);
-        }
-
-        let mut builder = Config::builder();
-
-        // Start with defaults (needed for deserialization)
-        let defaults = Settings::default();
-        builder = builder
-            .set_default("base_dir", defaults.base_dir.to_string_lossy().to_string())
-            .map_err(config_err)?
-            .set_default("editor", defaults.editor.clone())
-            .map_err(config_err)?
-            .set_default(
-                "sops.file_extensions_enc",
-                defaults.sops.file_extensions_enc.clone(),
-            )
-            .map_err(config_err)?
-            .set_default(
-                "sops.file_extensions_dec",
-                defaults.sops.file_extensions_dec.clone(),
-            )
-            .map_err(config_err)?
-            .set_default("sops.file_names_enc", defaults.sops.file_names_enc.clone())
-            .map_err(config_err)?
-            .set_default("sops.file_names_dec", defaults.sops.file_names_dec.clone())
-            .map_err(config_err)?
-            .set_default("sops.encrypt_on_commit", defaults.sops.encrypt_on_commit)
-            .map_err(config_err)?;
-
-        // Only vault-local config
-        builder = builder.add_source(File::from(local_path).required(true));
-
-        // Build and deserialize
-        let config = builder.build().map_err(config_err)?;
-        let mut settings: Self = config.try_deserialize().map_err(config_err)?;
-
-        // Expand ~ and $VAR in path-like fields
-        settings.expand_paths();
-
-        Ok(Some(settings))
     }
 
     /// Show the effective configuration as TOML.
