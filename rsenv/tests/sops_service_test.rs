@@ -773,3 +773,237 @@ fn given_changed_plaintext_when_encrypt_then_new_ciphertext_written_and_old_remo
     assert!(new_enc.exists());
     assert!(!old_enc.exists(), "stale ciphertext removed after success");
 }
+
+// ============================================================
+// sops store selection: always binary
+// ============================================================
+
+/// Stands in for the `sops` binary and records the arguments of every call.
+struct RecordingSops {
+    calls: std::sync::Mutex<Vec<Vec<String>>>,
+}
+
+impl RecordingSops {
+    fn last_call(&self) -> Vec<String> {
+        self.calls.lock().unwrap().last().unwrap().clone()
+    }
+}
+
+impl rsenv::infrastructure::traits::CommandRunner for RecordingSops {
+    fn run(&self, _cmd: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
+        use std::os::unix::process::ExitStatusExt;
+        self.calls
+            .lock()
+            .unwrap()
+            .push(args.iter().map(|a| a.to_string()).collect());
+        let output = args[args.iter().position(|a| *a == "--output").unwrap() + 1];
+        std::fs::write(output, "sops output")?;
+        Ok(std::process::Output {
+            status: std::process::ExitStatus::from_raw(0),
+            stdout: vec![],
+            stderr: vec![],
+        })
+    }
+
+    fn run_with_stdin(
+        &self,
+        _cmd: &str,
+        _args: &[&str],
+        _stdin: &str,
+    ) -> std::io::Result<std::process::Output> {
+        unimplemented!("not used by encrypt/decrypt")
+    }
+
+    fn run_interactive(
+        &self,
+        _cmd: &str,
+        _args: &[&str],
+    ) -> std::io::Result<std::process::ExitStatus> {
+        unimplemented!("not used by encrypt/decrypt")
+    }
+}
+
+fn recording_service(dir: &std::path::Path) -> (SopsService, Arc<RecordingSops>) {
+    let sops = Arc::new(RecordingSops {
+        calls: std::sync::Mutex::new(vec![]),
+    });
+    let settings = Arc::new(test_settings(dir.to_path_buf(), test_sops_config()));
+    let service = SopsService::new(Arc::new(RealFileSystem), sops.clone(), settings);
+    (service, sops)
+}
+
+fn has_binary_store_flags(args: &[String]) -> bool {
+    args.windows(4)
+        .any(|w| w == ["--input-type", "binary", "--output-type", "binary"])
+}
+
+/// sops would pick the json store from the suffix, which reformats the file and
+/// breaks the content hash in the ciphertext name.
+#[test]
+fn given_json_plaintext_when_encrypt_then_sops_uses_binary_store() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::write(dir.join("http-client.private.env.json"), "{\"a\": 1}\n").unwrap();
+    let (service, sops) = recording_service(dir);
+
+    // Act
+    service
+        .encrypt_file(&dir.join("http-client.private.env.json"))
+        .unwrap();
+
+    // Assert
+    let args = sops.last_call();
+    assert!(has_binary_store_flags(&args), "{args:?}");
+}
+
+/// The dotenv store drops blank lines; binary keeps the file byte for byte.
+#[test]
+fn given_dotenv_plaintext_when_encrypt_then_sops_uses_binary_store() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::write(dir.join("app.env"), "A=1\n\nB=2\n").unwrap();
+    let (service, sops) = recording_service(dir);
+
+    // Act
+    service.encrypt_file(&dir.join("app.env")).unwrap();
+
+    // Assert
+    let args = sops.last_call();
+    assert!(has_binary_store_flags(&args), "{args:?}");
+    assert!(!args.contains(&"dotenv".to_string()), "{args:?}");
+}
+
+/// Ciphertext names end in `.enc`, so sops' own inference must not decide the store:
+/// it has to match what encrypt used.
+#[test]
+fn given_json_ciphertext_when_decrypt_then_sops_uses_binary_store() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    let enc = dir.join(enc_name("http-client.private.env.json", "{\"a\": 1}\n"));
+    std::fs::write(&enc, "ciphertext").unwrap();
+    let (service, sops) = recording_service(dir);
+
+    // Act
+    service.decrypt_file(&enc).unwrap();
+
+    // Assert
+    let args = sops.last_call();
+    assert!(has_binary_store_flags(&args), "{args:?}");
+}
+
+#[test]
+fn given_dotenv_ciphertext_when_decrypt_then_sops_uses_binary_store() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    let enc = dir.join(enc_name("app.env", "A=1\n"));
+    std::fs::write(&enc, "ciphertext").unwrap();
+    let (service, sops) = recording_service(dir);
+
+    // Act
+    service.decrypt_file(&enc).unwrap();
+
+    // Assert
+    let args = sops.last_call();
+    assert!(has_binary_store_flags(&args), "{args:?}");
+    assert!(!args.contains(&"dotenv".to_string()), "{args:?}");
+}
+
+// ============================================================
+// real sops round trip (skipped without sops and gpg)
+// ============================================================
+
+fn tool_available(name: &str) -> bool {
+    std::process::Command::new(name)
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// Content-hash naming assumes decrypt restores the exact bytes that were hashed.
+/// Uses a throwaway GPG key in a temporary GNUPGHOME.
+#[test]
+fn given_real_sops_when_encrypt_then_decrypt_then_bytes_identical_for_every_file_type() {
+    if !tool_available("sops") || !tool_available("gpg") {
+        eprintln!("skipped: sops or gpg not installed");
+        return;
+    }
+
+    // Arrange
+    let gnupg = TempDir::new().unwrap();
+    let previous_gnupghome = std::env::var_os("GNUPGHOME");
+    std::env::set_var("GNUPGHOME", gnupg.path());
+    let keygen = std::process::Command::new("gpg")
+        .args(["--batch", "--passphrase", "", "--quick-gen-key"])
+        .args([
+            "rsenv-test <rsenv-test@example.invalid>",
+            "rsa2048",
+            // an explicit algo creates only a primary key; "default" usage would
+            // leave it unable to encrypt
+            "cert,sign,encr",
+            "never",
+        ])
+        .output()
+        .unwrap();
+    assert!(keygen.status.success(), "{keygen:?}");
+    let listing = std::process::Command::new("gpg")
+        .args(["--list-keys", "--with-colons"])
+        .output()
+        .unwrap();
+    let fingerprint = String::from_utf8(listing.stdout)
+        .unwrap()
+        .lines()
+        .find(|l| l.starts_with("fpr:"))
+        .unwrap()
+        .split(':')
+        .nth(9)
+        .unwrap()
+        .to_string();
+
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    let files: [(&str, &str); 4] = [
+        // json store would re-indent with tabs
+        (
+            "http-client.private.env.json",
+            "{\n  \"dev\": {\"token\": \"x\"},\n  \"n\": 1\n}\n",
+        ),
+        // dotenv store would drop the blank line
+        ("app.env", "# comment\nA=1\n\nB=\"two words\"\n"),
+        ("kube_config", "apiVersion: v1\nclusters: []\n"),
+        ("dot.envrc", "export A=1\n"),
+    ];
+    let mut sops = test_sops_config();
+    sops.gpg_key = Some(fingerprint);
+    let service = SopsService::new(
+        Arc::new(RealFileSystem),
+        Arc::new(RealCommandRunner),
+        Arc::new(test_settings(dir.to_path_buf(), sops)),
+    );
+
+    for (name, content) in files {
+        let plaintext = dir.join(name);
+        std::fs::write(&plaintext, content).unwrap();
+
+        // Act
+        let enc = service.encrypt_file(&plaintext).unwrap();
+        std::fs::remove_file(&plaintext).unwrap();
+        let decrypted = service.decrypt_file(&enc).unwrap();
+
+        // Assert
+        assert_eq!(decrypted, plaintext);
+        assert_eq!(
+            std::fs::read_to_string(&plaintext).unwrap(),
+            content,
+            "{name} must round-trip byte for byte"
+        );
+    }
+
+    match previous_gnupghome {
+        Some(v) => std::env::set_var("GNUPGHOME", v),
+        None => std::env::remove_var("GNUPGHOME"),
+    }
+}

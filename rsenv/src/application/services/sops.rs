@@ -272,13 +272,13 @@ impl SopsService {
         })
     }
 
-    /// Check if a file is a dotenv file (uses SOPS dotenv format).
-    fn is_dotenv_file(path: &Path) -> bool {
-        path.extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e == "env")
-            .unwrap_or(false)
-    }
+    /// Forces sops' binary store on encrypt and decrypt alike.
+    ///
+    /// sops otherwise picks a store from the file suffix: the json/yaml/dotenv stores
+    /// reformat the plaintext (breaking the content hash in the ciphertext name), and
+    /// on decrypt the `.enc` suffix selects binary, which cannot read a structured
+    /// ciphertext. Binary is byte-exact for every file type.
+    const BINARY_STORE: [&'static str; 4] = ["--input-type", "binary", "--output-type", "binary"];
 
     /// Encrypt a single file using SOPS with hash-based filename.
     ///
@@ -321,13 +321,8 @@ impl SopsService {
             ("--pgp", key.as_str())
         };
 
-        let is_dotenv = Self::is_dotenv_file(input);
         let mut args: Vec<&str> = vec!["-e", key_flag, key_value];
-
-        if is_dotenv {
-            args.extend(&["--input-type", "dotenv", "--output-type", "dotenv"]);
-        }
-
+        args.extend(Self::BINARY_STORE);
         args.extend(&["--output", output.to_str().unwrap_or_default()]);
         args.push(input.to_str().unwrap_or_default());
 
@@ -388,13 +383,8 @@ impl SopsService {
 
         let output = Self::plaintext_path(input)?;
 
-        let is_dotenv = Self::is_dotenv_file(&output);
         let mut args: Vec<&str> = vec!["-d"];
-
-        if is_dotenv {
-            args.extend(&["--input-type", "dotenv", "--output-type", "dotenv"]);
-        }
-
+        args.extend(Self::BINARY_STORE);
         args.extend(&["--output", output.to_str().unwrap_or_default()]);
         args.push(input.to_str().unwrap_or_default());
 
