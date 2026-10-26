@@ -459,39 +459,48 @@ impl Settings {
     pub fn template() -> String {
         r#"# rsenv configuration
 #
-# Locations (by precedence, lowest to highest):
-#   Global: this file - platform-dependent, print it with `rsenv config path`
-#           (Linux ~/.config/rsenv/, macOS ~/Library/Application Support/rsenv/)
-#   Local:  <vault_dir>/.rsenv.toml     (project-specific additions)
-#   Env:    RSENV__* environment variables (explicit overrides, e.g. RSENV__EDITOR)
+# The same template serves two files; `rsenv config path` prints both paths:
+#   Global config: rsenv.toml in the platform config dir
+#                  (macOS ~/Library/Application Support/rsenv/, Linux ~/.config/rsenv/)
+#   Vault config:  <vault>/.rsenv.toml, settings for one project
 #
-# Array Merge Semantics:
-#   Global config REPLACES compiled defaults (defaults are just examples).
-#   Local/vault config UNIONS with global (adds project-specific patterns).
-#   Use "!pattern" in local config to REMOVE an inherited item:
-#     file_extensions_enc = ["yaml", "!env"]  # adds yaml, removes env from global
+# Layers, each overriding the one above:
+#   1. compiled defaults
+#   2. global config  - lists REPLACE the defaults
+#   3. vault config   - lists ADD to the global lists; "!x" removes x:
+#                         file_extensions_enc = ["yaml", "!envrc"]
+#   4. RSENV__<KEY> environment variables, e.g. RSENV__EDITOR, RSENV__SOPS__GPG_KEY;
+#      lists are comma-separated, an empty value clears the list
+#
+# Every setting below is commented out and shows its default or an example.
 
-# Base directory for rsenv (vaults stored in base_dir/vaults)
+# Root of all rsenv data; vaults live in <base_dir>/vaults
 # base_dir = "~/.rsenv"
 
-# Editor for editing env files
+# Editor command (default: $VISUAL, else $EDITOR, else "vim")
 # editor = "vim"
 
 [sops]
-# GPG key fingerprint for SOPS encryption
+# Encryption key: set exactly one of gpg_key and age_key
+# GPG key fingerprint
 # gpg_key = "60A4127E82E218297532FAB6D750B66AE08F3B90"
-
-# Age public key (alternative to GPG)
+# Age public key
 # age_key = "age1..."
 
-# File extensions to encrypt (merged with global config, use !ext to remove)
+# Encryption patterns: which files `rsenv sops encrypt` encrypts and the
+# rsenv-managed .gitignore blocks ignore (the ciphertexts are never ignored).
+# Global file: replaces the defaults. Vault file: added to the global list.
+#
+# By extension: "env" matches *.env
 # file_extensions_enc = ["envrc", "env"]
+# By exact file name; inside a vault dotfiles carry dot-names (.pypirc -> dot.pypirc)
+# file_names_enc = ["dot.pypirc", "kube_config"]
 
-# Exact filenames to encrypt (merged with global config, use !name to remove)
-# file_names_enc = ["dot_pypirc", "dot_pgpass", "kube_config"]
-
-# File extensions to decrypt (typically just .enc)
+# Extensions of ciphertexts `rsenv sops decrypt` decrypts
 # file_extensions_dec = ["enc"]
+
+# Re-encrypt changed files before `rsenv vault commit` (--no-encrypt skips once)
+# encrypt_on_commit = true
 "#
         .to_string()
     }

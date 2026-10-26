@@ -453,3 +453,15 @@ fn given_empty_and_padded_list_envs_when_load_then_empty_and_trimmed() {
         vec!["env".to_string(), "envrc".to_string()]
     );
 }
+
+// ============================================================
+// Settings::template()
+// ============================================================
+
+/// `config init`/`config edit` write the template and later load it as config.
+#[test]
+fn given_template_when_parsed_then_it_is_valid_toml() {
+    let template = Settings::template();
+
+    toml::from_str::<toml::Value>(&template).expect("template must be valid TOML");
+}
