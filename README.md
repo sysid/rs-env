@@ -281,8 +281,11 @@ rsenv uses content-addressed filenames to detect staleness.
 ```
 
 A pre-commit hook (`rsenv hook install`) blocks commits when files are
-stale or unencrypted. `rsenv sops gitignore-sync` keeps plaintext out of git; `--dir`
-does the same for a secrets repo outside the vaults.
+stale or unencrypted. `rsenv sops gitignore-sync` keeps plaintext out of git.
+
+Without a vault: every sops command takes `--dir PATH`, so rsenv also manages a plain
+directory such as a secrets repo. Such a directory takes its patterns from the global
+config only ([details](https://github.com/sysid/rs-env/wiki/SOPS-Encryption#encrypting-a-plain-directory-no-vault)).
 
 ---
 
