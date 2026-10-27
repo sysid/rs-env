@@ -91,3 +91,37 @@ fn given_base_dir_gitignore_when_gitignore_status_global_then_header_names_base_
     assert!(stdout.contains("Base-dir .gitignore"), "{stdout}");
     assert!(!stdout.contains("Global Gitignore"), "{stdout}");
 }
+
+/// The section headers carry the counts, but on a long list they scroll away: the
+/// last line repeats them.
+#[test]
+fn given_files_in_every_state_when_sops_status_then_last_line_is_count_summary() {
+    // Arrange
+    let home = home();
+    let dir = home.base_dir.join("store");
+    fs::create_dir_all(&dir).unwrap();
+    let enc = |name: &str, content: &str| {
+        format!(
+            "{name}.{}.enc",
+            rsenv::application::hash::content_hash(content.as_bytes())
+        )
+    };
+    fs::write(dir.join("current.env"), "A=1").unwrap();
+    fs::write(dir.join(enc("current.env", "A=1")), "ciphertext").unwrap();
+    fs::write(dir.join(enc("orphan.env", "B=1")), "ciphertext").unwrap();
+    fs::write(dir.join("pending.env"), "C=1").unwrap();
+    fs::write(dir.join("stale.env"), "D=edited").unwrap();
+    fs::write(dir.join(enc("stale.env", "D=1")), "ciphertext").unwrap();
+
+    // Act
+    let output = rsenv(&home, &["sops", "status", "--dir", dir.to_str().unwrap()]);
+
+    // Assert
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{output:?}");
+    let last = stdout.lines().rev().find(|l| !l.trim().is_empty()).unwrap();
+    assert_eq!(
+        last, "Summary: 1 current, 1 orphaned, 1 pending, 1 stale",
+        "{stdout}"
+    );
+}

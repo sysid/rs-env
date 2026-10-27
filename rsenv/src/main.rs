@@ -1510,6 +1510,15 @@ fn handle_sops(
                 && status.orphaned.is_empty()
             {
                 output::detail(&"No matching files found");
+            } else {
+                // Last line on purpose: the section counts scroll away on a long list.
+                output::info(&format!(
+                    "Summary: {} current, {} orphaned, {} pending, {} stale",
+                    status.current.len(),
+                    status.orphaned.len(),
+                    status.pending_encrypt.len(),
+                    status.stale.len()
+                ));
             }
 
             Ok(())
