@@ -280,6 +280,15 @@ impl SopsService {
     /// ciphertext. Binary is byte-exact for every file type.
     const BINARY_STORE: [&'static str; 4] = ["--input-type", "binary", "--output-type", "binary"];
 
+    /// Upper bound on concurrent sops decrypts.
+    ///
+    /// Each decrypt is a private-key operation in the single gpg-agent; one sops per
+    /// CPU core exhausts its secure memory and random files fail with "Cannot allocate
+    /// memory". Encrypt needs only the public key and stays on the global pool.
+    // ponytail: fixed cap, not measured; make it configurable if 4 proves too slow or
+    // still too many for some agent.
+    const DECRYPT_THREADS: usize = 4;
+
     /// Encrypt a single file using SOPS with hash-based filename.
     ///
     /// Output file will be `{input}.{hash8}.enc`.
@@ -509,8 +518,9 @@ impl SopsService {
 
     /// Decrypt all .enc files in a directory.
     ///
-    /// Uses parallel execution with rayon. Never stops at a failing file: every
-    /// ciphertext is reported in exactly one list of the returned report.
+    /// Runs at most [`Self::DECRYPT_THREADS`] sops processes at once. Never stops at a
+    /// failing file: every ciphertext is reported in exactly one list of the returned
+    /// report.
     ///
     /// # Arguments
     /// * `base_dir` - Directory to process (defaults to vault if None)
@@ -533,10 +543,19 @@ impl SopsService {
 
         let files = self.collect_files(&dir, &self.settings.sops.file_extensions_dec, &[])?;
 
-        let outcomes: Vec<(PathBuf, ApplicationResult<DecryptOutcome>)> = files
-            .par_iter()
-            .map(|path| (path.clone(), self.decrypt(path, force)))
-            .collect();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(Self::DECRYPT_THREADS)
+            .build()
+            .map_err(|e| ApplicationError::OperationFailed {
+                context: "build decrypt thread pool".into(),
+                source: Box::new(e),
+            })?;
+        let outcomes: Vec<(PathBuf, ApplicationResult<DecryptOutcome>)> = pool.install(|| {
+            files
+                .par_iter()
+                .map(|path| (path.clone(), self.decrypt(path, force)))
+                .collect()
+        });
 
         let mut report = DecryptReport::default();
         for (enc, outcome) in outcomes {

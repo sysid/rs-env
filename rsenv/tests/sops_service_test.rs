@@ -728,6 +728,76 @@ fn given_one_sops_failure_when_decrypt_all_then_others_decrypted_and_failure_rep
     );
 }
 
+/// Stands in for the `sops` binary and records the highest number of calls that were
+/// running at the same time.
+struct ConcurrencyProbeSops {
+    running: std::sync::atomic::AtomicUsize,
+    max_running: std::sync::atomic::AtomicUsize,
+}
+
+impl rsenv::infrastructure::traits::CommandRunner for ConcurrencyProbeSops {
+    fn run(&self, _cmd: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
+        use std::os::unix::process::ExitStatusExt;
+        use std::sync::atomic::Ordering;
+        let now = self.running.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_running.fetch_max(now, Ordering::SeqCst);
+        // Long enough that unbounded parallel calls overlap.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let output = args[args.iter().position(|a| *a == "--output").unwrap() + 1];
+        std::fs::write(output, "decrypted")?;
+        self.running.fetch_sub(1, Ordering::SeqCst);
+        Ok(std::process::Output {
+            status: std::process::ExitStatus::from_raw(0),
+            stdout: vec![],
+            stderr: vec![],
+        })
+    }
+
+    fn run_with_stdin(
+        &self,
+        _cmd: &str,
+        _args: &[&str],
+        _stdin: &str,
+    ) -> std::io::Result<std::process::Output> {
+        unimplemented!("not used by decrypt")
+    }
+
+    fn run_interactive(
+        &self,
+        _cmd: &str,
+        _args: &[&str],
+    ) -> std::io::Result<std::process::ExitStatus> {
+        unimplemented!("not used by decrypt")
+    }
+}
+
+/// Every decrypt is a private-key operation in the one gpg-agent; with one sops per
+/// CPU core the agent runs out of secure memory ("Cannot allocate memory").
+#[test]
+fn given_many_ciphertexts_when_decrypt_all_then_at_most_four_sops_run_at_once() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    for i in 0..24 {
+        let name = format!("app{i}.env");
+        std::fs::write(dir.join(enc_name(&name, &name)), "ciphertext").unwrap();
+    }
+    let sops = Arc::new(ConcurrencyProbeSops {
+        running: std::sync::atomic::AtomicUsize::new(0),
+        max_running: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let settings = Arc::new(test_settings(dir.to_path_buf(), test_sops_config()));
+    let service = SopsService::new(Arc::new(RealFileSystem), sops.clone(), settings);
+
+    // Act
+    let report = service.decrypt_all(Some(dir), false).unwrap();
+
+    // Assert
+    assert_eq!(report.decrypted.len(), 24);
+    let max = sops.max_running.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(max <= 4, "{max} sops calls ran at once");
+}
+
 // ============================================================
 // encrypt_file(): old ciphertext survives a failed re-encryption
 // ============================================================
