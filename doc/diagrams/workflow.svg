@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 440" width="880" height="440" role="img" aria-labelledby="t d">
+  <title id="t">rsenv workflow</title>
+  <desc id="d">1 rsenv vault init, 2 rsenv env select, 3 rsenv guard add, 4 rsenv swap in, 5 rsenv sops encrypt, then work, 6 rsenv swap out, 7 rsenv sops encrypt.</desc>
+  <style>
+    :root {
+      --bg: #ffffff; --ink: #1f2328; --muted: #59636e; --row: #f6f8fa;
+      --proj: #0969da; --proj-bg: #ddf4ff; --proj-line: #54aeff;
+      --vault: #8250df; --vault-bg: #fbefff; --vault-line: #c297ff;
+      --ok: #1a7f37; --ok-bg: #dafbe1; --ok-line: #4ac26b;
+      --warn: #9a6700; --warn-bg: #fff8c5; --warn-line: #d4a72c;
+      --bad: #cf222e; --bad-bg: #ffebe9; --bad-line: #ff8182;
+      --link: #bf3989;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117; --ink: #e6edf3; --muted: #9198a1; --row: #161b22;
+        --proj: #4493f8; --proj-bg: #0c2d6b; --proj-line: #1f6feb;
+        --vault: #ab7df8; --vault-bg: #271052; --vault-line: #8957e5;
+        --ok: #3fb950; --ok-bg: #033a16; --ok-line: #238636;
+        --warn: #d29922; --warn-bg: #3b2300; --warn-line: #9e6a03;
+        --bad: #f85149; --bad-bg: #490202; --bad-line: #da3633;
+        --link: #f778ba;
+      }
+    }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--ink); font-size: 13px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .title { font-size: 17px; font-weight: 600; }
+    .path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; fill: var(--muted); }
+    .note { font-size: 12px; fill: var(--muted); }
+    .strong { font-weight: 600; }
+    .bg { fill: var(--bg); }
+    .row { fill: var(--row); }
+    .proj { fill: var(--proj-bg); stroke: var(--proj-line); stroke-width: 1.5; }
+    .vault { fill: var(--vault-bg); stroke: var(--vault-line); stroke-width: 1.5; }
+    .ok { fill: var(--ok-bg); stroke: var(--ok-line); stroke-width: 1.5; }
+    .warn { fill: var(--warn-bg); stroke: var(--warn-line); stroke-width: 1.5; }
+    .bad { fill: var(--bad-bg); stroke: var(--bad-line); stroke-width: 1.5; }
+    .ink-proj { fill: var(--proj); } .ink-vault { fill: var(--vault); } .ink-ok { fill: var(--ok); }
+    .ink-warn { fill: var(--warn); } .ink-bad { fill: var(--bad); } .ink-link { fill: var(--link); }
+    .ink-muted { fill: var(--muted); }
+    .line { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+    .arrow { stroke: var(--link); stroke-width: 2.5; fill: none; }
+    .arrow-proj { stroke: var(--proj); stroke-width: 2; fill: none; stroke-dasharray: 6 4; }
+    .arrow-vault { stroke: var(--vault); stroke-width: 2; fill: none; }
+    .head { fill: var(--link); } .head-proj { fill: var(--proj); } .head-vault { fill: var(--vault); }
+    .head-muted { fill: var(--muted); }
+    .pill { fill: var(--bg); stroke: var(--link); stroke-width: 1.5; }
+    .pill-text { font-size: 13px; font-weight: 600; fill: var(--link); }
+    .strike { text-decoration: line-through; }
+  </style>
+  <rect class="bg" x="0" y="0" width="880" height="440" rx="12"/>
+  <path class="line" d="M64 40 V 404"/>
+  <circle class="vault" cx="64" cy="40" r="16"/>
+  <text class="strong ink-vault" x="64" y="45" text-anchor="middle">1</text>
+  <text class="mono strong" x="100" y="45" text-anchor="start" style="font-size: 14px">rsenv vault init</text>
+  <text class="note" x="324" y="45" text-anchor="start">create vault, link via .envrc symlink</text>
+  <circle class="proj" cx="64" cy="92" r="16"/>
+  <text class="strong ink-proj" x="64" y="97" text-anchor="middle">2</text>
+  <text class="mono strong" x="100" y="97" text-anchor="start" style="font-size: 14px">rsenv env select</text>
+  <text class="note" x="324" y="97" text-anchor="start">pick environment, export variables</text>
+  <circle class="bad" cx="64" cy="144" r="16"/>
+  <text class="strong ink-bad" x="64" y="149" text-anchor="middle">3</text>
+  <text class="mono strong" x="100" y="149" text-anchor="start" style="font-size: 14px">rsenv guard add .env</text>
+  <text class="note" x="324" y="149" text-anchor="start">move secrets to vault (permanent)</text>
+  <circle class="ok" cx="64" cy="196" r="16"/>
+  <text class="strong ink-ok" x="64" y="201" text-anchor="middle">4</text>
+  <text class="mono strong" x="100" y="201" text-anchor="start" style="font-size: 14px">rsenv swap in</text>
+  <text class="note" x="324" y="201" text-anchor="start">swap in dev overrides (temporary)</text>
+  <circle class="warn" cx="64" cy="248" r="16"/>
+  <text class="strong ink-warn" x="64" y="253" text-anchor="middle">5</text>
+  <text class="mono strong" x="100" y="253" text-anchor="start" style="font-size: 14px">rsenv sops encrypt</text>
+  <text class="note" x="324" y="253" text-anchor="start">encrypt vault at rest</text>
+  <rect class="row" x="24" y="286" width="760" height="28" rx="14"/>
+  <text class="note strong" x="100" y="305" text-anchor="start">… work …</text>
+  <circle class="ok" cx="64" cy="352" r="16"/>
+  <text class="strong ink-ok" x="64" y="357" text-anchor="middle">6</text>
+  <text class="mono strong" x="100" y="357" text-anchor="start" style="font-size: 14px">rsenv swap out</text>
+  <text class="note" x="324" y="357" text-anchor="start">restore originals, no traces</text>
+  <circle class="warn" cx="64" cy="404" r="16"/>
+  <text class="strong ink-warn" x="64" y="409" text-anchor="middle">7</text>
+  <text class="mono strong" x="100" y="409" text-anchor="start" style="font-size: 14px">rsenv sops encrypt</text>
+  <text class="note" x="324" y="409" text-anchor="start">re-encrypt if changed</text>
+</svg>

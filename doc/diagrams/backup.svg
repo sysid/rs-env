@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 372" width="880" height="372" role="img" aria-labelledby="t d">
+  <title id="t">What the vault repo backs up</title>
+  <desc id="d">~/.rsenv is one git repo for all vaults. Ciphertexts, swap files and the encrypted dot.envrc are committed and pushed to a remote; plaintext env files are gitignored and never committed.</desc>
+  <style>
+    :root {
+      --bg: #ffffff; --ink: #1f2328; --muted: #59636e; --row: #f6f8fa;
+      --proj: #0969da; --proj-bg: #ddf4ff; --proj-line: #54aeff;
+      --vault: #8250df; --vault-bg: #fbefff; --vault-line: #c297ff;
+      --ok: #1a7f37; --ok-bg: #dafbe1; --ok-line: #4ac26b;
+      --warn: #9a6700; --warn-bg: #fff8c5; --warn-line: #d4a72c;
+      --bad: #cf222e; --bad-bg: #ffebe9; --bad-line: #ff8182;
+      --link: #bf3989;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117; --ink: #e6edf3; --muted: #9198a1; --row: #161b22;
+        --proj: #4493f8; --proj-bg: #0c2d6b; --proj-line: #1f6feb;
+        --vault: #ab7df8; --vault-bg: #271052; --vault-line: #8957e5;
+        --ok: #3fb950; --ok-bg: #033a16; --ok-line: #238636;
+        --warn: #d29922; --warn-bg: #3b2300; --warn-line: #9e6a03;
+        --bad: #f85149; --bad-bg: #490202; --bad-line: #da3633;
+        --link: #f778ba;
+      }
+    }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--ink); font-size: 13px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .title { font-size: 17px; font-weight: 600; }
+    .path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; fill: var(--muted); }
+    .note { font-size: 12px; fill: var(--muted); }
+    .strong { font-weight: 600; }
+    .bg { fill: var(--bg); }
+    .row { fill: var(--row); }
+    .proj { fill: var(--proj-bg); stroke: var(--proj-line); stroke-width: 1.5; }
+    .vault { fill: var(--vault-bg); stroke: var(--vault-line); stroke-width: 1.5; }
+    .ok { fill: var(--ok-bg); stroke: var(--ok-line); stroke-width: 1.5; }
+    .warn { fill: var(--warn-bg); stroke: var(--warn-line); stroke-width: 1.5; }
+    .bad { fill: var(--bad-bg); stroke: var(--bad-line); stroke-width: 1.5; }
+    .ink-proj { fill: var(--proj); } .ink-vault { fill: var(--vault); } .ink-ok { fill: var(--ok); }
+    .ink-warn { fill: var(--warn); } .ink-bad { fill: var(--bad); } .ink-link { fill: var(--link); }
+    .ink-muted { fill: var(--muted); }
+    .line { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+    .arrow { stroke: var(--link); stroke-width: 2.5; fill: none; }
+    .arrow-proj { stroke: var(--proj); stroke-width: 2; fill: none; stroke-dasharray: 6 4; }
+    .arrow-vault { stroke: var(--vault); stroke-width: 2; fill: none; }
+    .head { fill: var(--link); } .head-proj { fill: var(--proj); } .head-vault { fill: var(--vault); }
+    .head-muted { fill: var(--muted); }
+    .pill { fill: var(--bg); stroke: var(--link); stroke-width: 1.5; }
+    .pill-text { font-size: 13px; font-weight: 600; fill: var(--link); }
+    .strike { text-decoration: line-through; }
+  </style>
+  <rect class="bg" x="0" y="0" width="880" height="372" rx="12"/>
+  <rect class="vault" x="24" y="24" width="520" height="300" rx="14"/>
+  <text class="title ink-vault" x="44" y="56" text-anchor="start">~/.rsenv</text>
+  <text class="path" x="44" y="76" text-anchor="start">one git repo, covering every vault</text>
+  <text class="path" x="44" y="100" text-anchor="start">vaults/myproject-abc123/</text>
+  <rect class="row" x="44" y="110" width="480" height="30" rx="8"/>
+  <text class="mono ink-muted" x="58" y="129.68" text-anchor="start" style="font-size: 13px">envs/local.env</text>
+  <rect class="bad" x="412" y="116" width="98" height="18" rx="9"/>
+  <text class="ink-bad strong" x="461" y="129" text-anchor="middle" style="font-size: 11px">gitignored</text>
+  <rect class="row" x="44" y="148" width="480" height="30" rx="8"/>
+  <text class="mono " x="58" y="167.68" text-anchor="start" style="font-size: 13px">envs/local.env.a1b2c3d4.enc</text>
+  <rect class="ok" x="412" y="154" width="98" height="18" rx="9"/>
+  <text class="ink-ok strong" x="461" y="167" text-anchor="middle" style="font-size: 11px">committed</text>
+  <rect class="row" x="44" y="186" width="480" height="30" rx="8"/>
+  <text class="mono " x="58" y="205.68" text-anchor="start" style="font-size: 13px">guarded/secrets.yaml.b9c0d1e2.enc</text>
+  <rect class="ok" x="412" y="192" width="98" height="18" rx="9"/>
+  <text class="ink-ok strong" x="461" y="205" text-anchor="middle" style="font-size: 11px">committed</text>
+  <rect class="row" x="44" y="224" width="480" height="30" rx="8"/>
+  <text class="mono " x="58" y="243.68" text-anchor="start" style="font-size: 13px">swap/docker-compose.yml</text>
+  <rect class="ok" x="412" y="230" width="98" height="18" rx="9"/>
+  <text class="ink-ok strong" x="461" y="243" text-anchor="middle" style="font-size: 11px">committed</text>
+  <rect class="row" x="44" y="262" width="480" height="30" rx="8"/>
+  <text class="mono " x="58" y="281.68" text-anchor="start" style="font-size: 13px">dot.envrc.f3a4b5c6.enc</text>
+  <rect class="ok" x="412" y="268" width="98" height="18" rx="9"/>
+  <text class="ink-ok strong" x="461" y="281" text-anchor="middle" style="font-size: 11px">committed</text>
+  <path class="arrow" d="M544 174 L 689.0 174.0"/>
+  <path class="head" d="M700 174 L 689.2 179.2 L 689.2 168.8 z"/>
+  <rect class="pill" x="563.55" y="134" width="116.89999999999999" height="28" rx="14"/>
+  <text class="pill-text" x="622" y="153" text-anchor="middle">commit --push</text>
+  <path class="ok" d="M708 150 a 70 14 0 0 1 140 0 v 56 a 70 14 0 0 1 -140 0 z"/>
+  <path class="ok" d="M708 150 a 70 14 0 0 0 140 0" style="fill: none"/>
+  <text class="strong ink-ok" x="778" y="192" text-anchor="middle">remote</text>
+  <text class="note" x="778" y="210" text-anchor="middle">your backup</text>
+  <text class="note" x="44" y="352" text-anchor="start">Plaintext never leaves the machine: the gitignore keeps it out, the pre-commit hook blocks stale ciphertext.</text>
+</svg>

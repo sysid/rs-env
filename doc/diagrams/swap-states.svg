@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 380" width="880" height="380" role="img" aria-labelledby="t d">
+  <title id="t">Swap in and swap out</title>
+  <desc id="d">Swapped out, the project has the official file and the vault holds your dev version. Swap in moves the dev version into the project, backs up the official file and writes a host sentinel. Swap out reverses it.</desc>
+  <style>
+    :root {
+      --bg: #ffffff; --ink: #1f2328; --muted: #59636e; --row: #f6f8fa;
+      --proj: #0969da; --proj-bg: #ddf4ff; --proj-line: #54aeff;
+      --vault: #8250df; --vault-bg: #fbefff; --vault-line: #c297ff;
+      --ok: #1a7f37; --ok-bg: #dafbe1; --ok-line: #4ac26b;
+      --warn: #9a6700; --warn-bg: #fff8c5; --warn-line: #d4a72c;
+      --bad: #cf222e; --bad-bg: #ffebe9; --bad-line: #ff8182;
+      --link: #bf3989;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117; --ink: #e6edf3; --muted: #9198a1; --row: #161b22;
+        --proj: #4493f8; --proj-bg: #0c2d6b; --proj-line: #1f6feb;
+        --vault: #ab7df8; --vault-bg: #271052; --vault-line: #8957e5;
+        --ok: #3fb950; --ok-bg: #033a16; --ok-line: #238636;
+        --warn: #d29922; --warn-bg: #3b2300; --warn-line: #9e6a03;
+        --bad: #f85149; --bad-bg: #490202; --bad-line: #da3633;
+        --link: #f778ba;
+      }
+    }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--ink); font-size: 13px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .title { font-size: 17px; font-weight: 600; }
+    .path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; fill: var(--muted); }
+    .note { font-size: 12px; fill: var(--muted); }
+    .strong { font-weight: 600; }
+    .bg { fill: var(--bg); }
+    .row { fill: var(--row); }
+    .proj { fill: var(--proj-bg); stroke: var(--proj-line); stroke-width: 1.5; }
+    .vault { fill: var(--vault-bg); stroke: var(--vault-line); stroke-width: 1.5; }
+    .ok { fill: var(--ok-bg); stroke: var(--ok-line); stroke-width: 1.5; }
+    .warn { fill: var(--warn-bg); stroke: var(--warn-line); stroke-width: 1.5; }
+    .bad { fill: var(--bad-bg); stroke: var(--bad-line); stroke-width: 1.5; }
+    .ink-proj { fill: var(--proj); } .ink-vault { fill: var(--vault); } .ink-ok { fill: var(--ok); }
+    .ink-warn { fill: var(--warn); } .ink-bad { fill: var(--bad); } .ink-link { fill: var(--link); }
+    .ink-muted { fill: var(--muted); }
+    .line { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+    .arrow { stroke: var(--link); stroke-width: 2.5; fill: none; }
+    .arrow-proj { stroke: var(--proj); stroke-width: 2; fill: none; stroke-dasharray: 6 4; }
+    .arrow-vault { stroke: var(--vault); stroke-width: 2; fill: none; }
+    .head { fill: var(--link); } .head-proj { fill: var(--proj); } .head-vault { fill: var(--vault); }
+    .head-muted { fill: var(--muted); }
+    .pill { fill: var(--bg); stroke: var(--link); stroke-width: 1.5; }
+    .pill-text { font-size: 13px; font-weight: 600; fill: var(--link); }
+    .strike { text-decoration: line-through; }
+  </style>
+  <rect class="bg" x="0" y="0" width="880" height="380" rx="12"/>
+  <rect class="proj" x="24" y="24" width="300" height="300" rx="14"/>
+  <text class="title ink-proj" x="44" y="56" text-anchor="start">Swapped out</text>
+  <text class="path" x="44" y="76" text-anchor="start">normal state</text>
+  <text class="path" x="44" y="100" text-anchor="start">project/</text>
+  <rect class="row" x="44" y="108" width="260" height="44" rx="8"/>
+  <text class="mono" x="58" y="127" text-anchor="start" style="font-size: 13px">docker-compose.yml</text>
+  <text class="note" x="58" y="144" text-anchor="start">official version</text>
+  <text class="path" x="44" y="184" text-anchor="start">vault/swap/</text>
+  <rect class="vault" x="44" y="192" width="260" height="44" rx="8"/>
+  <text class="mono" x="58" y="211" text-anchor="start" style="font-size: 13px">docker-compose.yml</text>
+  <text class="note" x="58" y="228" text-anchor="start">your dev version</text>
+  <text class="note" x="44" y="290" text-anchor="start">git sees the official file</text>
+  <rect class="ok" x="456" y="24" width="400" height="300" rx="14"/>
+  <text class="title ink-ok" x="476" y="56" text-anchor="start">Swapped in</text>
+  <text class="path" x="476" y="76" text-anchor="start">working</text>
+  <text class="path" x="476" y="100" text-anchor="start">project/</text>
+  <rect class="vault" x="476" y="108" width="360" height="44" rx="8"/>
+  <text class="mono" x="490" y="127" text-anchor="start" style="font-size: 13px">docker-compose.yml</text>
+  <text class="note" x="490" y="144" text-anchor="start">your dev version, moved here</text>
+  <text class="path" x="476" y="184" text-anchor="start">vault/swap/</text>
+  <rect class="row" x="476" y="192" width="360" height="44" rx="8"/>
+  <text class="mono" x="490" y="211" text-anchor="start" style="font-size: 13px">docker-compose.yml.rsenv_original</text>
+  <text class="note" x="490" y="228" text-anchor="start">backup of the official version</text>
+  <rect class="warn" x="476" y="242" width="360" height="44" rx="8"/>
+  <text class="mono" x="490" y="261" text-anchor="start" style="font-size: 12px">docker-compose.yml@@HOST@@rsenv_active</text>
+  <text class="note" x="490" y="278" text-anchor="start">sentinel: which host swapped in</text>
+  <path class="arrow" d="M324 110 L 445.0 110.0"/>
+  <path class="head" d="M456 110 L 445.2 115.2 L 445.2 104.8 z"/>
+  <rect class="pill" x="331.55" y="74" width="116.89999999999999" height="28" rx="14"/>
+  <text class="pill-text" x="390" y="93" text-anchor="middle">rsenv swap in</text>
+  <path class="arrow" d="M456 230 L 335.0 230.0"/>
+  <path class="head" d="M324 230 L 334.8 224.8 L 334.8 235.2 z"/>
+  <rect class="pill" x="327.9" y="238" width="124.2" height="28" rx="14"/>
+  <text class="pill-text" x="390" y="257" text-anchor="middle">rsenv swap out</text>
+  <text class="note" x="440" y="356" text-anchor="middle">Swap out restores the official file; your changes to the dev version stay in the vault.</text>
+</svg>

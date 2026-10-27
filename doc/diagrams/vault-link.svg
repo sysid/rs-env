@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 380" width="880" height="380" role="img" aria-labelledby="t d">
+  <title id="t">rsenv: project and vault</title>
+  <desc id="d">The project keeps one symlink, .envrc, pointing to dot.envrc in the vault outside the project. The vault holds env files, guarded secrets, swap overrides and the vault config.</desc>
+  <style>
+    :root {
+      --bg: #ffffff; --ink: #1f2328; --muted: #59636e; --row: #f6f8fa;
+      --proj: #0969da; --proj-bg: #ddf4ff; --proj-line: #54aeff;
+      --vault: #8250df; --vault-bg: #fbefff; --vault-line: #c297ff;
+      --ok: #1a7f37; --ok-bg: #dafbe1; --ok-line: #4ac26b;
+      --warn: #9a6700; --warn-bg: #fff8c5; --warn-line: #d4a72c;
+      --bad: #cf222e; --bad-bg: #ffebe9; --bad-line: #ff8182;
+      --link: #bf3989;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117; --ink: #e6edf3; --muted: #9198a1; --row: #161b22;
+        --proj: #4493f8; --proj-bg: #0c2d6b; --proj-line: #1f6feb;
+        --vault: #ab7df8; --vault-bg: #271052; --vault-line: #8957e5;
+        --ok: #3fb950; --ok-bg: #033a16; --ok-line: #238636;
+        --warn: #d29922; --warn-bg: #3b2300; --warn-line: #9e6a03;
+        --bad: #f85149; --bad-bg: #490202; --bad-line: #da3633;
+        --link: #f778ba;
+      }
+    }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--ink); font-size: 13px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .title { font-size: 17px; font-weight: 600; }
+    .path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; fill: var(--muted); }
+    .note { font-size: 12px; fill: var(--muted); }
+    .strong { font-weight: 600; }
+    .bg { fill: var(--bg); }
+    .row { fill: var(--row); }
+    .proj { fill: var(--proj-bg); stroke: var(--proj-line); stroke-width: 1.5; }
+    .vault { fill: var(--vault-bg); stroke: var(--vault-line); stroke-width: 1.5; }
+    .ok { fill: var(--ok-bg); stroke: var(--ok-line); stroke-width: 1.5; }
+    .warn { fill: var(--warn-bg); stroke: var(--warn-line); stroke-width: 1.5; }
+    .bad { fill: var(--bad-bg); stroke: var(--bad-line); stroke-width: 1.5; }
+    .ink-proj { fill: var(--proj); } .ink-vault { fill: var(--vault); } .ink-ok { fill: var(--ok); }
+    .ink-warn { fill: var(--warn); } .ink-bad { fill: var(--bad); } .ink-link { fill: var(--link); }
+    .ink-muted { fill: var(--muted); }
+    .line { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+    .arrow { stroke: var(--link); stroke-width: 2.5; fill: none; }
+    .arrow-proj { stroke: var(--proj); stroke-width: 2; fill: none; stroke-dasharray: 6 4; }
+    .arrow-vault { stroke: var(--vault); stroke-width: 2; fill: none; }
+    .head { fill: var(--link); } .head-proj { fill: var(--proj); } .head-vault { fill: var(--vault); }
+    .head-muted { fill: var(--muted); }
+    .pill { fill: var(--bg); stroke: var(--link); stroke-width: 1.5; }
+    .pill-text { font-size: 13px; font-weight: 600; fill: var(--link); }
+    .strike { text-decoration: line-through; }
+  </style>
+  <rect class="bg" x="0" y="0" width="880" height="380" rx="12"/>
+  <rect class="proj" x="24" y="24" width="300" height="300" rx="14"/>
+  <text class="title ink-proj" x="44" y="56" text-anchor="start">Your project</text>
+  <text class="path" x="44" y="76" text-anchor="start">~/projects/myapp/</text>
+  <rect x="226.4" y="40" width="81.6" height="22" rx="11" style="fill: var(--proj)"/>
+  <text class="strong" x="267.2" y="55" text-anchor="middle" style="font-size: 11px; fill: var(--bg)">git-tracked</text>
+  <rect class="warn" x="44" y="96" width="260" height="34" rx="8"/>
+  <text class="mono " x="58" y="118.04" text-anchor="start" style="font-size: 14px">.envrc</text>
+  <text class="note" x="290" y="117.0" text-anchor="end">symlink</text>
+  <rect class="row" x="44" y="138" width="260" height="30" rx="8"/>
+  <text class="mono " x="58" y="158.04" text-anchor="start" style="font-size: 14px">src/</text>
+  <rect class="row" x="44" y="174" width="260" height="30" rx="8"/>
+  <text class="mono " x="58" y="194.04" text-anchor="start" style="font-size: 14px">Makefile</text>
+  <rect class="row" x="44" y="210" width="260" height="30" rx="8"/>
+  <text class="mono " x="58" y="230.04" text-anchor="start" style="font-size: 14px">docker-compose.yml</text>
+  <rect class="row" x="44" y="246" width="260" height="30" rx="8"/>
+  <text class="mono " x="58" y="266.04" text-anchor="start" style="font-size: 14px">config/database.yml</text>
+  <text class="note" x="44" y="306" text-anchor="start">minimal footprint: one symlink</text>
+  <rect class="vault" x="556" y="24" width="300" height="300" rx="14"/>
+  <text class="title ink-vault" x="576" y="56" text-anchor="start">The vault</text>
+  <text class="path" x="576" y="76" text-anchor="start">~/.rsenv/vaults/myapp-a1b2c3d4/</text>
+  <rect class="warn" x="576" y="96" width="260" height="34" rx="8"/>
+  <text class="mono " x="590" y="118.04" text-anchor="start" style="font-size: 14px">dot.envrc</text>
+  <text class="note" x="822" y="117.0" text-anchor="end">the real .envrc</text>
+  <rect class="row" x="576" y="138" width="260" height="30" rx="8"/>
+  <text class="mono " x="590" y="158.04" text-anchor="start" style="font-size: 14px">envs/</text>
+  <text class="note" x="822" y="157.0" text-anchor="end">local.env, prod.env</text>
+  <rect class="row" x="576" y="174" width="260" height="30" rx="8"/>
+  <text class="mono " x="590" y="194.04" text-anchor="start" style="font-size: 14px">guarded/</text>
+  <text class="note" x="822" y="193.0" text-anchor="end">secrets</text>
+  <rect class="row" x="576" y="210" width="260" height="30" rx="8"/>
+  <text class="mono " x="590" y="230.04" text-anchor="start" style="font-size: 14px">swap/</text>
+  <text class="note" x="822" y="229.0" text-anchor="end">dev overrides</text>
+  <rect class="row" x="576" y="246" width="260" height="30" rx="8"/>
+  <text class="mono " x="590" y="266.04" text-anchor="start" style="font-size: 14px">.rsenv.toml</text>
+  <text class="note" x="822" y="265.0" text-anchor="end">vault config</text>
+  <text class="note" x="576" y="306" text-anchor="start">outside project git: your personal workspace</text>
+  <path class="arrow" d="M304 113 L 565.0 113.0"/>
+  <path class="head" d="M576 113 L 565.2 118.2 L 565.2 107.8 z"/>
+  <rect class="pill" x="330.45" y="134" width="219.1" height="28" rx="14"/>
+  <text class="pill-text" x="440" y="153" text-anchor="middle">the only trace in your repo</text>
+  <text class="note" x="440" y="356" text-anchor="middle">rsenv vault init moves .envrc into the vault as dot.envrc and leaves the symlink behind</text>
+</svg>
