@@ -46,6 +46,10 @@ pub enum ApplicationError {
     )]
     DeleteRefused { problems: Vec<DeleteProblem> },
 
+    /// `rsenv worktree attach|detach` refused before writing anything.
+    #[error("{message}")]
+    WorktreeRefused { message: String },
+
     #[error("operation failed: {context}")]
     OperationFailed {
         context: String,

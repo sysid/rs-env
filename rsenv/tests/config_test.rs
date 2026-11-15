@@ -465,3 +465,28 @@ fn given_template_when_parsed_then_it_is_valid_toml() {
 
     toml::from_str::<toml::Value>(&template).expect("template must be valid TOML");
 }
+
+// ============================================================
+// [worktree] borrow
+// ============================================================
+
+#[test]
+fn given_vault_config_with_worktree_borrow_when_load_then_includes_it() {
+    // Arrange
+    let vault_dir = TempDir::new().unwrap();
+    fs::write(
+        vault_dir.path().join(".rsenv.toml"),
+        "[worktree]\nborrow = [\"CLAUDE.md\"]\n",
+    )
+    .unwrap();
+
+    // Act
+    let settings = Settings::load(Some(vault_dir.path())).expect("load settings");
+
+    // Assert
+    assert!(
+        settings.worktree.borrow.contains(&"CLAUDE.md".to_string()),
+        "{:?}",
+        settings.worktree.borrow
+    );
+}

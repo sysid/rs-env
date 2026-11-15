@@ -25,6 +25,7 @@ fn test_settings(base_dir: PathBuf) -> Settings {
     Settings {
         base_dir,
         editor: "vim".to_string(),
+        worktree: Default::default(),
         sops: Default::default(),
     }
 }

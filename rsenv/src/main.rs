@@ -13,12 +13,14 @@ use tracing_subscriber::EnvFilter;
 use colored::Colorize;
 use rsenv::application::envrc::update_vars_section;
 use rsenv::application::services::{
-    CommitOptions, DecryptOutcome, EnvironmentService, GitignoreDiff, GitignoreService,
-    ProjectCommit, SopsService, SwapService, VaultCommitService, VaultService,
+    AttachItem, CommitOptions, DecryptOutcome, EnvironmentService, GitignoreDiff, GitignoreService,
+    ProjectCommit, SkipReason, SopsService, SwapService, VaultCommitService, VaultService,
+    WorktreeService,
 };
+use rsenv::application::worktree::{borrowers, Borrower, Checkout};
 use rsenv::cli::args::{
     Cli, Commands, ConfigCommands, EnvCommands, GuardCommands, HookCommands, SopsCommands,
-    SwapCommands, VaultCommands,
+    SwapCommands, VaultCommands, WorktreeCommands,
 };
 use rsenv::cli::editor::is_vim_family;
 use rsenv::cli::hook::{pre_commit_hook, HookScope};
@@ -73,12 +75,11 @@ fn run(cli: Cli) -> rsenv::cli::CliResult<()> {
 
     match cli.command {
         Some(Commands::Config { command }) => handle_config(command, &settings, project_dir),
-        Some(Commands::Env { command }) => {
-            handle_env(command, project_dir, vault_path, &settings)
-        }
+        Some(Commands::Env { command }) => handle_env(command, project_dir, vault_path, &settings),
         Some(Commands::Guard { command }) => handle_guard(command, project_dir, &settings),
         Some(Commands::Hook { command }) => handle_hook(command, &settings),
         Some(Commands::Info { check }) => handle_info(project_dir, &settings, check),
+        Some(Commands::Worktree { command }) => handle_worktree(command, project_dir, &settings),
         Some(Commands::Sops { command }) => handle_sops(command, vault_path, &settings),
         Some(Commands::Vault { command }) => handle_vault(command, project_dir, &settings),
         Some(Commands::Swap { command }) => {
@@ -843,6 +844,9 @@ fn handle_guard(
 
     match command {
         GuardCommands::Add { file, absolute } => {
+            require_main_checkout(&guard_file_dir(&file), |m| {
+                rerun_guard_in(m, &format!("guard add {}", file.display()))
+            })?;
             let guarded = service.guard(&file, absolute).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
@@ -887,6 +891,9 @@ fn handle_guard(
             }
         }
         GuardCommands::Restore { file } => {
+            require_main_checkout(&guard_file_dir(&file), |m| {
+                rerun_guard_in(m, &format!("guard restore {}", file.display()))
+            })?;
             service.unguard(&file).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
@@ -906,6 +913,9 @@ fn handle_guard(
                     })
                 })?,
             };
+            require_main_checkout(&project_dir, |m| {
+                rerun_guard_in(m, &format!("guard delete {}", join_paths(&files)))
+            })?;
 
             let plan = service
                 .plan_guard_delete(&project_dir, &files)
@@ -999,6 +1009,232 @@ fn confirm_or_abort() -> rsenv::cli::CliResult<bool> {
     Ok(confirmed)
 }
 
+/// Refuse a vault-changing command in a linked git worktree (design R2).
+///
+/// The vault records one swapped-in copy per host and that copy lives in the main
+/// checkout. Run in a worktree, `swap in` is a silent no-op (the sentinel is keyed by
+/// path and host, not by checkout) and `swap out` moves the worktree's borrowed
+/// symlinks into the vault. `hint` builds the command to run in main instead.
+fn require_main_checkout(
+    dir: &std::path::Path,
+    hint: impl FnOnce(&std::path::Path) -> String,
+) -> rsenv::cli::CliResult<()> {
+    let checkout = rsenv::application::worktree::detect(&RealCommandRunner, dir).map_err(|e| {
+        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+    })?;
+    match checkout {
+        Checkout::Linked { dir, main_dir } => {
+            let hint = hint(&main_dir);
+            Err(rsenv::cli::CliError::LinkedWorktree {
+                dir,
+                main_dir,
+                hint,
+            })
+        }
+        Checkout::NotGit | Checkout::Main { .. } => Ok(()),
+    }
+}
+
+/// `swap` and `vault` resolve their paths against the project, so `-C <main>` repeats
+/// them as typed.
+fn rerun_in(main: &std::path::Path, args: &str) -> String {
+    format!("rsenv -C {} {}", main.display(), args)
+}
+
+/// `guard` resolves files against the cwd, not `-C`: the hint changes directory.
+fn rerun_guard_in(main: &std::path::Path, args: &str) -> String {
+    format!("cd {} && rsenv {}", main.display(), args)
+}
+
+/// Refuse to swap out entries that linked worktrees borrow (design R3).
+///
+/// Unlike the linked-worktree refusal this one has an override: the outcome is
+/// recoverable (the links revive on the next swap-in), and `vault commit` needs a
+/// swap-out.
+fn refuse_if_borrowed(
+    project_dir: &std::path::Path,
+    paths: &[std::path::PathBuf],
+    allow: bool,
+) -> rsenv::cli::CliResult<()> {
+    if allow {
+        return Ok(());
+    }
+    let found = borrowers_in(project_dir, paths)?;
+    if found.is_empty() {
+        Ok(())
+    } else {
+        Err(rsenv::cli::CliError::Borrowed(found))
+    }
+}
+
+/// Linked worktrees that borrow any of `paths` (project paths, relative or absolute)
+/// from the main checkout at `project_dir`. Empty outside git and in a linked worktree.
+fn borrowers_in(
+    project_dir: &std::path::Path,
+    paths: &[std::path::PathBuf],
+) -> rsenv::cli::CliResult<Vec<Borrower>> {
+    let app_err =
+        |e| rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e));
+    let Checkout::Main { dir: main_dir } =
+        rsenv::application::worktree::detect(&RealCommandRunner, project_dir).map_err(app_err)?
+    else {
+        return Ok(Vec::new());
+    };
+    let canonical = std::fs::canonicalize(project_dir).unwrap_or_else(|_| project_dir.into());
+    let relative: Vec<std::path::PathBuf> = paths
+        .iter()
+        .map(|p| {
+            p.strip_prefix(project_dir)
+                .or_else(|_| p.strip_prefix(&canonical))
+                .unwrap_or(p)
+                .to_path_buf()
+        })
+        .collect();
+    borrowers(&RealCommandRunner, &main_dir, &relative).map_err(app_err)
+}
+
+/// Project paths of the entries this host has swapped in.
+fn swapped_in_paths(
+    service: &SwapService,
+    project_dir: &std::path::Path,
+) -> rsenv::cli::CliResult<Vec<std::path::PathBuf>> {
+    Ok(service
+        .swapped_in_here(project_dir)
+        .map_err(|e| {
+            rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+        })?
+        .into_iter()
+        .map(|f| f.project_path)
+        .collect())
+}
+
+fn join_paths(files: &[std::path::PathBuf]) -> String {
+    files
+        .iter()
+        .map(|f| f.display().to_string())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Directory to run worktree detection in for a `guard` file argument: its parent,
+/// resolved against the cwd like the file itself.
+fn guard_file_dir(file: &std::path::Path) -> std::path::PathBuf {
+    let abs = if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(file))
+            .unwrap_or_else(|_| file.to_path_buf())
+    };
+    abs.parent().map(|p| p.to_path_buf()).unwrap_or(abs)
+}
+
+fn handle_worktree(
+    command: WorktreeCommands,
+    project_dir: Option<std::path::PathBuf>,
+    settings: &Settings,
+) -> rsenv::cli::CliResult<()> {
+    let app_err =
+        |e| rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e));
+    let dir_arg = match &command {
+        WorktreeCommands::Attach { dir } | WorktreeCommands::Detach { dir } => dir.clone(),
+    };
+    let dir = dir_arg
+        .or(project_dir)
+        .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+    let fs = Arc::new(RealFileSystem);
+    let runner = Arc::new(RealCommandRunner);
+    let settings_arc = Arc::new(settings.clone());
+    let vault_service = Arc::new(VaultService::new(fs.clone(), settings_arc.clone()));
+    let swap_service = Arc::new(SwapService::new(
+        fs.clone(),
+        vault_service.clone(),
+        settings_arc,
+    ));
+    let service = WorktreeService::new(fs.clone(), vault_service, swap_service, runner.clone());
+
+    // The borrow list comes from MAIN's vault config: the worktree may not be attached
+    // yet, so the settings loaded for the cwd can lack the vault layer.
+    let extra = match rsenv::application::worktree::detect(runner.as_ref(), &dir) {
+        Ok(Checkout::Linked { main_dir, .. }) => {
+            match VaultService::discover_vault_path(fs.as_ref(), &main_dir)
+                .ok()
+                .flatten()
+            {
+                Some(vault) => {
+                    Settings::load(Some(&vault))
+                        .map_err(app_err)?
+                        .worktree
+                        .borrow
+                }
+                None => settings.worktree.borrow.clone(),
+            }
+        }
+        _ => settings.worktree.borrow.clone(),
+    };
+
+    match command {
+        WorktreeCommands::Attach { .. } => {
+            let plan = service.plan_attach(&dir, &extra).map_err(app_err)?;
+            let linked = service.apply_attach(&plan).map_err(app_err)?;
+
+            output::action(
+                "Attached",
+                &format!("{} to {}", plan.worktree.display(), plan.main_dir.display()),
+            );
+            if linked.is_empty() {
+                output::detail(&"linked:  nothing new");
+            }
+            for p in &linked {
+                output::detail(&format!("linked:  {}", p.display()));
+            }
+            for item in &plan.items {
+                if let AttachItem::Skip { path, reason } = item {
+                    let why = match reason {
+                        SkipReason::NotInMain => "not in main",
+                        SkipReason::Tracked => {
+                            "tracked in git: the worktree keeps the committed version"
+                        }
+                        SkipReason::AlreadyLinked => continue,
+                    };
+                    output::detail(&format!("skipped: {} ({})", path.display(), why));
+                }
+            }
+            if linked.iter().any(|p| p == std::path::Path::new(".envrc")) {
+                output::info(&format!("next: direnv allow {}", plan.worktree.display()));
+            } else {
+                output::info(&format!(
+                    "next: direnv allow {}  (if not done yet)",
+                    plan.worktree.display()
+                ));
+            }
+            Ok(())
+        }
+        WorktreeCommands::Detach { .. } => {
+            let report = service.detach(&dir, &extra).map_err(app_err)?;
+            output::action("Detached", &report.worktree.display());
+            if report.removed.is_empty() {
+                output::detail(&"removed: nothing");
+            }
+            for p in &report.removed {
+                output::detail(&format!("removed: {}", p.display()));
+            }
+            for p in &report.kept {
+                output::detail(&format!(
+                    "kept:    {} (not a link into main or the vault)",
+                    p.display()
+                ));
+            }
+            output::info(&format!(
+                "next: git worktree remove {}",
+                report.worktree.display()
+            ));
+            Ok(())
+        }
+    }
+}
+
 fn handle_info(
     project_dir: Option<std::path::PathBuf>,
     settings: &Settings,
@@ -1022,31 +1258,88 @@ fn handle_info(
 
     output::header(&format!("Project: {}", project_dir.display()));
 
-    let vault = vault_service.get(&project_dir).map_err(|e| {
-        rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
-    })?;
+    let runner = Arc::new(RealCommandRunner);
+    let checkout = rsenv::application::worktree::detect(runner.as_ref(), &project_dir)
+        .unwrap_or(Checkout::NotGit);
+    let linked_main = match &checkout {
+        Checkout::Linked { main_dir, .. } => Some(main_dir.clone()),
+        _ => None,
+    };
+    match &checkout {
+        Checkout::Main { dir } => {
+            let n = rsenv::application::worktree::linked_worktrees(runner.as_ref(), dir)
+                .map(|w| w.len())
+                .unwrap_or(0);
+            output::info(&format!(
+                "Checkout: main checkout, {} linked worktree{}",
+                n,
+                if n == 1 { "" } else { "s" }
+            ));
+        }
+        Checkout::Linked { main_dir, .. } => {
+            output::info(&format!(
+                "Checkout: linked worktree of {}",
+                main_dir.display()
+            ));
+        }
+        Checkout::NotGit => {}
+    }
+
+    let swap_service = Arc::new(SwapService::new(
+        fs.clone(),
+        vault_service.clone(),
+        settings_arc.clone(),
+    ));
+    let worktree_service = WorktreeService::new(
+        fs.clone(),
+        vault_service.clone(),
+        swap_service.clone(),
+        runner.clone(),
+    );
+
+    // In a linked worktree a broken .envrc link is a reported problem, not a failure.
+    let vault = match vault_service.get(&project_dir) {
+        Ok(v) => v,
+        Err(_) if linked_main.is_some() => None,
+        Err(e) => {
+            return Err(rsenv::cli::CliError::Infra(
+                rsenv::infrastructure::InfraError::Application(e),
+            ))
+        }
+    };
 
     match vault {
         Some(v) => {
             output::info(&format!("Vault:   {}", v.path.display()));
             output::info(&format!("ID:      {}", v.sentinel_id));
 
-            // Count guarded files
-            let guarded_dir = v.path.join("guarded");
-            let guarded_count = if guarded_dir.exists() {
-                walkdir::WalkDir::new(&guarded_dir)
-                    .into_iter()
-                    .filter_map(|e| e.ok())
-                    .filter(|e| e.file_type().is_file())
-                    .count()
-            } else {
-                0
-            };
-            output::info(&format!("Guarded: {} files", guarded_count));
+            // Guarded files, not files in guarded/: ciphertexts belong to their plaintext.
+            let guarded_count = vault_service
+                .guarded_paths(&v)
+                .map_err(|e| {
+                    rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
+                })?
+                .len();
+            output::info(&format!(
+                "Guarded: {} file{}",
+                guarded_count,
+                if guarded_count == 1 { "" } else { "s" }
+            ));
 
-            // Swap status summary
-            let swap_service = SwapService::new(fs.clone(), vault_service.clone(), settings_arc);
-            if let Ok(swap_files) = swap_service.status(&project_dir) {
+            // Swap status summary. In a worktree the vault's state is main's; the quiet
+            // variant skips the sourceDir check, whose reconnect advice would re-point
+            // the vault at the worktree.
+            let swap_files = if linked_main.is_some() {
+                swap_service.status_quiet(&project_dir)
+            } else {
+                swap_service.status(&project_dir)
+            };
+            let borrowed_note = if linked_main.is_some() {
+                " — main's state, borrowed here"
+            } else {
+                ""
+            };
+            if let Ok(swap_files) = &swap_files {
                 if !swap_files.is_empty() {
                     let in_count = swap_files
                         .iter()
@@ -1054,15 +1347,44 @@ fn handle_info(
                         .count();
                     let out_count = swap_files.len() - in_count;
                     output::info(&format!(
-                        "Swap:    {} files ({} in, {} out)",
+                        "Swap:    {} files ({} in, {} out){}",
                         swap_files.len(),
                         in_count,
-                        out_count
+                        out_count,
+                        borrowed_note
                     ));
                 } else {
-                    output::info("Swap:    0 files");
+                    output::info(&format!("Swap:    0 files{borrowed_note}"));
                 }
             }
+
+            if let Checkout::Main { dir } = &checkout {
+                let mut borrow_set: std::collections::BTreeSet<std::path::PathBuf> = swap_files
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|f| {
+                        f.project_path
+                            .strip_prefix(&project_dir)
+                            .unwrap_or(&f.project_path)
+                            .to_path_buf()
+                    })
+                    .collect();
+                borrow_set.extend(vault_service.guarded_paths(&v).unwrap_or_default());
+                borrow_set.extend(
+                    settings
+                        .worktree
+                        .borrow
+                        .iter()
+                        .map(std::path::PathBuf::from),
+                );
+                print_worktrees(
+                    runner.as_ref(),
+                    dir,
+                    &borrow_set.into_iter().collect::<Vec<_>>(),
+                );
+            }
+            print_problems(&worktree_service.problems(&project_dir));
 
             // Gitignore status
             if let Ok(global_settings) = Settings::load_global_only() {
@@ -1118,6 +1440,11 @@ fn handle_info(
                 output::detail(&format!("sops.age_key: {}", truncated));
             }
         }
+        None if linked_main.is_some() => {
+            // `vault init` here would create a second vault for the worktree.
+            output::info(&"Vault:   (not attached)");
+            print_problems(&worktree_service.problems(&project_dir));
+        }
         None => {
             output::info(&"Vault:   (not initialized)");
             println!();
@@ -1126,6 +1453,60 @@ fn handle_info(
     }
 
     Ok(())
+}
+
+/// `info`'s worktree list: every linked worktree of `main` and what it borrows.
+fn print_worktrees(
+    runner: &dyn rsenv::infrastructure::traits::CommandRunner,
+    main: &std::path::Path,
+    borrow_set: &[std::path::PathBuf],
+) {
+    let worktrees =
+        rsenv::application::worktree::linked_worktrees(runner, main).unwrap_or_default();
+    if worktrees.is_empty() {
+        return;
+    }
+    let found = borrowers(runner, main, borrow_set).unwrap_or_default();
+    println!();
+    output::info(&"Worktrees:");
+    for wt in &worktrees {
+        let borrows = found
+            .iter()
+            .find(|b| b.dir == wt.dir)
+            .map(|b| {
+                b.paths
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_else(|| "nothing (not attached)".to_string());
+        output::detail(&format!(
+            "{}  {}  borrows: {}",
+            wt.branch.as_deref().unwrap_or("(detached)"),
+            wt.dir.display(),
+            borrows
+        ));
+    }
+}
+
+/// `info`'s health section; prints nothing when healthy.
+fn print_problems(problems: &[rsenv::application::services::Problem]) {
+    if problems.is_empty() {
+        return;
+    }
+    println!();
+    output::info(&"Problems:");
+    for p in problems {
+        let mark = match p.severity {
+            rsenv::application::services::Severity::Error => "✗".red(),
+            rsenv::application::services::Severity::Warn => "!".yellow(),
+        };
+        output::detail(&format!("{} {}  {}", mark, p.code, p.message));
+        if let Some(hint) = &p.hint {
+            output::detail(&format!("    fix: {hint}"));
+        }
+    }
 }
 
 fn resolve_sops_dir(
@@ -1161,24 +1542,31 @@ fn handle_vault(
             let project_dir = project
                 .or(project_dir_opt)
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
+            require_main_checkout(&project_dir, |m| rerun_in(m, "vault init"))?;
             handle_vault_create(project_dir, absolute, settings)
         }
         VaultCommands::Reset { project } => {
             let project_dir = project
                 .or(project_dir_opt)
                 .unwrap_or_else(|| std::env::current_dir().unwrap());
+            require_main_checkout(&project_dir, |m| rerun_in(m, "vault reset"))?;
             handle_vault_reset(project_dir, settings)
         }
         VaultCommands::Reconnect { envrc_path } => {
             let project_dir = project_dir_opt.unwrap_or_else(|| std::env::current_dir().unwrap());
+            require_main_checkout(&project_dir, |m| {
+                rerun_in(m, &format!("vault reconnect {}", envrc_path.display()))
+            })?;
             handle_vault_reconnect(envrc_path, project_dir, settings)
         }
         VaultCommands::Commit {
             auto,
             push,
             no_encrypt,
+            allow_borrowed,
         } => {
             let project_dir = project_dir_opt.unwrap_or_else(|| std::env::current_dir().unwrap());
+            require_main_checkout(&project_dir, |m| rerun_in(m, "vault commit"))?;
 
             let fs = Arc::new(RealFileSystem);
             let settings = Arc::new(settings.clone());
@@ -1188,6 +1576,9 @@ fn handle_vault(
                 vault_service.clone(),
                 settings.clone(),
             ));
+            // Commit swaps out first; borrowed entries would lose their content.
+            let affected = swapped_in_paths(&swap_service, &project_dir)?;
+            refuse_if_borrowed(&project_dir, &affected, allow_borrowed)?;
             let cmd = Arc::new(RealCommandRunner);
             let sops = Arc::new(SopsService::new(
                 Arc::new(RealFileSystem),
@@ -2061,6 +2452,9 @@ fn handle_swap(
             if files.is_empty() {
                 return Err(rsenv::cli::CliError::Usage("no files specified".into()));
             }
+            require_main_checkout(&project_dir, |m| {
+                rerun_in(m, &format!("swap in {}", join_paths(&files)))
+            })?;
 
             let swapped = service.swap_in(&project_dir, &files).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
@@ -2080,10 +2474,48 @@ fn handle_swap(
             files,
             global,
             vault_base,
+            allow_borrowed,
         } => {
+            // --global walks vaults by their recorded sourceDir, never by the cwd.
+            if !global {
+                require_main_checkout(&project_dir, |m| {
+                    rerun_in(m, format!("swap out {}", join_paths(&files)).trim_end())
+                })?;
+                let affected = if files.is_empty() {
+                    swapped_in_paths(&service, &project_dir)?
+                } else {
+                    files.clone()
+                };
+                refuse_if_borrowed(&project_dir, &affected, allow_borrowed)?;
+            }
             if global {
                 // Global: swap out all vaults
                 let vault_base_dir = vault_base.unwrap_or_else(|| settings.vaults_dir());
+
+                // Runs unattended, so it warns instead of refusing: a refusal would
+                // silently skip a vault, dangling links revive on the next swap-in.
+                if let Ok(statuses) = service.status_all_vaults(&vault_base_dir) {
+                    for status in &statuses {
+                        let Some(project) = &status.project_path else {
+                            continue;
+                        };
+                        let paths: Vec<_> = status
+                            .active_swaps
+                            .iter()
+                            .map(|f| f.project_path.clone())
+                            .collect();
+                        for b in borrowers_in(project, &paths).unwrap_or_default() {
+                            let names: Vec<_> =
+                                b.paths.iter().map(|p| p.display().to_string()).collect();
+                            output::warning(&format!(
+                                "{}: linked worktree {} borrows {}; its links dangle until the next swap in",
+                                status.vault_id,
+                                b.dir.display(),
+                                names.join(", ")
+                            ));
+                        }
+                    }
+                }
 
                 let results = service.swap_out_all_vaults(&vault_base_dir).map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
@@ -2137,6 +2569,9 @@ fn handle_swap(
             if files.is_empty() {
                 return Err(rsenv::cli::CliError::Usage("no files specified".into()));
             }
+            require_main_checkout(&project_dir, |m| {
+                rerun_in(m, &format!("swap init {}", join_paths(&files)))
+            })?;
 
             let initialized = service.swap_init(&project_dir, &files).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
@@ -2222,10 +2657,27 @@ fn handle_swap(
                     _ => std::process::exit(rsenv::exitcode::UNMANAGED),
                 }
             } else {
-                // Project-level: show status for current project
-                let status = service.status(&project_dir).map_err(|e| {
+                // Project-level: show status for current project. In a linked worktree the
+                // vault's state is main's; the quiet variant skips the sourceDir check,
+                // whose reconnect advice would re-point the vault at the worktree.
+                let linked_main =
+                    match rsenv::application::worktree::detect(&RealCommandRunner, &project_dir) {
+                        Ok(Checkout::Linked { main_dir, .. }) => Some(main_dir),
+                        _ => None,
+                    };
+                let status = match &linked_main {
+                    Some(_) => service.status_quiet(&project_dir),
+                    None => service.status(&project_dir),
+                }
+                .map_err(|e| {
                     rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
                 })?;
+                if let Some(main) = &linked_main {
+                    output::info(&format!(
+                        "(linked worktree: showing the state of {})",
+                        main.display()
+                    ));
+                }
 
                 if status.is_empty() {
                     output::info(&"No swappable files found");
@@ -2344,10 +2796,18 @@ fn handle_swap(
             })?;
             Ok(())
         }
-        SwapCommands::Delete { files, yes } => {
+        SwapCommands::Delete {
+            files,
+            yes,
+            allow_borrowed,
+        } => {
             if files.is_empty() {
                 return Err(rsenv::cli::CliError::Usage("no files specified".into()));
             }
+            require_main_checkout(&project_dir, |m| {
+                rerun_in(m, &format!("swap delete {}", join_paths(&files)))
+            })?;
+            refuse_if_borrowed(&project_dir, &files, allow_borrowed)?;
 
             let plan = service.plan_delete(&project_dir, &files).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))

@@ -15,6 +15,7 @@ fn test_settings(base_dir: PathBuf) -> Settings {
     Settings {
         base_dir,
         editor: "vim".to_string(),
+        worktree: Default::default(),
         sops: Default::default(),
     }
 }
@@ -1442,4 +1443,78 @@ fn given_dotfile_in_subdir_when_guard_then_neutralizes_path() {
 
     // Symlink still points to the neutralized vault location
     assert!(guarded.project_path.is_symlink());
+}
+
+// ============================================================
+// guarded_paths() tests
+// ============================================================
+
+/// A guarded file has a plaintext and, once encrypted, ciphertexts next to it in
+/// `guarded/`. It is still ONE guarded project path, under its project name.
+#[test]
+fn given_guarded_dotfile_with_ciphertext_when_guarded_paths_then_one_project_path() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(project_dir.join("config")).unwrap();
+    let secret = project_dir.join("config/.secret");
+    std::fs::write(&secret, "token\n").unwrap();
+    let service = VaultService::new(
+        Arc::new(RealFileSystem),
+        Arc::new(test_settings(temp.path().to_path_buf())),
+    );
+    let vault = service.init(&project_dir, false).unwrap();
+    let guarded = service.guard(&secret, false).unwrap();
+    let ciphertext = guarded.vault_path.with_file_name("dot.secret.a1b2c3d4.enc");
+    std::fs::write(&ciphertext, "ciphertext").unwrap();
+
+    // Act
+    let paths = service.guarded_paths(&vault).unwrap();
+
+    // Assert
+    assert_eq!(paths, vec![PathBuf::from("config/.secret")]);
+}
+
+/// `sops clean` removes plaintexts; the file is still guarded, by its ciphertext.
+#[test]
+fn given_guarded_file_with_only_ciphertext_when_guarded_paths_then_still_listed() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let service = VaultService::new(
+        Arc::new(RealFileSystem),
+        Arc::new(test_settings(temp.path().to_path_buf())),
+    );
+    let vault = service.init(&project_dir, false).unwrap();
+    std::fs::write(
+        vault.path.join("guarded/secrets.env.0badcafe.enc"),
+        "ciphertext",
+    )
+    .unwrap();
+
+    // Act
+    let paths = service.guarded_paths(&vault).unwrap();
+
+    // Assert
+    assert_eq!(paths, vec![PathBuf::from("secrets.env")]);
+}
+
+#[test]
+fn given_no_guarded_files_when_guarded_paths_then_empty() {
+    // Arrange
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("myproject");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let service = VaultService::new(
+        Arc::new(RealFileSystem),
+        Arc::new(test_settings(temp.path().to_path_buf())),
+    );
+    let vault = service.init(&project_dir, false).unwrap();
+
+    // Act
+    let paths = service.guarded_paths(&vault).unwrap();
+
+    // Assert
+    assert!(paths.is_empty(), "{paths:?}");
 }

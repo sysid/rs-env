@@ -72,6 +72,22 @@ pub struct RawSopsConfig {
     pub encrypt_on_commit: Option<bool>,
 }
 
+/// Linked git worktree settings (`rsenv worktree attach`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct WorktreeConfig {
+    /// Project paths a linked worktree borrows from main besides the swap entries and
+    /// guarded files, e.g. `CLAUDE.md`, `.claude`. Default: none.
+    pub borrow: Vec<String>,
+}
+
+/// Raw worktree config: `None` = not set in this layer.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct RawWorktreeConfig {
+    pub borrow: Option<Vec<String>>,
+}
+
 /// Raw settings for intermediate parsing.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
@@ -80,6 +96,8 @@ pub struct RawSettings {
     pub editor: Option<String>,
     #[serde(default)]
     pub sops: RawSopsConfig,
+    #[serde(default)]
+    pub worktree: RawWorktreeConfig,
 }
 
 impl SopsConfig {
@@ -188,6 +206,8 @@ pub struct Settings {
     pub editor: String,
     /// SOPS encryption settings
     pub sops: SopsConfig,
+    /// Linked git worktree settings
+    pub worktree: WorktreeConfig,
 }
 
 impl Default for Settings {
@@ -206,6 +226,7 @@ impl Default for Settings {
             base_dir,
             editor,
             sops: SopsConfig::default(),
+            worktree: WorktreeConfig::default(),
         }
     }
 }
@@ -282,6 +303,14 @@ impl Settings {
                 .clone()
                 .unwrap_or_else(|| self.editor.clone()),
             sops: self.sops.merge(&overlay.sops),
+            worktree: WorktreeConfig {
+                borrow: overlay
+                    .worktree
+                    .borrow
+                    .as_ref()
+                    .map(|o| SopsConfig::merge_array(&self.worktree.borrow, o))
+                    .unwrap_or_else(|| self.worktree.borrow.clone()),
+            },
         }
     }
 
@@ -300,6 +329,13 @@ impl Settings {
                 .unwrap_or_else(|| self.base_dir.clone()),
             editor: global.editor.clone().unwrap_or_else(|| self.editor.clone()),
             sops: self.sops.apply_global(&global.sops),
+            worktree: WorktreeConfig {
+                borrow: global
+                    .worktree
+                    .borrow
+                    .clone()
+                    .unwrap_or_else(|| self.worktree.borrow.clone()),
+            },
         }
     }
 
@@ -395,6 +431,9 @@ impl Settings {
         }
         if let Ok(val) = config.get_bool("sops.encrypt_on_commit") {
             settings.sops.encrypt_on_commit = val;
+        }
+        if let Some(val) = env_list(&config, "worktree.borrow") {
+            settings.worktree.borrow = val;
         }
 
         Ok(settings)
@@ -501,6 +540,12 @@ impl Settings {
 
 # Re-encrypt changed files before `rsenv vault commit` (--no-encrypt skips once)
 # encrypt_on_commit = true
+
+[worktree]
+# Paths `rsenv worktree attach` links from the main checkout into a linked worktree,
+# in addition to the vault's swap entries and guarded files. Paths tracked in git
+# are never linked.
+# borrow = ["CLAUDE.md", ".claude"]
 "#
         .to_string()
     }
@@ -547,6 +592,7 @@ mod tests {
         let mut settings = Settings {
             base_dir: PathBuf::from("~/.rsenv"),
             editor: "~/bin/myeditor".to_string(),
+            worktree: Default::default(),
             sops: SopsConfig::default(),
         };
 
@@ -575,6 +621,7 @@ mod tests {
     fn given_env_var_in_path_when_expand_paths_then_expands_variable() {
         let mut settings = Settings {
             base_dir: PathBuf::from("$HOME/.rsenv"),
+            worktree: Default::default(),
             editor: "${HOME}/bin/myeditor".to_string(),
             sops: SopsConfig::default(),
         };

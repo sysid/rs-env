@@ -70,6 +70,7 @@ fn test_settings(base_dir: PathBuf, encrypt_on_commit: bool) -> Settings {
     Settings {
         base_dir,
         editor: "vim".to_string(),
+        worktree: Default::default(),
         sops: rsenv::config::SopsConfig {
             encrypt_on_commit,
             ..Default::default()

@@ -10,6 +10,7 @@ mod sops;
 mod swap;
 mod vault;
 mod vault_commit;
+mod worktree;
 
 pub use environment::{EnvHierarchy, EnvOutput, EnvironmentService, MultiParentFile};
 pub use gitignore::{GitignoreDiff, GitignoreService, GitignoreStatus, VaultGitignoreStatus};
@@ -18,4 +19,7 @@ pub use swap::{is_binary, SwapChange, SwapChangeKind, SwapDeletion, SwapEntryDif
 pub use vault::{GuardDeletion, VaultService};
 pub use vault_commit::{
     CommitOptions, CommitOutcome, ProjectCommit, StagedChange, VaultCommitService,
+};
+pub use worktree::{
+    AttachItem, AttachPlan, DetachReport, Problem, Severity, SkipReason, WorktreeService,
 };

@@ -114,6 +114,22 @@ the file they point at.
 Dot-file names are reported as they appear in the project (`.gitignore`), not in their
 neutralized vault form (`dot.gitignore`).
 
+**Linked git worktrees**: swapped-in state is per host, and it lives in the main checkout. A
+worktree created with `git worktree add` therefore *borrows* main's files through symlinks
+instead of swapping itself. `rsenv worktree attach` creates those links (an absolute `.envrc`
+to the vault, plus the swap entries, guarded files and `[worktree] borrow` paths), and
+`rsenv worktree detach` removes them so a plain `git worktree remove` works:
+
+```bash
+git worktree add ../myproject__worktrees/feat -b feat
+rsenv worktree attach ../myproject__worktrees/feat && direnv allow ../myproject__worktrees/feat
+```
+
+Commands that change the vault (`swap in/out`, `guard add`, `vault reconnect`, ...) are
+refused inside a linked worktree and name the command to run in main instead. In main,
+swapping out an entry a worktree still borrows is refused unless you pass
+`--allow-borrowed`. `rsenv info` lists the worktrees and reports broken links.
+
 ---
 
 ## 3. Environment Hierarchy
