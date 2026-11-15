@@ -300,7 +300,6 @@ fn given_main_checkout_without_borrowers_when_swap_out_then_allowed() {
 #[case::swap_out_all(&["swap", "out"])]
 #[case::swap_out_path(&["swap", "out", "thoughts"])]
 #[case::swap_delete(&["swap", "delete", "-y", "thoughts"])]
-#[case::vault_commit(&["vault", "commit", "--auto"])]
 fn given_worktree_borrows_entry_when_swapping_it_out_in_main_then_refused(#[case] args: &[&str]) {
     // Arrange
     let fx = fixture();
@@ -1039,4 +1038,186 @@ fn given_checkout_kind_when_info_check_then_exit_code_unchanged(
     // Assert
     assert_eq!(out.status.code(), Some(code), "{which}: {out:?}");
     assert!(out.stdout.is_empty());
+}
+
+// ============================================================
+// Review fixes
+// ============================================================
+
+/// `vault commit` never swaps out: it requires the project swapped out already, and
+/// `swap out` is where borrowers are checked. So commit names `swap out` as the
+/// remedy, not detach, and has no `--allow-borrowed` that could not change anything.
+#[test]
+fn given_worktree_borrows_entry_when_vault_commit_in_main_then_asks_for_swap_out() {
+    // Arrange
+    let fx = fixture();
+    fx.attach_by_hand();
+    let vault_before = snapshot(&fx.vault);
+
+    // Act
+    let out = fx.rsenv(&fx.main, &["vault", "commit", "--auto"]);
+
+    // Assert
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(stderr.contains("rsenv swap out"), "{stderr}");
+    assert!(!stderr.contains("--allow-borrowed"), "{stderr}");
+    assert_eq!(snapshot(&fx.vault), vault_before);
+}
+
+#[test]
+fn given_vault_commit_when_allow_borrowed_passed_then_unknown_argument() {
+    // Arrange
+    let fx = fixture();
+
+    // Act
+    let out = fx.rsenv(&fx.main, &["vault", "commit", "--auto", "--allow-borrowed"]);
+
+    // Assert
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+}
+
+/// A worktree nested inside main (Claude Code puts them in `.claude/worktrees/`):
+/// a committed relative link resolves below main too. Detach must only remove links
+/// to the SAME path in main, never the worktree's own tracked files.
+#[test]
+fn given_worktree_nested_in_main_with_tracked_relative_link_when_detach_then_link_kept() {
+    // Arrange
+    let fx = fixture();
+    fs::write(fx.main.join("AGENTS.md"), "agents\n").unwrap();
+    symlink("AGENTS.md", fx.main.join("CLAUDE.md")).unwrap();
+    git(&fx.main, &["add", "AGENTS.md", "CLAUDE.md"]);
+    git(&fx.main, &["commit", "-q", "-m", "agents"]);
+    git(
+        &fx.main,
+        &["worktree", "add", "-q", ".worktrees/nested", "-b", "nested"],
+    );
+    let nested = fx.main.join(".worktrees/nested");
+    fx.rsenv_ok(&nested, &["worktree", "attach"]);
+
+    // Act
+    let out = fx.rsenv(&nested, &["worktree", "detach"]);
+
+    // Assert
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        nested.join("CLAUDE.md").is_symlink(),
+        "tracked link deleted"
+    );
+    assert!(!nested.join("thoughts").is_symlink(), "borrowed link kept");
+    assert_eq!(git_out(&nested, &["status", "--porcelain"]), "");
+}
+
+/// A borrowed directory covers the borrowed paths below it: `.claude` is linked
+/// once, and its guarded `settings.local.json` is reached through that link.
+#[test]
+fn given_borrowed_dir_containing_guarded_file_when_attach_twice_then_dir_linked_once() {
+    // Arrange
+    let fx = fixture();
+    fs::create_dir_all(fx.main.join(".claude")).unwrap();
+    fs::write(fx.main.join(".claude/settings.local.json"), "{}\n").unwrap();
+    fx.rsenv_ok(&fx.main, &["guard", "add", ".claude/settings.local.json"]);
+    fx.set_global_borrow(&[".claude"]);
+    let main_before = snapshot(&fx.main);
+
+    // Act
+    let first = fx.rsenv(&fx.wt, &["worktree", "attach"]);
+    let second = fx.rsenv(&fx.wt, &["worktree", "attach"]);
+
+    // Assert
+    assert!(first.status.success(), "{first:?}");
+    assert!(second.status.success(), "{second:?}");
+    assert_eq!(
+        fs::read_link(fx.wt.join(".claude")).unwrap(),
+        fx.main.join(".claude")
+    );
+    assert_eq!(snapshot(&fx.main), main_before, "main changed");
+}
+
+/// Detach goes through the same paths. Removing `.claude/settings.local.json`
+/// through the worktree's `.claude` link would delete MAIN's guard link.
+#[test]
+fn given_borrowed_dir_containing_guarded_file_when_detach_then_mains_guard_link_kept() {
+    // Arrange
+    let fx = fixture();
+    fs::create_dir_all(fx.main.join(".claude")).unwrap();
+    fs::write(fx.main.join(".claude/settings.local.json"), "{}\n").unwrap();
+    fx.rsenv_ok(&fx.main, &["guard", "add", ".claude/settings.local.json"]);
+    fx.set_global_borrow(&[".claude"]);
+    fx.rsenv_ok(&fx.wt, &["worktree", "attach"]);
+    let main_before = snapshot(&fx.main);
+
+    // Act
+    let out = fx.rsenv(&fx.wt, &["worktree", "detach"]);
+
+    // Assert
+    assert!(out.status.success(), "{out:?}");
+    assert!(!fx.wt.join(".claude").exists());
+    assert_eq!(snapshot(&fx.main), main_before, "main changed");
+}
+
+/// A tracked swap entry is never linked (the worktree keeps the committed version),
+/// so main having it swapped out is no reason to refuse attach.
+#[test]
+fn given_tracked_swap_entry_swapped_out_in_main_when_attach_then_skipped_not_refused() {
+    // Arrange
+    let fx = fixture();
+    fs::write(fx.main.join("app.yml"), "committed\n").unwrap();
+    git(&fx.main, &["add", "app.yml"]);
+    git(&fx.main, &["commit", "-q", "-m", "app"]);
+    git(&fx.wt, &["merge", "-q", "--ff-only", "main"]);
+    fx.rsenv_ok(&fx.main, &["swap", "init", "app.yml"]);
+
+    // Act
+    let out = fx.rsenv(&fx.wt, &["worktree", "attach"]);
+
+    // Assert
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{out:?}");
+    assert!(!fx.wt.join("app.yml").is_symlink());
+    assert!(
+        stdout.contains("app.yml") && stdout.contains("tracked"),
+        "{stdout}"
+    );
+}
+
+/// In an attached worktree `.envrc` is main's vault `dot.envrc`: rewriting its vars
+/// would switch main and every other worktree, and void their `direnv allow`.
+#[test]
+fn given_attached_worktree_when_env_envrc_then_refused_and_vault_envrc_unchanged() {
+    // Arrange
+    let fx = fixture();
+    fx.attach_by_hand();
+    fs::write(fx.wt.join("staging.env"), "export STAGE=staging\n").unwrap();
+    let dot_envrc = fx.vault.join("dot.envrc");
+    let before = fs::read_to_string(&dot_envrc).unwrap();
+
+    // Act
+    let out = fx.rsenv(&fx.wt, &["env", "envrc", "staging.env"]);
+
+    // Assert
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(77), "{out:?}");
+    assert!(
+        stderr.contains(&format!("cd {} && rsenv env envrc", fx.main.display())),
+        "{stderr}"
+    );
+    assert_eq!(fs::read_to_string(&dot_envrc).unwrap(), before);
+}
+
+/// A worktree's own `.envrc` file (not attached) belongs to the worktree alone.
+#[test]
+fn given_unattached_worktree_with_own_envrc_when_env_envrc_then_updated() {
+    // Arrange
+    let fx = fixture();
+    fs::copy(fx.vault.join("dot.envrc"), fx.wt.join(".envrc")).unwrap();
+    fs::write(fx.wt.join("staging.env"), "export STAGE=staging\n").unwrap();
+
+    // Act
+    fx.rsenv_ok(&fx.wt, &["env", "envrc", "staging.env"]);
+
+    // Assert
+    assert!(fs::read_to_string(fx.wt.join(".envrc"))
+        .unwrap()
+        .contains("STAGE=staging"));
 }

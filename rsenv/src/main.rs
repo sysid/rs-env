@@ -181,6 +181,14 @@ fn handle_env(
         EnvCommands::Envrc { file, envrc } => {
             let fs: Arc<dyn rsenv::infrastructure::traits::FileSystem> = Arc::new(RealFileSystem);
             let envrc_path = envrc.unwrap_or_else(|| std::path::PathBuf::from(".envrc"));
+            // In an attached worktree `.envrc` links to main's vault `dot.envrc`: writing
+            // through it switches main and every worktree. A worktree's own plain file
+            // is its own business.
+            if envrc_path.is_symlink() {
+                require_main_checkout(&guard_file_dir(&envrc_path), |m| {
+                    rerun_guard_in(m, &format!("env envrc {}", file.display()))
+                })?;
+            }
             let output = service.build(&file).map_err(|e| {
                 rsenv::cli::CliError::Infra(rsenv::infrastructure::InfraError::Application(e))
             })?;
@@ -1050,7 +1058,7 @@ fn rerun_guard_in(main: &std::path::Path, args: &str) -> String {
 ///
 /// Unlike the linked-worktree refusal this one has an override: the outcome is
 /// recoverable (the links revive on the next swap-in), and `vault commit` needs a
-/// swap-out.
+/// prior swap-out.
 fn refuse_if_borrowed(
     project_dir: &std::path::Path,
     paths: &[std::path::PathBuf],
@@ -1090,7 +1098,9 @@ fn borrowers_in(
                 .to_path_buf()
         })
         .collect();
-    borrowers(&RealCommandRunner, &main_dir, &relative).map_err(app_err)
+    let worktrees = rsenv::application::worktree::linked_worktrees(&RealCommandRunner, &main_dir)
+        .map_err(app_err)?;
+    Ok(borrowers(&RealFileSystem, &worktrees, &main_dir, &relative))
 }
 
 /// Project paths of the entries this host has swapped in.
@@ -1265,11 +1275,16 @@ fn handle_info(
         Checkout::Linked { main_dir, .. } => Some(main_dir.clone()),
         _ => None,
     };
-    match &checkout {
+    // Main's linked worktrees, listed once for the count and the `Worktrees:` section.
+    let worktrees = match &checkout {
         Checkout::Main { dir } => {
-            let n = rsenv::application::worktree::linked_worktrees(runner.as_ref(), dir)
-                .map(|w| w.len())
-                .unwrap_or(0);
+            rsenv::application::worktree::linked_worktrees(runner.as_ref(), dir).unwrap_or_default()
+        }
+        _ => Vec::new(),
+    };
+    match &checkout {
+        Checkout::Main { .. } => {
+            let n = worktrees.len();
             output::info(&format!(
                 "Checkout: main checkout, {} linked worktree{}",
                 n,
@@ -1359,30 +1374,10 @@ fn handle_info(
             }
 
             if let Checkout::Main { dir } = &checkout {
-                let mut borrow_set: std::collections::BTreeSet<std::path::PathBuf> = swap_files
-                    .as_deref()
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|f| {
-                        f.project_path
-                            .strip_prefix(&project_dir)
-                            .unwrap_or(&f.project_path)
-                            .to_path_buf()
-                    })
-                    .collect();
-                borrow_set.extend(vault_service.guarded_paths(&v).unwrap_or_default());
-                borrow_set.extend(
-                    settings
-                        .worktree
-                        .borrow
-                        .iter()
-                        .map(std::path::PathBuf::from),
-                );
-                print_worktrees(
-                    runner.as_ref(),
-                    dir,
-                    &borrow_set.into_iter().collect::<Vec<_>>(),
-                );
+                let borrow_set = worktree_service
+                    .borrow_set(dir, &v, &settings.worktree.borrow)
+                    .unwrap_or_default();
+                print_worktrees(&worktrees, dir, &borrow_set.into_iter().collect::<Vec<_>>());
             }
             print_problems(&worktree_service.problems(&project_dir));
 
@@ -1457,19 +1452,17 @@ fn handle_info(
 
 /// `info`'s worktree list: every linked worktree of `main` and what it borrows.
 fn print_worktrees(
-    runner: &dyn rsenv::infrastructure::traits::CommandRunner,
+    worktrees: &[rsenv::application::worktree::WorktreeEntry],
     main: &std::path::Path,
     borrow_set: &[std::path::PathBuf],
 ) {
-    let worktrees =
-        rsenv::application::worktree::linked_worktrees(runner, main).unwrap_or_default();
     if worktrees.is_empty() {
         return;
     }
-    let found = borrowers(runner, main, borrow_set).unwrap_or_default();
+    let found = borrowers(&RealFileSystem, worktrees, main, borrow_set);
     println!();
     output::info(&"Worktrees:");
-    for wt in &worktrees {
+    for wt in worktrees {
         let borrows = found
             .iter()
             .find(|b| b.dir == wt.dir)
@@ -1563,11 +1556,12 @@ fn handle_vault(
             auto,
             push,
             no_encrypt,
-            allow_borrowed,
         } => {
             let project_dir = project_dir_opt.unwrap_or_else(|| std::env::current_dir().unwrap());
             require_main_checkout(&project_dir, |m| rerun_in(m, "vault commit"))?;
 
+            // No borrower check: commit never swaps out, it requires a prior `swap out`,
+            // and that is where borrowers are refused.
             let fs = Arc::new(RealFileSystem);
             let settings = Arc::new(settings.clone());
             let vault_service = Arc::new(VaultService::new(fs.clone(), settings.clone()));
@@ -1576,9 +1570,6 @@ fn handle_vault(
                 vault_service.clone(),
                 settings.clone(),
             ));
-            // Commit swaps out first; borrowed entries would lose their content.
-            let affected = swapped_in_paths(&swap_service, &project_dir)?;
-            refuse_if_borrowed(&project_dir, &affected, allow_borrowed)?;
             let cmd = Arc::new(RealCommandRunner);
             let sops = Arc::new(SopsService::new(
                 Arc::new(RealFileSystem),

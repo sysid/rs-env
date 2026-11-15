@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::application::{ApplicationError, ApplicationResult};
-use crate::infrastructure::traits::CommandRunner;
+use crate::infrastructure::traits::{CommandRunner, FileSystem};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Checkout {
@@ -58,41 +58,46 @@ pub fn detect(runner: &dyn CommandRunner, dir: &Path) -> ApplicationResult<Check
         return Ok(Checkout::Main { dir: toplevel });
     }
 
-    Ok(Checkout::Linked {
-        main_dir: main_worktree(runner, &toplevel)?,
-        dir: toplevel,
-    })
+    match main_worktree(runner, &toplevel)? {
+        Some(main_dir) => Ok(Checkout::Linked {
+            main_dir,
+            dir: toplevel,
+        }),
+        // A bare repository has no main working tree: each of its worktrees stands
+        // alone and owns its vault, as before rsenv knew about worktrees.
+        None => Ok(Checkout::Main { dir: toplevel }),
+    }
 }
 
-/// Top level of the main working tree: the first entry of `git worktree list`.
+/// Top level of the main working tree: the first entry of `git worktree list`;
+/// `None` when that entry is a bare repository.
 ///
 /// The common dir's parent would be a guess: wrong for `--separate-git-dir`, and a
 /// bare repository has no main working tree at all.
-fn main_worktree(runner: &dyn CommandRunner, linked: &Path) -> ApplicationResult<PathBuf> {
+fn main_worktree(runner: &dyn CommandRunner, linked: &Path) -> ApplicationResult<Option<PathBuf>> {
     let linked_str = linked.to_string_lossy();
+    let failed = |source: std::io::Error| ApplicationError::OperationFailed {
+        context: format!("git worktree list in {}", linked.display()),
+        source: Box::new(source),
+    };
     let out = runner
         .run(
             "git",
             &["-C", &linked_str, "worktree", "list", "--porcelain"],
         )
-        .map_err(|e| ApplicationError::OperationFailed {
-            context: format!("git worktree list in {}", linked.display()),
-            source: Box::new(e),
-        })?;
+        .map_err(failed)?;
+    if !out.status.success() {
+        return Err(failed(std::io::Error::other(
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        )));
+    }
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let first = parse_worktree_list(&stdout).into_iter().next();
-    match first {
-        Some(entry) if !entry.bare => Ok(entry.dir),
-        _ => Err(ApplicationError::OperationFailed {
-            context: format!(
-                "{} is a worktree of a bare repository; rsenv needs a main checkout to own the vault",
-                linked.display()
-            ),
-            source: Box::new(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "bare repository",
-            )),
-        }),
+    match parse_worktree_list(&stdout).into_iter().next() {
+        Some(entry) if entry.bare => Ok(None),
+        Some(entry) => Ok(Some(entry.dir)),
+        None => Err(failed(std::io::Error::other(
+            "no worktrees listed".to_string(),
+        ))),
     }
 }
 
@@ -165,35 +170,38 @@ pub fn linked_worktrees(
     Ok(parse_worktree_list(&stdout)
         .into_iter()
         .skip(1)
-        .filter(|w| !w.bare && !w.prunable)
+        // A worktree of a bare repository is its own main (see `detect`) and is
+        // listed after the bare entry. Both paths come from git, so they compare as is.
+        .filter(|w| !w.bare && !w.prunable && w.dir != main_dir)
         .collect())
 }
 
-/// Linked worktrees of `main_dir` that borrow any of `paths` (project-relative):
-/// `<wt>/p` is a symlink resolving to `<main>/p` or below it. Dangling links count:
-/// they come back to life on the next swap-in.
+/// Which of `worktrees` (linked worktrees of `main_dir`) borrow any of `paths`
+/// (project-relative): `<wt>/p` is a symlink resolving to `<main>/p` or below it.
+/// Dangling links count: they come back to life on the next swap-in.
 pub fn borrowers(
-    runner: &dyn CommandRunner,
+    fs: &dyn FileSystem,
+    worktrees: &[WorktreeEntry],
     main_dir: &Path,
     paths: &[PathBuf],
-) -> ApplicationResult<Vec<Borrower>> {
-    let main = resolve(main_dir);
+) -> Vec<Borrower> {
+    let main = resolve(fs, main_dir);
     let mut found = Vec::new();
-    for wt in linked_worktrees(runner, main_dir)? {
+    for wt in worktrees {
         let borrowed: Vec<PathBuf> = paths
             .iter()
-            .filter(|p| links_into(&wt.dir.join(p), &main.join(p)))
+            .filter(|p| links_into(fs, &wt.dir.join(p), &main.join(p)))
             .cloned()
             .collect();
         if !borrowed.is_empty() {
             found.push(Borrower {
-                dir: wt.dir,
-                branch: wt.branch,
+                dir: wt.dir.clone(),
+                branch: wt.branch.clone(),
                 paths: borrowed,
             });
         }
     }
-    Ok(found)
+    found
 }
 
 /// True when `link` is a symlink whose target is `root` or lies below it.
@@ -201,8 +209,8 @@ pub fn borrowers(
 /// Compares the link's FIRST hop: the target's directory is resolved, its last
 /// component is not. A borrowed guarded file is `<wt>/p -> <main>/p -> <vault>/...`;
 /// it borrows from main, wherever main's own link leads. Works for dangling links.
-pub fn links_into(link: &Path, root: &Path) -> bool {
-    let Ok(target) = std::fs::read_link(link) else {
+pub fn links_into(fs: &dyn FileSystem, link: &Path, root: &Path) -> bool {
+    let Ok(target) = fs.read_link(link) else {
         return false;
     };
     let target = if target.is_relative() {
@@ -210,26 +218,26 @@ pub fn links_into(link: &Path, root: &Path) -> bool {
     } else {
         target
     };
-    resolve_parent(&target).starts_with(resolve_parent(root))
+    resolve_parent(fs, &target).starts_with(resolve_parent(fs, root))
 }
 
 /// `resolve()` of the parent, joined with the last component as it is.
-fn resolve_parent(path: &Path) -> PathBuf {
+fn resolve_parent(fs: &dyn FileSystem, path: &Path) -> PathBuf {
     match (path.parent(), path.file_name()) {
-        (Some(parent), Some(name)) => resolve(parent).join(name),
-        _ => resolve(path),
+        (Some(parent), Some(name)) => resolve(fs, parent).join(name),
+        _ => resolve(fs, path),
     }
 }
 
 /// Canonical form of `path` even when it does not exist: canonicalize the longest
 /// existing ancestor and append the rest. Needed because a dangling link has no
 /// canonical target, and macOS temp paths hide behind `/var -> /private/var`.
-fn resolve(path: &Path) -> PathBuf {
-    if let Ok(p) = std::fs::canonicalize(path) {
+fn resolve(fs: &dyn FileSystem, path: &Path) -> PathBuf {
+    if let Ok(p) = fs.canonicalize(path) {
         return p;
     }
     match (path.parent(), path.file_name()) {
-        (Some(parent), Some(name)) => resolve(parent).join(name),
+        (Some(parent), Some(name)) => resolve(fs, parent).join(name),
         _ => path.to_path_buf(),
     }
 }

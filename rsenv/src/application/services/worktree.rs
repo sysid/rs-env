@@ -120,8 +120,9 @@ impl WorktreeService {
 
     /// Plan `attach` for the linked worktree containing `dir`; writes nothing.
     ///
-    /// Refuses unless main has a vault and every swap entry is swapped in on this host
-    /// (borrowing a swapped-out entry hands the worktree the committed original).
+    /// Refuses unless main has a vault and every swap entry it would link is swapped in
+    /// on this host (borrowing a swapped-out entry hands the worktree the committed
+    /// original). Tracked entries are never linked, so their state does not matter.
     /// `extra` is the `[worktree] borrow` config of main's vault.
     pub fn plan_attach(&self, dir: &Path, extra: &[String]) -> ApplicationResult<AttachPlan> {
         let (wt, main) = self.linked(dir)?;
@@ -132,17 +133,18 @@ impl WorktreeService {
             ))
         })?;
 
-        let entries = self.swap_entries(&main)?;
+        let borrow = self.borrow_set(&main, &vault, extra)?;
+        let tracked = self.tracked(&wt, &borrow);
         let here: BTreeSet<PathBuf> = self
             .swap_service
             .swapped_in_here(&main)?
             .into_iter()
             .map(|f| relative(&main, &f.project_path))
             .collect();
-        let not_in: Vec<PathBuf> = entries
-            .iter()
-            .filter(|p| !here.contains(*p))
-            .cloned()
+        let not_in: Vec<PathBuf> = self
+            .swap_entries(&main)?
+            .into_iter()
+            .filter(|p| !here.contains(p) && !is_tracked(&tracked, p))
             .collect();
         if !not_in.is_empty() {
             // A swapped-out directory entry is reported as its files (`swap status`),
@@ -159,13 +161,24 @@ impl WorktreeService {
             )));
         }
 
-        let mut borrow: BTreeSet<PathBuf> = entries.into_iter().collect();
-        borrow.extend(self.vault_service.guarded_paths(&vault)?);
-        borrow.extend(extra_paths(extra));
-
         let mut items = vec![self.plan_envrc(&wt, &vault.path.join("dot.envrc"))];
+        // Paths whose link reaches main; a path below one is reached through it.
+        // BTreeSet order puts a directory before the paths below it.
+        let mut reached: Vec<PathBuf> = Vec::new();
         for p in borrow {
-            items.push(self.plan_borrow(&wt, &main, &p));
+            if reached.iter().any(|r| p.starts_with(r)) {
+                continue;
+            }
+            let item = self.plan_borrow(&wt, &main, &p, is_tracked(&tracked, &p));
+            if let AttachItem::Link { .. }
+            | AttachItem::Skip {
+                reason: SkipReason::AlreadyLinked,
+                ..
+            } = &item
+            {
+                reached.push(p);
+            }
+            items.push(item);
         }
         Ok(AttachPlan {
             worktree: wt,
@@ -217,30 +230,17 @@ impl WorktreeService {
         Ok(linked)
     }
 
-    /// Remove the worktree's `.envrc` and every link into main or its vault.
+    /// Remove the worktree's `.envrc` and every link to the same path in main or into
+    /// main's vault.
     ///
     /// Decides by link target, not by vault state, so it works after main swapped out
-    /// or lost its vault. Candidates: the borrow set (when main's vault is still
-    /// reachable), `extra`, and every top-level symlink of the worktree.
+    /// or lost its vault. Candidates: see `link_candidates`.
     /// ponytail: with main's vault gone, a borrowed link nested deeper than the top
     /// level and not in `extra` is not found; walking the whole worktree would.
     pub fn detach(&self, dir: &Path, extra: &[String]) -> ApplicationResult<DetachReport> {
         let (wt, main) = self.linked(dir)?;
         let vault = self.vault_service.get(&main).ok().flatten();
-
-        let mut candidates: BTreeSet<PathBuf> = extra_paths(extra).collect();
-        if let Some(v) = &vault {
-            candidates.extend(self.swap_entries(&main).unwrap_or_default());
-            candidates.extend(self.vault_service.guarded_paths(v).unwrap_or_default());
-        }
-        if let Ok(read) = std::fs::read_dir(&wt) {
-            for entry in read.flatten() {
-                if entry.path().is_symlink() {
-                    candidates.insert(PathBuf::from(entry.file_name()));
-                }
-            }
-        }
-        candidates.remove(Path::new(".envrc"));
+        let candidates = self.link_candidates(&wt, &main, vault.as_ref(), extra);
 
         let mut removed = Vec::new();
         let mut kept = Vec::new();
@@ -268,9 +268,13 @@ impl WorktreeService {
             if !self.fs.exists_or_is_symlink(&link) {
                 continue;
             }
+            // The SAME path in main, not anything below main: a worktree nested in main
+            // has committed relative links that resolve below main too.
             let borrowed = self.fs.is_symlink(&link)
-                && (links_into(&link, &main)
-                    || vault.as_ref().is_some_and(|v| links_into(&link, &v.path)));
+                && (links_into(self.fs.as_ref(), &link, &main.join(&p))
+                    || vault
+                        .as_ref()
+                        .is_some_and(|v| links_into(self.fs.as_ref(), &link, &v.path)));
             if borrowed {
                 self.fs
                     .remove_file(&link)
@@ -393,32 +397,23 @@ impl WorktreeService {
             }
         }
 
-        // Every link into main: borrow set (when main's vault is reachable) plus
-        // top-level links, which covers configured extras.
-        let mut candidates: BTreeSet<PathBuf> = BTreeSet::new();
-        let mut out_entries: BTreeSet<PathBuf> = BTreeSet::new();
-        if let Some(m) = main_vault {
-            for entry in self.swap_service.status_quiet(main).unwrap_or_default() {
-                let rel = relative(main, &entry.project_path);
-                if entry.state == SwapState::Out {
-                    out_entries.insert(rel.clone());
-                }
-                candidates.insert(rel);
-            }
-            candidates.extend(self.vault_service.guarded_paths(m).unwrap_or_default());
-        }
-        if let Ok(read) = std::fs::read_dir(wt) {
-            for entry in read.flatten() {
-                if entry.path().is_symlink() {
-                    candidates.insert(PathBuf::from(entry.file_name()));
-                }
-            }
-        }
-        candidates.remove(Path::new(".envrc"));
+        // Configured extras are not known here; the top-level scan covers the usual ones.
+        let candidates = self.link_candidates(wt, main, main_vault, &[]);
+        let out_entries: BTreeSet<PathBuf> = match main_vault {
+            Some(_) => self
+                .swap_service
+                .status_quiet(main)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|e| e.state == SwapState::Out)
+                .map(|e| relative(main, &e.project_path))
+                .collect(),
+            None => BTreeSet::new(),
+        };
 
         for p in candidates {
             let link = wt.join(&p);
-            if !links_into(&link, &main.join(&p)) {
+            if !links_into(self.fs.as_ref(), &link, &main.join(&p)) {
                 continue;
             }
             let swap_in = format!("rsenv -C {} swap in {}", main.display(), p.display());
@@ -458,7 +453,7 @@ impl WorktreeService {
             .and_then(|c| parse_rsenv_metadata(&c))
         {
             let recorded = PathBuf::from(expand_env_vars(&meta.source_dir));
-            let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+            let canon = |p: &Path| self.fs.canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
             if canon(&recorded) != canon(project_dir) {
                 found.push(Problem {
                     code: "source-dir-mismatch",
@@ -475,7 +470,7 @@ impl WorktreeService {
         let guarded_dir = vault.path.join("guarded");
         for p in self.vault_service.guarded_paths(vault).unwrap_or_default() {
             let link = project_dir.join(&p);
-            if !(self.fs.is_symlink(&link) && links_into(&link, &guarded_dir)) {
+            if !(self.fs.is_symlink(&link) && links_into(self.fs.as_ref(), &link, &guarded_dir)) {
                 found.push(Problem {
                     code: "guarded-link-broken",
                     severity: Severity::Error,
@@ -495,20 +490,79 @@ impl WorktreeService {
         }
     }
 
+    /// What a worktree of `main` borrows: the swap entries of main's vault (in or out),
+    /// its guarded files, and the configured extras. Project-relative.
+    pub fn borrow_set(
+        &self,
+        main: &Path,
+        vault: &Vault,
+        extra: &[String],
+    ) -> ApplicationResult<BTreeSet<PathBuf>> {
+        let mut set: BTreeSet<PathBuf> = self.swap_entries(main)?.into_iter().collect();
+        set.extend(self.vault_service.guarded_paths(vault)?);
+        set.extend(extra_paths(extra));
+        Ok(set)
+    }
+
     /// Project-relative paths of all swap entries of main's vault, in or out.
+    ///
+    /// Quiet: callers report a sourceDir mismatch themselves (`info`), and the
+    /// reconnect advice of the loud variant would be wrong for a worktree.
     fn swap_entries(&self, main: &Path) -> ApplicationResult<Vec<PathBuf>> {
         Ok(self
             .swap_service
-            .status(main)?
+            .status_quiet(main)?
             .into_iter()
             .map(|f| relative(main, &f.project_path))
             .collect())
     }
 
+    /// Worktree paths that may be links into main or its vault: the borrow set (when
+    /// main's vault is reachable, else just `extra`) plus every top-level symlink,
+    /// minus `.envrc` (handled on its own).
+    ///
+    /// Drops paths reached through a symlinked ancestor: `<wt>/.claude/x` behind a
+    /// borrowed `.claude` link IS main's `.claude/x`, and removing it would delete
+    /// main's own (guard) link.
+    fn link_candidates(
+        &self,
+        wt: &Path,
+        main: &Path,
+        vault: Option<&Vault>,
+        extra: &[String],
+    ) -> BTreeSet<PathBuf> {
+        let mut candidates: BTreeSet<PathBuf> = match vault {
+            Some(v) => self.borrow_set(main, v, extra).unwrap_or_default(),
+            None => extra_paths(extra).collect(),
+        };
+        // Directory enumeration goes through walkdir: `FileSystem` has no read_dir.
+        for entry in walkdir::WalkDir::new(wt)
+            .min_depth(1)
+            .max_depth(1)
+            .into_iter()
+            .flatten()
+        {
+            if entry.path_is_symlink() {
+                candidates.insert(PathBuf::from(entry.file_name()));
+            }
+        }
+        candidates.remove(Path::new(".envrc"));
+        candidates.retain(|p| !self.behind_link(wt, p));
+        candidates
+    }
+
+    /// Some proper ancestor of `p` inside `wt` is a symlink.
+    fn behind_link(&self, wt: &Path, p: &Path) -> bool {
+        p.ancestors()
+            .skip(1)
+            .filter(|a| !a.as_os_str().is_empty())
+            .any(|a| self.fs.is_symlink(&wt.join(a)))
+    }
+
     fn plan_envrc(&self, wt: &Path, dot_envrc: &Path) -> AttachItem {
         let path = PathBuf::from(".envrc");
         let link = wt.join(&path);
-        if links_into(&link, dot_envrc) {
+        if links_into(self.fs.as_ref(), &link, dot_envrc) {
             AttachItem::Skip {
                 path,
                 reason: SkipReason::AlreadyLinked,
@@ -523,24 +577,26 @@ impl WorktreeService {
         }
     }
 
-    fn plan_borrow(&self, wt: &Path, main: &Path, p: &Path) -> AttachItem {
+    fn plan_borrow(&self, wt: &Path, main: &Path, p: &Path, tracked: bool) -> AttachItem {
         let path = p.to_path_buf();
         let in_main = main.join(p);
         let link = wt.join(p);
-        if !self.fs.exists_or_is_symlink(&in_main) {
+        // Tracked first: it decides, whatever main holds. A tracked swap entry that
+        // main swapped out is absent there, yet "not in main" would hide the reason.
+        if tracked {
+            AttachItem::Skip {
+                path,
+                reason: SkipReason::Tracked,
+            }
+        } else if !self.fs.exists_or_is_symlink(&in_main) {
             AttachItem::Skip {
                 path,
                 reason: SkipReason::NotInMain,
             }
-        } else if links_into(&link, &in_main) {
+        } else if links_into(self.fs.as_ref(), &link, &in_main) {
             AttachItem::Skip {
                 path,
                 reason: SkipReason::AlreadyLinked,
-            }
-        } else if self.tracked(wt, p) {
-            AttachItem::Skip {
-                path,
-                reason: SkipReason::Tracked,
             }
         } else if !self.fs.exists_or_is_symlink(&link) {
             AttachItem::Link {
@@ -552,18 +608,35 @@ impl WorktreeService {
         }
     }
 
-    /// `p` (or something below it) is tracked in the worktree's git index.
-    fn tracked(&self, wt: &Path, p: &Path) -> bool {
+    /// Files of the worktree's git index at or below any of `paths`, in one git call.
+    /// Empty when git fails: nothing counts as tracked, as outside git.
+    fn tracked(&self, wt: &Path, paths: &BTreeSet<PathBuf>) -> BTreeSet<PathBuf> {
+        if paths.is_empty() {
+            return BTreeSet::new();
+        }
         let wt_str = wt.to_string_lossy();
-        let p_str = p.to_string_lossy();
-        self.runner
-            .run(
-                "git",
-                &["-C", &wt_str, "ls-files", "--error-unmatch", "--", &p_str],
-            )
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        let path_strs: Vec<String> = paths
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        // Literal: a borrowed name like `*.local` or `:x` must not act as a pattern.
+        let mut args = vec!["--literal-pathspecs", "-C", &wt_str, "ls-files", "-z", "--"];
+        args.extend(path_strs.iter().map(String::as_str));
+        match self.runner.run("git", &args) {
+            Ok(out) if out.status.success() => out
+                .stdout
+                .split(|b| *b == 0)
+                .filter(|f| !f.is_empty())
+                .map(|f| PathBuf::from(String::from_utf8_lossy(f).into_owned()))
+                .collect(),
+            _ => BTreeSet::new(),
+        }
     }
+}
+
+/// `p` is a tracked file, or a directory with tracked files below it.
+fn is_tracked(tracked: &BTreeSet<PathBuf>, p: &Path) -> bool {
+    tracked.iter().any(|f| f.starts_with(p))
 }
 
 /// Configured extras as paths. Negations are consumed by config layering; one left

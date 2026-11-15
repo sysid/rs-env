@@ -559,14 +559,6 @@ export RSENV_VAULT={vault_var}
         )
     }
 
-    /// Guard a file by moving it to the vault and creating a symlink.
-    ///
-    /// # Arguments
-    /// * `file` - Path to the file to guard (must be within an initialized project)
-    /// * `absolute` - If true, use absolute paths for symlinks; otherwise use relative paths
-    ///
-    /// # Returns
-    /// GuardedFile with project and vault paths
     /// Project-relative paths of the vault's guarded files, sorted.
     ///
     /// `guarded/` holds dot-names (`dot.secret`) and, once encrypted, ciphertexts
@@ -596,6 +588,14 @@ export RSENV_VAULT={vault_var}
         Ok(paths.into_iter().collect())
     }
 
+    /// Guard a file by moving it to the vault and creating a symlink.
+    ///
+    /// # Arguments
+    /// * `file` - Path to the file to guard (must be within an initialized project)
+    /// * `absolute` - If true, use absolute paths for symlinks; otherwise use relative paths
+    ///
+    /// # Returns
+    /// GuardedFile with project and vault paths
     pub fn guard(&self, file: &Path, absolute: bool) -> ApplicationResult<GuardedFile> {
         debug!("guard: file={}, absolute={}", file.display(), absolute);
         // Check if file is already guarded (symlink to vault)

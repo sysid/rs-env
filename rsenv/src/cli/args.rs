@@ -592,10 +592,6 @@ pub enum VaultCommands {
         /// Skip re-encryption, overriding sops.encrypt_on_commit
         #[arg(long)]
         no_encrypt: bool,
-        /// Commit (which swaps out) even if linked worktrees borrow the entries; their links dangle
-        /// until the next `swap in`
-        #[arg(long)]
-        allow_borrowed: bool,
     },
 }
 

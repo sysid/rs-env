@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use rsenv::application::worktree::{borrowers, linked_worktrees, links_into, Borrower};
-use rsenv::infrastructure::traits::RealCommandRunner;
+use rsenv::infrastructure::traits::{RealCommandRunner, RealFileSystem};
 use tempfile::TempDir;
 
 fn git(dir: &Path, args: &[&str]) {
@@ -63,6 +63,12 @@ fn repo() -> Repo {
     }
 }
 
+/// Borrowers among all linked worktrees of `main`, as `swap out` asks.
+fn borrowers_of(main: &Path, ps: &[PathBuf]) -> Vec<Borrower> {
+    let worktrees = linked_worktrees(&RealCommandRunner, main).unwrap();
+    borrowers(&RealFileSystem, &worktrees, main, ps)
+}
+
 fn paths(ps: &[&str]) -> Vec<PathBuf> {
     ps.iter().map(PathBuf::from).collect()
 }
@@ -103,12 +109,7 @@ fn given_worktree_linking_into_main_when_borrowers_then_reports_linked_paths_onl
     // A real file of the same name is the worktree's own, not borrowed.
     fs::write(wt.join("secret.txt"), "own\n").unwrap();
 
-    let found = borrowers(
-        &RealCommandRunner,
-        &repo.main,
-        &paths(&["thoughts", "secret.txt"]),
-    )
-    .unwrap();
+    let found = borrowers_of(&repo.main, &paths(&["thoughts", "secret.txt"]));
 
     assert_eq!(
         found,
@@ -128,7 +129,7 @@ fn given_link_pointing_elsewhere_when_borrowers_then_not_a_borrower() {
     fs::create_dir_all(&elsewhere).unwrap();
     symlink(&elsewhere, wt.join("thoughts")).unwrap();
 
-    let found = borrowers(&RealCommandRunner, &repo.main, &paths(&["thoughts"])).unwrap();
+    let found = borrowers_of(&repo.main, &paths(&["thoughts"]));
 
     assert!(found.is_empty(), "{found:?}");
 }
@@ -142,7 +143,7 @@ fn given_dangling_link_into_main_when_borrowers_then_still_a_borrower() {
     symlink(repo.main.join("thoughts"), wt.join("thoughts")).unwrap();
     fs::remove_dir_all(repo.main.join("thoughts")).unwrap();
 
-    let found = borrowers(&RealCommandRunner, &repo.main, &paths(&["thoughts"])).unwrap();
+    let found = borrowers_of(&repo.main, &paths(&["thoughts"]));
 
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].paths, paths(&["thoughts"]));
@@ -158,7 +159,7 @@ fn given_link_written_through_symlinked_parent_when_borrowers_then_found() {
     symlink(&repo.main, &alias).unwrap();
     symlink(alias.join("thoughts"), wt.join("thoughts")).unwrap();
 
-    let found = borrowers(&RealCommandRunner, &repo.main, &paths(&["thoughts"])).unwrap();
+    let found = borrowers_of(&repo.main, &paths(&["thoughts"]));
 
     assert_eq!(found.len(), 1, "{found:?}");
 }
@@ -167,7 +168,7 @@ fn given_link_written_through_symlinked_parent_when_borrowers_then_found() {
 fn given_not_a_git_repo_when_borrowers_then_empty() {
     let temp = TempDir::new().unwrap();
 
-    let found = borrowers(&RealCommandRunner, temp.path(), &paths(&["thoughts"])).unwrap();
+    let found = borrowers_of(temp.path(), &paths(&["thoughts"]));
 
     assert!(found.is_empty());
 }
@@ -184,7 +185,7 @@ fn given_link_to_mains_own_link_when_borrowers_then_borrows_from_main() {
     symlink(&vault_file, repo.main.join("secret.txt")).unwrap();
     symlink(repo.main.join("secret.txt"), wt.join("secret.txt")).unwrap();
 
-    let found = borrowers(&RealCommandRunner, &repo.main, &paths(&["secret.txt"])).unwrap();
+    let found = borrowers_of(&repo.main, &paths(&["secret.txt"]));
 
     assert_eq!(found.len(), 1, "{found:?}");
 }
@@ -199,5 +200,34 @@ fn given_chained_link_when_links_into_main_dir_then_true() {
     symlink(&vault_file, repo.main.join("secret.txt")).unwrap();
     symlink(repo.main.join("secret.txt"), wt.join("secret.txt")).unwrap();
 
-    assert!(links_into(&wt.join("secret.txt"), &repo.main));
+    assert!(links_into(
+        &RealFileSystem,
+        &wt.join("secret.txt"),
+        &repo.main
+    ));
+}
+
+/// In a bare repository each worktree is its own main checkout. Its "linked
+/// worktrees" are its siblings, never itself: it cannot borrow from itself.
+#[test]
+fn given_worktree_of_bare_repository_when_linked_worktrees_then_siblings_without_itself() {
+    let repo = repo();
+    git(
+        &repo.root,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            repo.main.to_str().unwrap(),
+            "repo.git",
+        ],
+    );
+    let bare = repo.root.join("repo.git");
+    git(&bare, &["worktree", "add", "-q", "../a", "-b", "a"]);
+    git(&bare, &["worktree", "add", "-q", "../b", "-b", "b"]);
+
+    let wts = linked_worktrees(&RealCommandRunner, &repo.root.join("a")).unwrap();
+
+    let dirs: Vec<_> = wts.iter().map(|w| w.dir.clone()).collect();
+    assert_eq!(dirs, vec![repo.root.join("b")]);
 }
