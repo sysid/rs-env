@@ -8,6 +8,7 @@ pub mod error;
 pub mod error_ext;
 pub mod hash;
 pub mod services;
+pub mod worktree;
 
 pub use envrc::{
     delete_section, parse_rsenv_metadata, update_dot_envrc, END_SECTION_DELIMITER,

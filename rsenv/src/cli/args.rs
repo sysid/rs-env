@@ -36,6 +36,11 @@ TERMS
   swap           Temporarily replace a project file or directory with a variant kept in
                  <vault>/swap/ (e.g. a dev-only config), and later put the original
                  back. Swapped-in state is per host: one host at a time.
+  linked worktree
+                 A checkout made by `git worktree add`. The vault belongs to the main
+                 checkout; a worktree borrows main's files through symlinks
+                 (`rsenv worktree attach`). Vault-changing commands are refused there
+                 and name the command to run in main instead.
   ciphertext     The SOPS-encrypted copy of a file, <name>.<hash8>.enc next to it, where
                  hash8 is the first 8 hex digits of the plaintext's SHA-256. Commit
                  ciphertexts, never plaintext.
@@ -189,6 +194,25 @@ pub enum Commands {
         command: HookCommands,
     },
 
+    /// Link a linked git worktree to its main checkout's vault, or unlink it
+    ///
+    /// A vault holds one swapped-in copy per host, in the main checkout. A linked
+    /// worktree (`git worktree add`) borrows it: `attach` links the worktree's .envrc
+    /// to the vault and each borrowed path to the same path in main. Borrowed: the
+    /// swap entries, the guarded files and `[worktree] borrow` from the config.
+    /// rsenv never creates or removes worktrees; git does:
+    ///
+    ///   git worktree add ../proj__worktrees/feat -b feat
+    ///   rsenv worktree attach ../proj__worktrees/feat
+    ///   ...
+    ///   rsenv worktree detach ../proj__worktrees/feat
+    ///   git worktree remove ../proj__worktrees/feat
+    #[command(verbatim_doc_comment)]
+    Worktree {
+        #[command(subcommand)]
+        command: WorktreeCommands,
+    },
+
     /// Show the project's vault, guarded and swapped files, and config
     Info {
         /// Print nothing; exit 0 if the project has a valid vault, else 1
@@ -201,6 +225,32 @@ pub enum Commands {
         /// Shell type
         #[arg(value_enum)]
         shell: clap_complete::Shell,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WorktreeCommands {
+    /// Link a linked worktree to main's vault and swapped-in files
+    ///
+    /// Requires main to have a vault with every swap entry swapped in on this host.
+    /// Plans first and writes nothing if the worktree already has its own version of
+    /// a borrowed path; paths tracked in git are skipped (the worktree keeps the
+    /// committed version). Links are absolute. Safe to repeat: links only what is
+    /// missing. Run `direnv allow` in the worktree afterwards.
+    #[command(verbatim_doc_comment)]
+    Attach {
+        /// The linked worktree (default: -C DIR, else the current directory)
+        dir: Option<PathBuf>,
+    },
+
+    /// Remove the links `attach` created, so `git worktree remove` works without --force
+    ///
+    /// Removes the .envrc link to the vault and every symlink pointing into main or
+    /// the vault; real files and links elsewhere are kept.
+    #[command(verbatim_doc_comment)]
+    Detach {
+        /// The linked worktree (default: -C DIR, else the current directory)
+        dir: Option<PathBuf>,
     },
 }
 
@@ -405,6 +455,10 @@ pub enum SwapCommands {
         /// Directory of vaults to use with --global (default: <base_dir>/vaults)
         #[arg(long, requires = "global", value_name = "DIR")]
         vault_base: Option<PathBuf>,
+        /// Swap out even if linked worktrees borrow the entries; their links dangle
+        /// until the next `swap in`. (--global never refuses, it warns.)
+        #[arg(long, conflicts_with = "global")]
+        allow_borrowed: bool,
     },
 
     /// Move project files into <vault>/swap/ as variants (one-time setup)
@@ -474,6 +528,10 @@ pub enum SwapCommands {
         /// Do not ask for confirmation
         #[arg(short, long)]
         yes: bool,
+        /// Delete even if linked worktrees borrow the entries; their links dangle
+        /// until the next `swap in`
+        #[arg(long)]
+        allow_borrowed: bool,
     },
 }
 

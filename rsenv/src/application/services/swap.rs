@@ -180,7 +180,7 @@ impl SwapService {
         if stored_path != project_dir {
             output::warning(&format!(
                 "Vault metadata out of sync: sourceDir is '{}' but you're in '{}'.\n  \
-                 Run: rsenv reconnect {}\n  \
+                 Run: rsenv vault reconnect {}\n  \
                  Or manually update: {}/dot.envrc",
                 stored_path.display(),
                 project_dir.display(),

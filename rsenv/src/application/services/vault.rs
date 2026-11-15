@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use tracing::debug;
 
-use crate::application::dotfile::neutralize_path;
-use crate::application::hash::encrypted_siblings;
+use crate::application::dotfile::{neutralize_path, restore_path};
+use crate::application::hash::{encrypted_siblings, is_old_enc_format, parse_encrypted_filename};
 use crate::application::services::environment::{default_env_content, DEFAULT_ENVS};
 use crate::application::{ApplicationError, ApplicationResult, DeleteProblem, IoResultExt};
 use crate::config::Settings;
@@ -557,6 +557,35 @@ export RSENV_VAULT={vault_var}
             vault_var = vault_var,
             vars_marker = crate::application::envrc::VARS_SECTION_DELIMITER,
         )
+    }
+
+    /// Project-relative paths of the vault's guarded files, sorted.
+    ///
+    /// `guarded/` holds dot-names (`dot.secret`) and, once encrypted, ciphertexts
+    /// (`dot.secret.<hash8>.enc`) next to them; `sops clean` may have removed the
+    /// plaintext. Each such group is ONE guarded file, reported under its project name.
+    pub fn guarded_paths(&self, vault: &Vault) -> ApplicationResult<Vec<PathBuf>> {
+        let guarded_dir = vault.path.join("guarded");
+        if !self.fs.exists(&guarded_dir) {
+            return Ok(Vec::new());
+        }
+        let mut paths = std::collections::BTreeSet::new();
+        for entry in walkdir::WalkDir::new(&guarded_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| !e.file_type().is_dir())
+        {
+            let Ok(rel) = entry.path().strip_prefix(&guarded_dir) else {
+                continue;
+            };
+            let vault_rel = match parse_encrypted_filename(rel) {
+                Some((name, _hash)) => rel.with_file_name(name),
+                None if is_old_enc_format(rel) => rel.with_extension(""),
+                None => rel.to_path_buf(),
+            };
+            paths.insert(restore_path(&vault_rel));
+        }
+        Ok(paths.into_iter().collect())
     }
 
     /// Guard a file by moving it to the vault and creating a symlink.
