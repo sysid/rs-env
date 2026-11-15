@@ -72,7 +72,7 @@ in a worktree.
 ## Quick start
 
 ```bash
-brew tap sysid/rsenv && brew install rsenv      # or: cargo install rsenv
+brew install sysid/rsenv/rsenv                  # or: cargo install rsenv
 
 cd myproject
 rsenv vault init                                # vault + .envrc symlink
