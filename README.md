@@ -2,13 +2,13 @@
 
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 
-# rsenv: your private workspace for every project
+# rsenv: my private workspace for every project
 
 [Crate of the week 512](https://this-week-in-rust.org/blog/2023/09/13/this-week-in-rust-512)
 
 Some things belong to a project but must never be committed with it: env vars, secrets, your
-patched `docker-compose.yml`, personal notes. rsenv keeps them in a **vault** outside the repo,
-versioned and encrypted, and links it to the project with a single symlink.
+patched `docker-compose.yml`, personal notes. `rsenv` keeps them in a **vault** outside the repo,
+versioned and encrypted, and connects it to the project with a single symlink.
 
 ![Project and vault: .envrc is a symlink to the vault's dot.envrc](doc/diagrams/vault-link.svg)
 
