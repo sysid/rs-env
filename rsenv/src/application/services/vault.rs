@@ -531,16 +531,8 @@ impl VaultService {
 
         // Convert paths to use $HOME for portability
         let home_dir = std::env::var("HOME").unwrap_or_default();
-        let source_dir = if !home_dir.is_empty() {
-            project_dir.to_string_lossy().replace(&home_dir, "$HOME")
-        } else {
-            project_dir.to_string_lossy().to_string()
-        };
-        let vault_var = if !home_dir.is_empty() {
-            vault_path.to_string_lossy().replace(&home_dir, "$HOME")
-        } else {
-            vault_path.to_string_lossy().to_string()
-        };
+        let source_dir = home_relative(project_dir, &home_dir);
+        let vault_var = home_relative(vault_path, &home_dir);
 
         format!(
             r#"# config.relative = {relative}
@@ -1018,5 +1010,72 @@ export RSENV_VAULT={vault_var}
         }
 
         Err(ApplicationError::VaultNotInitialized(file.to_path_buf()))
+    }
+}
+
+/// `path` with a leading `home` written as `$HOME`, for portable paths in `dot.envrc`.
+///
+/// Only a leading match of whole components counts: a plain string replace turned
+/// `/Users/ab` into `$HOMEb` (an unset variable when sourced) and `/private/tmp/h` into
+/// `/private$HOME`.
+fn home_relative(path: &Path, home: &str) -> String {
+    if home.is_empty() {
+        return path.to_string_lossy().into_owned();
+    }
+    match path.strip_prefix(home) {
+        Ok(rest) if rest.as_os_str().is_empty() => "$HOME".to_string(),
+        Ok(rest) => format!("$HOME/{}", rest.to_string_lossy()),
+        Err(_) => path.to_string_lossy().into_owned(),
+    }
+}
+
+#[cfg(test)]
+mod home_relative_tests {
+    use super::*;
+
+    #[test]
+    fn given_path_under_home_when_home_relative_then_prefix_becomes_dollar_home() {
+        assert_eq!(
+            home_relative(Path::new("/Users/a/.rsenv/vaults/x"), "/Users/a"),
+            "$HOME/.rsenv/vaults/x"
+        );
+    }
+
+    #[test]
+    fn given_path_equal_to_home_when_home_relative_then_dollar_home() {
+        assert_eq!(home_relative(Path::new("/Users/a"), "/Users/a"), "$HOME");
+    }
+
+    /// A plain string replace turned `/Users/ab/x` into `$HOMEb/x`: the shell reads
+    /// `$HOMEb`, an unset variable, so the path expanded to `/x`.
+    #[test]
+    fn given_sibling_dir_sharing_home_as_string_prefix_when_home_relative_then_unchanged() {
+        assert_eq!(
+            home_relative(Path::new("/Users/ab/x"), "/Users/a"),
+            "/Users/ab/x"
+        );
+    }
+
+    /// macOS: HOME=/tmp/h but paths canonicalize to /private/tmp/h. Only a LEADING
+    /// match counts, so no `/private$HOME`.
+    #[test]
+    fn given_home_inside_path_not_at_start_when_home_relative_then_unchanged() {
+        assert_eq!(
+            home_relative(Path::new("/private/tmp/h/.rsenv"), "/tmp/h"),
+            "/private/tmp/h/.rsenv"
+        );
+    }
+
+    #[test]
+    fn given_trailing_slash_in_home_when_home_relative_then_still_matches() {
+        assert_eq!(
+            home_relative(Path::new("/Users/a/p"), "/Users/a/"),
+            "$HOME/p"
+        );
+    }
+
+    #[test]
+    fn given_no_home_when_home_relative_then_unchanged() {
+        assert_eq!(home_relative(Path::new("/Users/a/p"), ""), "/Users/a/p");
     }
 }
